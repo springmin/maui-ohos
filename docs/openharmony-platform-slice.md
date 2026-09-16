@@ -1,0 +1,45 @@
+# OpenHarmony platform slice (start)
+
+Status: scaffolding. The fork's platform block (`Directory.Build.props`) enables the
+`net11.0-openharmony<api>` TFM automatically when the
+`microsoft.net.sdk.openharmony` workload is installed (`IncludeOpenHarmonyTargetFrameworks`),
+defines `OPENHARMONY` for compiled code, and the `maui-openharmony` workload extends
+`["maui-blazor", "openharmony"]`.
+
+## What the platform workload provides (already implemented)
+
+`Microsoft.OpenHarmony.Hosting` (in the platform SDK pack) is the bridge between the ArkTS
+shell and managed code:
+
+| Managed surface | Purpose |
+|---|---|
+| `OpenHarmonyBridge.Context` | app dirs, bundle/ability names, `NodeContent` handle |
+| `OpenHarmonyBridge.LifecycleChanged` | Create/Destroy/Foreground/Background, forwarded from the ability |
+| `OpenHarmonyBridge.NodeContent` | native ArkUI node attachment point (overlays, custom widgets) |
+| `OpenHarmonyBridge.SurfaceChanged` / `.Surface` | the `OHNativeWindow*` handed over by the ArkUI `XComponent` (surface type) |
+| `OpenHarmonyBridge.FillSurface(argb)` | managed-driven frame; the placeholder a real renderer replaces |
+| `OpenHarmonyOpenHarmonyRuntime.IsOpenHarmony` (`Microsoft.OpenHarmony.dll`) | platform check for user code |
+
+The shell (`templates/ets/**` in the platform pack) is prebuilt both headless
+(`modules.abc`) and with a UI page + `XComponent` (`modules.ui.abc`); the MAUI slice only
+needs the UI variant.
+
+## Slice layout (to add under `src/Core/src/Platform/OpenHarmony/`)
+
+| MAUI concept | OpenHarmony implementation sketch |
+|---|---|
+| `MauiContext` | wraps the app context (dirs, dispatcher, `SurfaceChanged` source) |
+| `MauiDispatcher` | posts to the ArkTS UI thread (NAPI call into the shell) or a managed UI thread driven by `Choreographer`-style callbacks |
+| `PlatformView` / handlers | native ArkUI nodes created through `NodeContent` (for simple views) or drawn into the `XComponent` surface (for custom/MAUI-rendered views) |
+| `WindowHandler` | maps MAUI `Window` to the ability lifecycle + surface (`SurfaceChanged`, size) |
+| Input | `OH_NativeXComponent` touch/key callbacks forwarded to MAUI gestures |
+| `Microsoft.Maui.Graphics` backend | `ISkiaSharpApiLease`-style backend over the `OHNativeWindow*` (Skia OHOS build) |
+
+## Immediate steps
+
+1. Confirm the surface handshake on a device (`SurfaceChanged` + `FillSurface`).
+2. Bring up Skia over `OHNativeWindow*` (CPU write first, then GPU) and publish it as the
+   `Microsoft.Maui.Graphics` backend for `OPENHARMONY`.
+3. Port the first handlers (Label/Button/Layout) either through native ArkUI nodes
+   (`NodeContent`) or the Skia surface, and wire `MauiProgram`/`WindowHandler` to
+   `OpenHarmonyBridge`.

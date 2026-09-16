@@ -157,6 +157,7 @@
 
   <PropertyGroup>
     <DefineConstants Condition="'$(_MauiTargetPlatformIsWindows)' == 'True'">$(DefineConstants);WINDOWS</DefineConstants>
+    <DefineConstants Condition="'$(_MauiTargetPlatformIsOpenHarmony)' == 'True'">$(DefineConstants);OPENHARMONY</DefineConstants>
     <DefineConstants Condition="'$(IncludeCompatibilityProjects)' == 'True'">$(DefineConstants);COMPATIBILITY_ENABLED</DefineConstants>
     <DefineConstants Condition="'$(IncludePreviousTfms)' == 'True'">$(DefineConstants);ENABLE_PREVIOUS_TFM_BUILDS</DefineConstants>
     <!-- <SymbolPackageFormat>snupkg</SymbolPackageFormat> -->

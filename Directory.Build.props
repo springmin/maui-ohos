@@ -191,7 +191,10 @@
     <WindowsTargetFrameworkVersion>10.0.19041.0</WindowsTargetFrameworkVersion>
     <Windows2TargetFrameworkVersion>10.0.20348.0</Windows2TargetFrameworkVersion>
     <TizenTargetFrameworkVersion>7.0</TizenTargetFrameworkVersion>
-    <OpenHarmonyTargetFrameworkVersion>1.0</OpenHarmonyTargetFrameworkVersion>
+    <!-- OpenHarmony TFM version = the API level of the SDK used to build (iOS/Xcode model).
+         The platform workload (microsoft.net.sdk.openharmony) accepts 20.0 (public SDK) and
+         26.0 (device SDK); CI can override with -p:OpenHarmonyTargetFrameworkVersion=20.0. -->
+    <OpenHarmonyTargetFrameworkVersion>26.0</OpenHarmonyTargetFrameworkVersion>
     <!-- Previous .NET -->
     <IosPreviousTargetFrameworkVersion>18.0</IosPreviousTargetFrameworkVersion>
     <TvosPreviousTargetFrameworkVersion>18.0</TvosPreviousTargetFrameworkVersion>
@@ -201,7 +204,8 @@
     <WindowsPreviousTargetFrameworkVersion>10.0.19041.0</WindowsPreviousTargetFrameworkVersion>
     <Windows2PreviousTargetFrameworkVersion>10.0.20348.0</Windows2PreviousTargetFrameworkVersion>
     <TizenPreviousTargetFrameworkVersion>7.0</TizenPreviousTargetFrameworkVersion>
-    <OpenHarmonyPreviousTargetFrameworkVersion>1.0</OpenHarmonyPreviousTargetFrameworkVersion>
+    <!-- No previous .NET release shipped OpenHarmony support yet; keep it in sync. -->
+    <OpenHarmonyPreviousTargetFrameworkVersion>26.0</OpenHarmonyPreviousTargetFrameworkVersion>
     <!-- Minimums -->
     <MinimumWindowsTargetFrameworkVersion>10.0.17763.0</MinimumWindowsTargetFrameworkVersion>
   </PropertyGroup>

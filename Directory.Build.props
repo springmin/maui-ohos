@@ -117,15 +117,22 @@
 
     <DotNetMacOSWorkloadIsInstalled Condition="Exists('$(DotNetWorkloadPacksInstallLocation)Microsoft.macOS.Sdk\$(DotNetMacOSWorkloadInstalledVersion)\Sdk\AutoImport.props')">true</DotNetMacOSWorkloadIsInstalled>
     <DotNetTizenWorkloadIsInstalled Condition="Exists('$(DotNetWorkloadPacksInstallLocation)Samsung.Tizen.Sdk\$(DotNetTizenWorkloadInstalledVersion)\Sdk\AutoImport.props')">true</DotNetTizenWorkloadIsInstalled>
-    <DotNetOpenHarmonyWorkloadInstalledVersion Condition="Exists('$(DotNetWorkloadInstallLocation)microsoft.net.sdk.openharmony\WorkloadManifest.json')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(DotNetWorkloadInstallLocation)\microsoft.net.sdk.openharmony\WorkloadManifest.json')), $(DotNetWorkloadVersionRegex)))</DotNetOpenHarmonyWorkloadInstalledVersion>
-    <DotNetOpenHarmonyWorkloadIsInstalled Condition="Exists('$(DotNetWorkloadPacksInstallLocation)Microsoft.OpenHarmony.Sdk\$(DotNetOpenHarmonyWorkloadInstalledVersion)\Sdk\AutoImport.props')">true</DotNetOpenHarmonyWorkloadIsInstalled>
+    <!-- OpenHarmony detection is independent of the macOS/Windows install location probes above:
+         locate the platform workload manifest through a wildcard (any SDK feature band) and
+         derive the packs directory from it, so it also works on Linux/HarmonyOS hosts. -->
+    <_DotNetOpenHarmonyManifest Condition="'$(DOTNET_ROOT)' != ''">$([System.IO.Directory]::GetFiles('$(DOTNET_ROOT)/sdk-manifests', 'WorkloadManifest.json', System.IO.SearchOption.AllDirectories))</_DotNetOpenHarmonyManifest>
+    <_DotNetOpenHarmonyManifestDir>$([System.Text.RegularExpressions.Regex]::Match('$(_DotNetOpenHarmonyManifest)', '[^;]*microsoft\.net\.sdk\.openharmony[^;]*'))</_DotNetOpenHarmonyManifestDir>
+    <_DotNetOpenHarmonyManifestDir>$([System.IO.Path]::GetDirectoryName('$(_DotNetOpenHarmonyManifestDir)'))</_DotNetOpenHarmonyManifestDir>
+    <DotNetOpenHarmonyWorkloadInstalledVersion Condition="'$(_DotNetOpenHarmonyManifestDir)' != '' and Exists('$(_DotNetOpenHarmonyManifestDir)/WorkloadManifest.json')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(_DotNetOpenHarmonyManifestDir)/WorkloadManifest.json')), $(DotNetWorkloadVersionRegex)))</DotNetOpenHarmonyWorkloadInstalledVersion>
+    <DotNetOpenHarmonyWorkloadPacksInstallLocation Condition="'$(_DotNetOpenHarmonyManifestDir)' != ''">$([System.IO.Path]::GetFullPath('$(_DotNetOpenHarmonyManifestDir)/../../../packs'))/</DotNetOpenHarmonyWorkloadPacksInstallLocation>
+    <DotNetOpenHarmonyWorkloadIsInstalled Condition="'$(DotNetOpenHarmonyWorkloadPacksInstallLocation)' != '' and Exists('$(DotNetOpenHarmonyWorkloadPacksInstallLocation)Microsoft.OpenHarmony.Sdk/$(DotNetOpenHarmonyWorkloadInstalledVersion)/Sdk/AutoImport.props')">true</DotNetOpenHarmonyWorkloadIsInstalled>
     <IncludeOpenHarmonyTargetFrameworks Condition="'$(DotNetOpenHarmonyWorkloadIsInstalled)' == 'true'">true</IncludeOpenHarmonyTargetFrameworks>
 
     <IncludeWindowsTargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows')) or '$(Packing)' == 'true'">true</IncludeWindowsTargetFrameworks>
     <IncludeMacOSTargetFrameworks Condition="'$(DotNetMacOSWorkloadIsInstalled)' == 'true'">true</IncludeMacOSTargetFrameworks>
     <IncludeTizenTargetFrameworks Condition="'$(DotNetTizenWorkloadIsInstalled)' == 'true'">true</IncludeTizenTargetFrameworks>
-    <!-- OpenHarmony: no platform workload exists yet; opt in with
-         -p:IncludeOpenHarmonyTargetFrameworks=true (or install microsoft.net.sdk.openharmony). -->
+    <!-- OpenHarmony: enabled automatically when the microsoft.net.sdk.openharmony workload
+         is installed; opt in early with -p:IncludeOpenHarmonyTargetFrameworks=true. -->
     <IncludeOpenHarmonyTargetFrameworks Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == ''">false</IncludeOpenHarmonyTargetFrameworks>
     <IncludeAndroidTargetFrameworks>true</IncludeAndroidTargetFrameworks>
     <IncludeMacCatalystTargetFrameworks>true</IncludeMacCatalystTargetFrameworks>

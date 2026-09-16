@@ -82,6 +82,12 @@
       "extends": [
         "maui-blazor"
       ]
+    },
+    "maui-openharmony": {
+      "description": ".NET MAUI SDK for OpenHarmony (experimental; platform workload microsoft.net.sdk.openharmony pending)",
+      "extends": [
+        "maui-blazor"
+      ]
     }
   },
   "packs": {

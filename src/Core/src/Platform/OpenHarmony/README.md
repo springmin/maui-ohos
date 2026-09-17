@@ -12,13 +12,36 @@ that ships in the `microsoft.net.sdk.openharmony` workload
 | `OpenHarmonyView` | the compositor's platform view: arranged frame, text/background, tap routing |
 | `OpenHarmonyWindowRenderer` | measures/arranges the MAUI tree, draws it through the MauiGraphics canvas and routes touches (deepest interactive view first) |
 | `OpenHarmonyLabelHandler` / `OpenHarmonyButtonHandler` / `OpenHarmonyLayoutHandler` | handlers for `ILabel`/`IButton`/`ILayout` (also an `ILayoutHandler`), including `GetDesiredSize` from platform text metrics and cross-platform measure/arrange |
-| `MauiOpenHarmonyExtensions.UseOpenHarmony()` | registers the services and the handlers with `MauiAppBuilder` |
+| `OpenHarmonyMauiAppHost` | creates the window through `IApplication.CreateWindow`, connects this slice's handlers to the visual tree, arranges it for the surface and drives render/touch from the platform contract |
+| `MauiOpenHarmonyExtensions.UseOpenHarmony()` | registers the services, the host and the handlers with `MauiAppBuilder` |
 
 Build:
 
 ```sh
 dotnet build src/Core/src/Platform/OpenHarmony/Microsoft.Maui.Platform.OpenHarmony.csproj \
   -p:OpenHarmonyHostingAssembly=<path to Microsoft.OpenHarmony.Hosting.dll>
+```
+
+## Verification (real MAUI application)
+
+```csharp
+var builder = MauiApp.CreateBuilder();
+builder.UseOpenHarmony();
+builder.UseMauiApp<TestApp>();          // Application with Window(ContentPage(VerticalStackLayout))
+var app = builder.Build();
+app.Services.GetRequiredService<OpenHarmonyMauiAppHost>().Run(app.Services.GetRequiredService<IApplication>());
+```
+
+produces
+
+```
+ContentPage
+  VerticalStackLayout frame=0,0,1080x1920
+    Label  frame=24,24,1032x54   text='MAUI app on OpenHarmony'
+    Button frame=24,94,1032x51   text='Tap me'
+    Label  frame=24,161,1032x32  text='Ready'
+[verify] Button.Clicked fired
+[verify] tap 540,119 handled(down=True, up=True)
 ```
 
 ## Verification

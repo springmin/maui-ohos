@@ -31,6 +31,22 @@ public sealed class OpenHarmonyWindowRenderer
         return true;
     }
 
+    /// <summary>Child views of a view: layout children and content-view content (pages).</summary>
+    private static IEnumerable<IView> ChildrenOf(IView view)
+    {
+        if (view is ILayout layout)
+        {
+            foreach (IView child in layout)
+            {
+                yield return child;
+            }
+        }
+        if (view is IContentView contentView && contentView.PresentedContent is IView presented)
+        {
+            yield return presented;
+        }
+    }
+
     private void DrawView(IView view)
     {
         if (view.Visibility != Visibility.Visible)
@@ -41,12 +57,9 @@ public sealed class OpenHarmonyWindowRenderer
         {
             platform.Draw(_canvas);
         }
-        if (view is ILayout layout)
+        foreach (IView child in ChildrenOf(view))
         {
-            foreach (IView child in layout)
-            {
-                DrawView(child);
-            }
+            DrawView(child);
         }
     }
 
@@ -57,12 +70,9 @@ public sealed class OpenHarmonyWindowRenderer
     public bool HandleTouch(IView root, bool down, bool up, float x, float y)
     {
         bool handled = false;
-        if (root is ILayout layout)
+        foreach (IView child in ChildrenOf(root))
         {
-            foreach (IView child in layout)
-            {
-                handled |= HandleTouch(child, down, up, x, y);
-            }
+            handled |= HandleTouch(child, down, up, x, y);
         }
         if (root.Handler?.PlatformView is OpenHarmonyView platform && platform.Tap is not null)
         {
@@ -89,12 +99,9 @@ public sealed class OpenHarmonyWindowRenderer
             sb.Append(" text='").Append(text.Text).Append('\'');
         }
         sb.AppendLine();
-        if (view is ILayout layout)
+        foreach (IView child in ChildrenOf(view))
         {
-            foreach (IView child in layout)
-            {
-                sb.Append(Describe(child, depth + 1));
-            }
+            sb.Append(Describe(child, depth + 1));
         }
         return sb.ToString();
     }

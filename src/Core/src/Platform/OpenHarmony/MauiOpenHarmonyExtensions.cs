@@ -17,6 +17,7 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<IDispatcher, OpenHarmonyDispatcher>();
         builder.Services.AddSingleton<OpenHarmonyWindowSurface>();
         builder.Services.AddSingleton<OpenHarmonyWindowRenderer>();
+        builder.Services.AddSingleton<OpenHarmonyMauiAppHost>();
         builder.ConfigureMauiHandlers(handlers =>
         {
             handlers.AddHandler<ILabel, OpenHarmonyLabelHandler>();

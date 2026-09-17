@@ -81,11 +81,41 @@ public sealed class OpenHarmonyWindowRenderer
     /// does not depend on the platform handlers maintaining child lists.
     /// </summary>
     private OpenHarmonyView? _dragScrollTarget;
+    private OpenHarmonyView? _dragSliderTarget;
     private float _dragLastY;
 
-    /// <summary>Handles a touch/mouse move: scrolls the scroll view captured on the last down.</summary>
+    /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
+    public bool HasAnimations(IView? root) => TreeHasAnimations(root);
+
+    private static bool TreeHasAnimations(IView? view)
+    {
+        if (view is null || view.Visibility != Visibility.Visible)
+        {
+            return false;
+        }
+        if (view.Handler?.PlatformView is OpenHarmonyView { NeedsAnimation: true })
+        {
+            return true;
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            if (TreeHasAnimations(child))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Handles a touch/mouse move: drags the slider or scrolls the scroll view captured on down.</summary>
     public bool HandleMove(float x, float y)
     {
+        if (_dragSliderTarget is { IsSlider: true } slider)
+        {
+            float fraction = slider.SliderValueFromX(x);
+            slider.SliderDrag?.Invoke(fraction, false);
+            return true;
+        }
         if (_dragScrollTarget is not { IsScrollView: true } scroll)
         {
             return false;
@@ -109,10 +139,16 @@ public sealed class OpenHarmonyWindowRenderer
         if (down)
         {
             _dragScrollTarget = FindScrollView(root, x, y);
+            _dragSliderTarget = FindSlider(root, x, y);
             _dragLastY = y;
         }
         else if (up)
         {
+            if (_dragSliderTarget is { IsSlider: true } slider)
+            {
+                _dragSliderTarget = null;
+                slider.SliderDrag?.Invoke(slider.SliderFraction, true);
+            }
             _dragScrollTarget = null;
         }
         return HandleTouchCore(root, down, up, x, y);
@@ -135,6 +171,35 @@ public sealed class OpenHarmonyWindowRenderer
             handled |= platform.IsScrollView && platform.Frame.Contains(x, y);
         }
         return handled;
+    }
+
+    /// <summary>Slider containing the point (the nearest ancestor wins).</summary>
+    private OpenHarmonyView? FindSlider(IView view, float x, float y)
+    {
+        OpenHarmonyView? found = null;
+        float localX = x;
+        float localY = y;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            if (!platform.Frame.Contains(x, y))
+            {
+                return null;
+            }
+            if (platform.IsSlider)
+            {
+                found = platform;
+            }
+            if (platform.IsScrollView)
+            {
+                localX += platform.ScrollOffsetX;
+                localY += platform.ScrollOffsetY;
+            }
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            found = FindSlider(child, localX, localY) ?? found;
+        }
+        return found;
     }
 
     /// <summary>Deepest scroll view containing the point (coordinates adjusted for offsets).</summary>
@@ -184,6 +249,26 @@ public sealed class OpenHarmonyWindowRenderer
         if (platform is { IsTextEntry: true, IsFocused: true })
         {
             sb.Append(" focused");
+        }
+        if (platform is { IsCheckBox: true })
+        {
+            sb.Append($" checked={platform.IsChecked}");
+        }
+        if (platform is { IsSwitch: true })
+        {
+            sb.Append($" on={platform.IsOn}");
+        }
+        if (platform is { IsSlider: true })
+        {
+            sb.Append($" slider={platform.SliderValue:0.##}/{platform.SliderMinimum:0.##}-{platform.SliderMaximum:0.##}");
+        }
+        if (platform is { IsProgressBar: true })
+        {
+            sb.Append($" progress={platform.Progress:0.##}");
+        }
+        if (platform is { IsActivityIndicator: true })
+        {
+            sb.Append($" running={platform.IsRunning}");
         }
         if (view is ILabel label && !string.IsNullOrEmpty(label.Text))
         {

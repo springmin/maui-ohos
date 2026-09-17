@@ -27,6 +27,11 @@ public static class MauiOpenHarmonyExtensions
             handlers.AddHandler<IEntry, OpenHarmonyEntryHandler>();
             handlers.AddHandler<Microsoft.Maui.IImage, OpenHarmonyImageHandler>();
             handlers.AddHandler<IScrollView, OpenHarmonyScrollViewHandler>();
+            handlers.AddHandler<ICheckBox, OpenHarmonyCheckBoxHandler>();
+            handlers.AddHandler<ISwitch, OpenHarmonySwitchHandler>();
+            handlers.AddHandler<ISlider, OpenHarmonySliderHandler>();
+            handlers.AddHandler<IProgress, OpenHarmonyProgressBarHandler>();
+            handlers.AddHandler<IActivityIndicator, OpenHarmonyActivityIndicatorHandler>();
         });
         return builder;
     }

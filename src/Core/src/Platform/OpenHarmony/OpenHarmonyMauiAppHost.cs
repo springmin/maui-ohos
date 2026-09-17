@@ -50,6 +50,12 @@ public sealed class OpenHarmonyMauiAppHost
 
         OpenHarmonyBridge.Frame += _ =>
         {
+            // Activity indicators keep animating: advance the shared angle and redraw.
+            if (_renderer.HasAnimations(_window?.Content as IView))
+            {
+                OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
+                _dirty = true;
+            }
             if (_dirty)
             {
                 _dirty = false;

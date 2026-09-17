@@ -26,10 +26,9 @@ public sealed class OpenHarmonyPageHandler : OpenHarmonyViewHandler<Page>
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        if (PageContent is { } content)
+        if (VirtualView is IView page)
         {
-            content.Measure(frame.Width, frame.Height);
-            content.Arrange(new Rect(frame.X, frame.Y, frame.Width, frame.Height));
+            OpenHarmonyContentArrange.Arrange(page, frame);
         }
     }
 }

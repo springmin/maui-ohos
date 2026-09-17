@@ -28,6 +28,7 @@ public static class MauiOpenHarmonyExtensions
         [typeof(IActivityIndicator)] = typeof(OpenHarmonyActivityIndicatorHandler),
         [typeof(Microsoft.Maui.Controls.NavigationPage)] = typeof(OpenHarmonyNavigationPageHandler),
         [typeof(Microsoft.Maui.Controls.Page)] = typeof(OpenHarmonyPageHandler),
+        [typeof(Microsoft.Maui.Controls.CollectionView)] = typeof(OpenHarmonyCollectionViewHandler),
     };
 
     /// <summary>

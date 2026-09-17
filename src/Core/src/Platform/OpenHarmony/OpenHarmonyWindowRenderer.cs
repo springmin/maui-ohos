@@ -54,6 +54,14 @@ public sealed class OpenHarmonyWindowRenderer
         {
             yield return currentPage;
         }
+        // Platform-owned children (collection view items) are part of the rendered tree.
+        if (view.Handler?.PlatformView is OpenHarmonyView { ViewChildren.Count: > 0 } platform)
+        {
+            foreach (IView child in platform.ViewChildren)
+            {
+                yield return child;
+            }
+        }
     }
 
     private void DrawView(IView view)

@@ -107,8 +107,9 @@ public sealed class OpenHarmonyMauiAppHost
             OpenHarmonyBridge.WriteStatus("[maui] application did not create a window");
             return;
         }
-        ConnectTree(_window);
-        ConnectTree(_window.Content);
+        OpenHarmonyHandlerConnector.Context = _context;
+        OpenHarmonyHandlerConnector.ConnectTree(_window);
+        OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
         OpenHarmonyBridge.WriteStatus($"[maui] window created ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
         // The platform's Create lifecycle event activates the window.
         _dirty = true;
@@ -125,11 +126,15 @@ public sealed class OpenHarmonyMauiAppHost
         }
         // MAUI measures/arranges through handlers; Page/ContentView have no platform handler
         // in this slice, so arrange the first descendant that has one.
+        var bounds = new Rect(0, 0, width, height);
+        // Pages have no platform layout of their own, so the content chain is arranged directly
+        // (navigation bars are subtracted on the way down).
+        OpenHarmonyContentArrange.Arrange(content, bounds);
         IView? root = FindArrangableRoot(content);
-        if (root is not null)
+        if (root is not null && !ReferenceEquals(root, content))
         {
             root.Measure(width, height);
-            root.Arrange(new Rect(0, 0, width, height));
+            root.Arrange(bounds);
         }
     }
 
@@ -174,65 +179,4 @@ public sealed class OpenHarmonyMauiAppHost
 
     public string Describe() => _window?.Content is IView content ? _renderer.Describe(content) : "(no window content)";
 
-    private IElementHandler? HandlerFor(Type handlerType)
-        => Activator.CreateInstance(handlerType) as IElementHandler;
-
-    private static Type? FindSliceHandlerType(Type viewType)
-    {
-        if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(viewType, out Type? exact))
-        {
-            return exact;
-        }
-        foreach (Type iface in viewType.GetInterfaces())
-        {
-            if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(iface, out Type? byInterface))
-            {
-                return byInterface;
-            }
-        }
-        for (Type? type = viewType.BaseType; type is not null; type = type.BaseType)
-        {
-            if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(type, out Type? byBase))
-            {
-                return byBase;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>Connects handlers for a view and its descendants (idempotent).</summary>
-    private void ConnectTree(IElement? element)
-    {
-        if (element is null)
-        {
-            return;
-        }
-        // Prefer this slice's interface-registered handlers over MAUI's platform-partial
-        // concrete registrations, which have no platform view here. Window/IWindow is an
-        // IElement (not an IView), so both are handled.
-        if (element.Handler is null &&
-            FindSliceHandlerType(element.GetType()) is { } handlerType &&
-            HandlerFor(handlerType) is { } handler)
-        {
-            handler.SetMauiContext(_context);
-            element.Handler = handler;
-        }
-        if (element is ILayout layout)
-        {
-            foreach (IView child in layout)
-            {
-                ConnectTree(child);
-            }
-        }
-        else if (element is Microsoft.Maui.Controls.NavigationPage navigation)
-        {
-            // A navigation page's visible content is the current page (which may also be its
-            // presented content); make sure it always gets its handlers.
-            ConnectTree(navigation.CurrentPage);
-        }
-        else if (element is IContentView contentView)
-        {
-            ConnectTree(contentView.PresentedContent);
-        }
-    }
 }

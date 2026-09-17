@@ -23,6 +23,17 @@ public sealed class OpenHarmonyLayoutHandler : OpenHarmonyViewHandler<ILayout>, 
     {
         if (VirtualView is Microsoft.Maui.Controls.Layout layout)
         {
+            // Children whose handlers were connected after the last measure pass (for example
+            // collection views built during tree connection) still report an empty desired size;
+            // MAUI's arrange would skip them, so measure them again first.
+            foreach (IView child in layout)
+            {
+                Size desired = child.DesiredSize;
+                if (desired.Width <= 0 || desired.Height <= 0)
+                {
+                    child.Measure(frame.Width, frame.Height);
+                }
+            }
             layout.CrossPlatformArrange(frame);
         }
         else

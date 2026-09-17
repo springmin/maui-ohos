@@ -2,7 +2,6 @@
 // back button that pops the stack.
 using Microsoft.Maui;
 using Microsoft.Maui.Controls;
-using Microsoft.Maui.Controls.Internals;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -35,13 +34,6 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         {
             navigationPage.Pushed += OnStackChanged;
             navigationPage.Popped += OnStackChanged;
-            // MAUI's navigation pipeline asks the platform to perform the transition and to
-            // complete the pending navigation: there is no animation here, so completion is
-            // immediate.
-            var controller = (INavigationPageController)navigationPage;
-            controller.PushRequested += OnPushRequested;
-            controller.PopRequested += OnPopRequested;
-            controller.PopToRootRequested += OnPopToRootRequested;
         }
         UpdateNavigationBar();
     }
@@ -52,85 +44,28 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         {
             navigationPage.Pushed -= OnStackChanged;
             navigationPage.Popped -= OnStackChanged;
-            var controller = (INavigationPageController)navigationPage;
-            controller.PushRequested -= OnPushRequested;
-            controller.PopRequested -= OnPopRequested;
-            controller.PopToRootRequested -= OnPopToRootRequested;
         }
         base.DisconnectHandler(platformView);
     }
 
-    private void OnPushRequested(object? sender, NavigationRequestedEventArgs args)
+    /// <summary>
+    /// MAUI's navigation pipeline (MauiNavigationImpl) asks the platform handler to perform a
+    /// navigation. There is no transition animation here, so the new stack is reported back
+    /// immediately - that call also completes the pending <c>PushAsync</c>/<c>PopAsync</c>.
+    /// </summary>
+    public override void Invoke(string command, object? args)
     {
-        var stack = new List<IView>(CurrentStack());
-        if (args.Page is IView pushed)
+        if (command == nameof(IStackNavigation.RequestNavigation) && args is NavigationRequest request)
         {
-            stack.Add(pushed);
+            if (VirtualView is IStackNavigation navigation)
+            {
+                navigation.NavigationFinished(request.NavigationStack);
+            }
+            UpdateNavigationBar();
+            OpenHarmonyBridge.RequestRedraw();
+            return;
         }
-        Finish(stack, args);
-    }
-
-    private void OnPopRequested(object? sender, NavigationRequestedEventArgs args)
-    {
-        var stack = new List<IView>(CurrentStack());
-        if (stack.Count > 1)
-        {
-            stack.RemoveAt(stack.Count - 1);
-        }
-        Finish(stack, args);
-    }
-
-    private void OnPopToRootRequested(object? sender, NavigationRequestedEventArgs args)
-    {
-        var stack = new List<IView>(CurrentStack());
-        if (stack.Count > 1)
-        {
-            stack.RemoveRange(1, stack.Count - 1);
-        }
-        Finish(stack, args);
-    }
-
-    private IEnumerable<IView> CurrentStack()
-        => VirtualView?.Navigation?.NavigationStack?.Cast<IView>() ?? Enumerable.Empty<IView>();
-
-    private void Finish(IReadOnlyList<IView> stack, NavigationRequestedEventArgs args)
-    {
-        // There is no transition animation, so the platform side is finished immediately. NOTE:
-        // MAUI's stock navigation pipeline still waits for a platform NavigationView handler to
-        // report its own completion, so `await PushAsync(...)`/`await PopAsync(...)` do not
-        // complete on this slice yet even though the navigation itself happens (the stack, the
-        // bar and the rendered page are updated). Tracked for the navigation phase.
-        if (VirtualView is IStackNavigation navigation)
-        {
-            navigation.NavigationFinished(stack);
-        }
-        args.Task = Task.FromResult(true);
-        UpdateNavigationBar();
-        OpenHarmonyBridge.RequestRedraw();
-    }
-
-    public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
-    {
-        if (VirtualView?.CurrentPage is IView content)
-        {
-            double contentHeight = Math.Max(0, heightConstraint - PlatformView.NavBarHeight);
-            Size size = content.Measure(widthConstraint, contentHeight);
-            return new Size(Math.Min(size.Width, widthConstraint),
-                            Math.Min(size.Height + PlatformView.NavBarHeight, heightConstraint));
-        }
-        return base.GetDesiredSize(widthConstraint, heightConstraint);
-    }
-
-    public override void PlatformArrange(Rect frame)
-    {
-        base.PlatformArrange(frame);
-        if (VirtualView?.CurrentPage is IView content)
-        {
-            // The current page lives below the navigation bar, so no draw-time offset is needed.
-            double contentHeight = Math.Max(0, frame.Height - PlatformView.NavBarHeight);
-            content.Measure(frame.Width, contentHeight);
-            content.Arrange(new Rect(frame.X, frame.Y + PlatformView.NavBarHeight, frame.Width, contentHeight));
-        }
+        base.Invoke(command, args);
     }
 
     private void OnStackChanged(object? sender, NavigationEventArgs args)

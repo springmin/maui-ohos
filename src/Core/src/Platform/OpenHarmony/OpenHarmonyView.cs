@@ -100,6 +100,12 @@ public class OpenHarmonyView
 
     public List<OpenHarmonyView> Children { get; } = new();
 
+    /// <summary>
+    /// Views owned by the platform side (collection view items materialized from a template):
+    /// the renderer draws and hit-tests them like ordinary children.
+    /// </summary>
+    public List<IView> ViewChildren { get; } = new();
+
     public RectF Frame => VirtualView?.Frame is Rect frame
         ? new RectF((float)frame.X, (float)frame.Y, (float)frame.Width, (float)frame.Height)
         : default;

@@ -71,6 +71,26 @@ public class OpenHarmonyView
     /// <summary>True when this view keeps redrawing on its own (activity indicators).</summary>
     public bool NeedsAnimation => IsActivityIndicator && IsRunning;
 
+    // Navigation page support
+    public bool IsNavigationPage { get; set; }
+    public float NavBarHeight { get; set; } = 48f;
+    public string? NavTitle { get; set; }
+    public bool CanGoBack { get; set; }
+    public Color NavBarColor { get; set; } = Colors.Black;
+    public Color NavBarTextColor { get; set; } = Colors.White;
+    public Action? BackTapped { get; set; }
+
+    /// <summary>Width of the tappable back area in the navigation bar.</summary>
+    public const float NavBackWidth = 88f;
+
+    public bool InBackRegion(float x, float y)
+    {
+        RectF frame = Frame;
+        return IsNavigationPage && CanGoBack &&
+               y >= frame.Y && y <= frame.Y + NavBarHeight &&
+               x >= frame.X && x <= frame.X + NavBackWidth;
+    }
+
     // Scroll support
     public bool IsScrollView { get; set; }
     public float ScrollOffsetX { get; set; }
@@ -102,6 +122,11 @@ public class OpenHarmonyView
             {
                 canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
             }
+        }
+        if (IsNavigationPage)
+        {
+            DrawNavigationBar(canvas, frame);
+            return;
         }
         if (IsCheckBox)
         {
@@ -176,6 +201,26 @@ public class OpenHarmonyView
         }
         Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
             ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
+    }
+
+    private void DrawNavigationBar(MauiCanvas canvas, RectF frame)
+    {
+        canvas.FillColor = NavBarColor;
+        canvas.FillRectangle(frame.X, frame.Y, frame.Width, NavBarHeight);
+        if (CanGoBack)
+        {
+            float cx = frame.X + 26f;
+            float cy = frame.Y + NavBarHeight / 2f;
+            canvas.StrokeColor = NavBarTextColor;
+            canvas.StrokeSize = 3;
+            canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
+            canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+        }
+        canvas.FontColor = NavBarTextColor;
+        canvas.FontSize = 30;
+        canvas.DrawString(NavTitle ?? string.Empty, frame.X + NavBackWidth, frame.Y,
+            frame.Width - NavBackWidth * 2, NavBarHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        // The current page is drawn by the renderer, translated below the bar.
     }
 
     private void DrawCheckBox(MauiCanvas canvas, RectF frame)
@@ -278,9 +323,26 @@ public class OpenHarmonyView
         {
             handled |= child.OnTouch(down, up, x, y);
         }
+        if (IsNavigationPage)
+        {
+            if (down && InBackRegion(x, y))
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                if (InBackRegion(x, y))
+                {
+                    BackTapped?.Invoke();
+                }
+                return true;
+            }
+        }
         if (Tap is null)
         {
-            return handled;
+            return handled || Pressed;
         }
         if (down && HitTest(x, y))
         {

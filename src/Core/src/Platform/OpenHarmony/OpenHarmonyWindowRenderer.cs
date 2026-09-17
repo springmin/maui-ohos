@@ -41,9 +41,18 @@ public sealed class OpenHarmonyWindowRenderer
                 yield return child;
             }
         }
-        if (view is IContentView contentView && contentView.PresentedContent is IView presented)
+        IView? presentedContent = (view as IContentView)?.PresentedContent as IView;
+        if (presentedContent is not null)
         {
-            yield return presented;
+            yield return presentedContent;
+        }
+        // The current page of a navigation page is what is visible; avoid double-yielding when
+        // it is also the presented content.
+        if (view is Microsoft.Maui.Controls.NavigationPage navigation &&
+            navigation.CurrentPage is IView currentPage &&
+            !ReferenceEquals(currentPage, presentedContent))
+        {
+            yield return currentPage;
         }
     }
 
@@ -157,16 +166,23 @@ public sealed class OpenHarmonyWindowRenderer
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
     {
         bool handled = false;
+        // Children of a scrolled view are shifted by the scroll offset; navigation page
+        // content is already arranged below its bar.
+        float childX = x;
+        float childY = y;
+        if (view.Handler?.PlatformView is OpenHarmonyView { IsScrollView: true } container)
+        {
+            childX += container.ScrollOffsetX;
+            childY += container.ScrollOffsetY;
+        }
         foreach (IView child in ChildrenOf(view))
         {
-            handled |= HandleTouchCore(child, down, up, x, y);
+            handled |= HandleTouchCore(child, down, up, childX, childY);
         }
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            if (platform.Tap is not null)
-            {
-                handled |= platform.OnTouch(down, up, x, y);
-            }
+            // Views handle their own touches (buttons, navigation bars); plain views ignore them.
+            handled |= platform.OnTouch(down, up, x, y);
             // Scroll views consume touches inside them (drag scrolling).
             handled |= platform.IsScrollView && platform.Frame.Contains(x, y);
         }
@@ -269,6 +285,10 @@ public sealed class OpenHarmonyWindowRenderer
         if (platform is { IsActivityIndicator: true })
         {
             sb.Append($" running={platform.IsRunning}");
+        }
+        if (platform is { IsNavigationPage: true })
+        {
+            sb.Append($" nav='{platform.NavTitle}' back={platform.CanGoBack}");
         }
         if (view is ILabel label && !string.IsNullOrEmpty(label.Text))
         {

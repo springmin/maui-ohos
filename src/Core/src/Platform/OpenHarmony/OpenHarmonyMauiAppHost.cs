@@ -48,6 +48,8 @@ public sealed class OpenHarmonyMauiAppHost
             }
         };
 
+        OpenHarmonyBridge.RedrawRequested += () => _dirty = true;
+
         OpenHarmonyBridge.Frame += _ =>
         {
             // Activity indicators keep animating: advance the shared angle and redraw.
@@ -175,18 +177,27 @@ public sealed class OpenHarmonyMauiAppHost
     private IElementHandler? HandlerFor(Type handlerType)
         => Activator.CreateInstance(handlerType) as IElementHandler;
 
-    private Type? FindSliceHandlerType(Type viewType)
+    private static Type? FindSliceHandlerType(Type viewType)
     {
+        if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(viewType, out Type? exact))
+        {
+            return exact;
+        }
         foreach (Type iface in viewType.GetInterfaces())
         {
-            Type? candidate = _context.Handlers.GetHandlerType(iface);
-            if (candidate is not null && candidate.Assembly == typeof(OpenHarmonyMauiAppHost).Assembly)
+            if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(iface, out Type? byInterface))
             {
-                return candidate;
+                return byInterface;
             }
         }
-        Type? direct = _context.Handlers.GetHandlerType(viewType);
-        return direct is not null && direct.Assembly == typeof(OpenHarmonyMauiAppHost).Assembly ? direct : null;
+        for (Type? type = viewType.BaseType; type is not null; type = type.BaseType)
+        {
+            if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(type, out Type? byBase))
+            {
+                return byBase;
+            }
+        }
+        return null;
     }
 
     /// <summary>Connects handlers for a view and its descendants (idempotent).</summary>
@@ -212,6 +223,12 @@ public sealed class OpenHarmonyMauiAppHost
             {
                 ConnectTree(child);
             }
+        }
+        else if (element is Microsoft.Maui.Controls.NavigationPage navigation)
+        {
+            // A navigation page's visible content is the current page (which may also be its
+            // presented content); make sure it always gets its handlers.
+            ConnectTree(navigation.CurrentPage);
         }
         else if (element is IContentView contentView)
         {

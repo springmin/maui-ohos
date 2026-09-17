@@ -3,6 +3,7 @@
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.Maui;
+using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
@@ -24,16 +25,55 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         var view = new OpenHarmonyView { IsTextEntry = true, Background = Colors.DimGray };
         view.Tap = () =>
         {
-            IsFocused = true;
-            ((IView)VirtualView!).Focus();
+            SetFocus(true);
+            OpenHarmonyBridge.RequestTextInput(true);
         };
         return view;
     }
 
-    private bool IsFocused
+    protected override void ConnectHandler(OpenHarmonyView platformView)
     {
-        get => PlatformView.IsFocused;
-        set => PlatformView.IsFocused = value;
+        base.ConnectHandler(platformView);
+        OpenHarmonyBridge.TextInput += OnTextInput;
+    }
+
+    protected override void DisconnectHandler(OpenHarmonyView platformView)
+    {
+        OpenHarmonyBridge.TextInput -= OnTextInput;
+        base.DisconnectHandler(platformView);
+    }
+
+    private void OnTextInput(string text)
+    {
+        // Only the focused entry consumes the shell's text. IText.Text is read-only, so the
+        // assignment goes through the Controls types, which raises TextChanged/Completed.
+        if (!PlatformView.IsFocused)
+        {
+            return;
+        }
+        PlatformView.Text = text;
+        switch (VirtualView)
+        {
+            case Microsoft.Maui.Controls.Entry entry:
+                entry.Text = text;
+                break;
+            case Microsoft.Maui.Controls.Editor editor:
+                editor.Text = text;
+                break;
+        }
+    }
+
+    // The platform view is the source of truth; the virtual view is updated through the
+    // read-only IsFocused bindable key so app code sees IsFocused/Focused/Unfocused.
+    private void SetFocus(bool focused)
+    {
+        PlatformView.IsFocused = focused;
+        OpenHarmonyBridge.RequestTextInput(focused);
+        if (VirtualView is Microsoft.Maui.Controls.VisualElement element &&
+            element.IsFocused != focused)
+        {
+            element.SetValue(Microsoft.Maui.Controls.VisualElement.IsFocusedPropertyKey, focused);
+        }
     }
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
@@ -50,14 +90,14 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         switch (command)
         {
             case "Focus":
-                PlatformView.IsFocused = true;
+                SetFocus(true);
                 if (args is RetrievePlatformValueRequest<bool> focusRequest)
                 {
                     focusRequest.SetResult(true);
                 }
                 return;
             case "Unfocus":
-                PlatformView.IsFocused = false;
+                SetFocus(false);
                 if (args is RetrievePlatformValueRequest<bool> unfocusRequest)
                 {
                     unfocusRequest.SetResult(true);

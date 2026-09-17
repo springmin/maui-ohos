@@ -20,6 +20,22 @@ public class OpenHarmonyView
 
     public bool Pressed { get; set; }
 
+    // Entry support
+    public bool IsTextEntry { get; set; }
+    public string? Placeholder { get; set; }
+    public bool IsFocused { get; set; }
+
+    // Image support
+    public byte[]? ImageBytes { get; set; }
+    public Aspect ImageAspect { get; set; } = Aspect.AspectFit;
+
+    // Scroll support
+    public bool IsScrollView { get; set; }
+    public float ScrollOffsetX { get; set; }
+    public float ScrollOffsetY { get; set; }
+    public float ScrollContentWidth { get; set; }
+    public float ScrollContentHeight { get; set; }
+
     public List<OpenHarmonyView> Children { get; } = new();
 
     public RectF Frame => VirtualView?.Frame is Rect frame
@@ -45,16 +61,54 @@ public class OpenHarmonyView
                 canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
             }
         }
-        if (!string.IsNullOrEmpty(Text))
+        if (ImageBytes is { Length: > 0 })
+        {
+            DrawImage(canvas, frame);
+            return;
+        }
+        string? text = Text;
+        if (IsTextEntry && string.IsNullOrEmpty(text))
+        {
+            canvas.FontColor = Colors.Gray;
+            canvas.FontSize = FontSize;
+            canvas.DrawString(Placeholder ?? string.Empty, frame.X + 12, frame.Y, frame.Width - 24, frame.Height,
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+            if (IsFocused)
+            {
+                canvas.FillColor = Colors.White;
+                canvas.FillRectangle(frame.X + 12, frame.Y + 8, 2, frame.Height - 16);
+            }
+            return;
+        }
+        if (!string.IsNullOrEmpty(text))
         {
             canvas.FontColor = TextColor;
             canvas.FontSize = FontSize;
-            float padding = CornerRadius > 0 ? 24f : 0f;
+            float padding = IsTextEntry ? 12f : (CornerRadius > 0 ? 24f : 0f);
             canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
         // Children are drawn by OpenHarmonyWindowRenderer walking the MAUI tree; the list here
         // is used for hit-testing.
+    }
+
+    private void DrawImage(MauiCanvas canvas, RectF frame)
+    {
+        float imageWidth = frame.Width;
+        float imageHeight = frame.Height;
+        float x = frame.X;
+        float y = frame.Y;
+        // Aspect fitting is limited to what the platform view knows (intrinsic size is not
+        // tracked yet): AspectFill/Center keep the frame, Fit preserves the square case.
+        if (ImageAspect == Aspect.AspectFit && Math.Abs(imageWidth - imageHeight) > 0.5f)
+        {
+            float side = Math.Min(imageWidth, imageHeight);
+            x += (imageWidth - side) / 2f;
+            y += (imageHeight - side) / 2f;
+            imageWidth = imageHeight = side;
+        }
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
+            ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
     }
 
     public bool HitTest(float x, float y)

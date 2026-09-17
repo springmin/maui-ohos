@@ -23,6 +23,10 @@ public static class MauiOpenHarmonyExtensions
             handlers.AddHandler<ILabel, OpenHarmonyLabelHandler>();
             handlers.AddHandler<IButton, OpenHarmonyButtonHandler>();
             handlers.AddHandler<ILayout, OpenHarmonyLayoutHandler>();
+            handlers.AddHandler<IWindow, OpenHarmonyWindowHandler>();
+            handlers.AddHandler<IEntry, OpenHarmonyEntryHandler>();
+            handlers.AddHandler<Microsoft.Maui.IImage, OpenHarmonyImageHandler>();
+            handlers.AddHandler<IScrollView, OpenHarmonyScrollViewHandler>();
         });
         return builder;
     }

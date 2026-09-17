@@ -35,9 +35,14 @@ public sealed class OpenHarmonyMauiAppHost
 
         OpenHarmonyBridge.Touch += args =>
         {
-            bool down = args.Action == OpenHarmonyTouchAction.Down;
-            bool up = args.Action == OpenHarmonyTouchAction.Up;
-            if (HandleTouch(down, up, args.X, args.Y))
+            bool handled = args.Action switch
+            {
+                OpenHarmonyTouchAction.Down => HandleTouch(true, false, args.X, args.Y),
+                OpenHarmonyTouchAction.Up => HandleTouch(false, true, args.X, args.Y),
+                OpenHarmonyTouchAction.Move => _renderer.HandleMove(args.X, args.Y),
+                _ => false,
+            };
+            if (handled)
             {
                 _dirty = true;
             }
@@ -156,6 +161,9 @@ public sealed class OpenHarmonyMauiAppHost
     public bool HandleTouch(bool down, bool up, float x, float y)
         => _window?.Content is IView content && _renderer.HandleTouch(content, down, up, x, y);
 
+    /// <summary>Handles a touch move (drag scrolling).</summary>
+    public bool HandleMove(float x, float y) => _renderer.HandleMove(x, y);
+
     public string Describe() => _window?.Content is IView content ? _renderer.Describe(content) : "(no window content)";
 
     private IElementHandler? HandlerFor(Type handlerType)
@@ -182,19 +190,15 @@ public sealed class OpenHarmonyMauiAppHost
         {
             return;
         }
-        if (element is IView view && view.Handler is null)
+        // Prefer this slice's interface-registered handlers over MAUI's platform-partial
+        // concrete registrations, which have no platform view here. Window/IWindow is an
+        // IElement (not an IView), so both are handled.
+        if (element.Handler is null &&
+            FindSliceHandlerType(element.GetType()) is { } handlerType &&
+            HandlerFor(handlerType) is { } handler)
         {
-            // Prefer this slice's interface-registered handlers (ILabel/IButton/ILayout) over
-            // MAUI's platform-partial concrete registrations, which have no platform view here.
-            Type? handlerType = FindSliceHandlerType(view.GetType());
-            if (handlerType is not null)
-            {
-                if (HandlerFor(handlerType) is IViewHandler viewHandler)
-                {
-                    viewHandler.SetMauiContext(_context);
-                    view.Handler = viewHandler;
-                }
-            }
+            handler.SetMauiContext(_context);
+            element.Handler = handler;
         }
         if (element is ILayout layout)
         {

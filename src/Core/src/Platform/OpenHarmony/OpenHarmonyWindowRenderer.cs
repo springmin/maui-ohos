@@ -294,6 +294,19 @@ public sealed class OpenHarmonyWindowRenderer
         {
             sb.Append($" running={platform.IsRunning}");
         }
+        if (platform is { IsShape: true } or { IsBorder: true })
+        {
+            var path = platform.Shape?.PathForBounds(new RectF(platform.Frame.X, platform.Frame.Y, platform.Frame.Width, platform.Frame.Height));
+            sb.Append($" shape={platform.Shape?.GetType().Name ?? "null"} points={(path?.Points?.Count() ?? 0)}");
+        }
+        if (platform is { IsStepper: true })
+        {
+            sb.Append($" stepper={platform.StepperValue:0.##}");
+        }
+        if (platform is { IsRadioButton: true })
+        {
+            sb.Append($" radio={platform.RadioChecked}");
+        }
         if (platform is { IsNavigationPage: true })
         {
             sb.Append($" nav='{platform.NavTitle}' back={platform.CanGoBack}");

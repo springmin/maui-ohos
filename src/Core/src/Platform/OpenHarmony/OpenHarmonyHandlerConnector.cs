@@ -40,8 +40,11 @@ public static class OpenHarmonyHandlerConnector
     /// <summary>Connects the slice handler of a single element when it has none.</summary>
     public static void Connect(IElement? element)
     {
-        if (element?.Handler is null &&
-            FindSliceHandlerType(element.GetType()) is { } handlerType &&
+        if (element is null || element.Handler is not null)
+        {
+            return;
+        }
+        if (FindSliceHandlerType(element.GetType()) is { } handlerType &&
             HandlerFor(handlerType) is { } handler &&
             Context is not null)
         {

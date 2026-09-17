@@ -35,9 +35,5 @@ internal static class OpenHarmonyContentArrange
         }
         view.Measure(frame.Width, frame.Height);
         view.Arrange(frame);
-        if (view.Handler is IViewHandler viewHandler)
-        {
-            viewHandler.PlatformArrange(frame);
-        }
     }
 }

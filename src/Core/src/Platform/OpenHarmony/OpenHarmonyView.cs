@@ -71,6 +71,32 @@ public class OpenHarmonyView
     /// <summary>True when this view keeps redrawing on its own (activity indicators).</summary>
     public bool NeedsAnimation => IsActivityIndicator && IsRunning;
 
+    // Shape support (Rectangle/Ellipse/Line/Path/Polygon/Polyline/RoundRectangle)
+    public bool IsShape { get; set; }
+    public Microsoft.Maui.Graphics.IShape? Shape { get; set; }
+    public Paint? ShapeFill { get; set; }
+    public Color ShapeStroke { get; set; } = Colors.White;
+    public float ShapeStrokeThickness { get; set; } = 1f;
+
+    // Border support
+    public bool IsBorder { get; set; }
+    public Color BorderStroke { get; set; } = Colors.Gray;
+    public float BorderStrokeThickness { get; set; } = 1f;
+
+    // Stepper support
+    public bool IsStepper { get; set; }
+    public double StepperValue { get; set; }
+    public double StepperMinimum { get; set; }
+    public double StepperMaximum { get; set; } = 100;
+    public double StepperInterval { get; set; } = 1;
+    /// <summary>Invoked with true (increment) or false (decrement) when a stepper half is tapped.</summary>
+    public Action<bool>? StepperStep { get; set; }
+
+    // Radio button support
+    public bool IsRadioButton { get; set; }
+    public bool RadioChecked { get; set; }
+    public Color RadioColor { get; set; } = Colors.DodgerBlue;
+
     // Navigation page support
     public bool IsNavigationPage { get; set; }
     public float NavBarHeight { get; set; } = 48f;
@@ -132,6 +158,21 @@ public class OpenHarmonyView
         if (IsNavigationPage)
         {
             DrawNavigationBar(canvas, frame);
+            return;
+        }
+        if (IsShape || IsBorder)
+        {
+            DrawShape(canvas, frame);
+            return;
+        }
+        if (IsStepper)
+        {
+            DrawStepper(canvas, frame);
+            return;
+        }
+        if (IsRadioButton)
+        {
+            DrawRadioButton(canvas, frame);
             return;
         }
         if (IsCheckBox)
@@ -207,6 +248,65 @@ public class OpenHarmonyView
         }
         Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
             ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
+    }
+
+    /// <summary>Fills/strokes a shape (IShape.PathForBounds) inside the frame.</summary>
+    private void DrawShape(MauiCanvas canvas, RectF frame)
+    {
+        Microsoft.Maui.Graphics.PathF? path = Shape?.PathForBounds(new RectF(frame.X, frame.Y, frame.Width, frame.Height));
+        if (path is null)
+        {
+            return;
+        }
+        Color? fill = (ShapeFill as SolidPaint)?.Color;
+        if (fill is not null)
+        {
+            canvas.FillColor = fill;
+            canvas.FillPath(path);
+        }
+        Color stroke = IsBorder ? BorderStroke : ShapeStroke;
+        float thickness = IsBorder ? BorderStrokeThickness : ShapeStrokeThickness;
+        if (thickness > 0 && stroke.Alpha > 0)
+        {
+            canvas.StrokeColor = stroke;
+            canvas.StrokeSize = thickness;
+            canvas.DrawPath(path);
+        }
+    }
+
+    private void DrawStepper(MauiCanvas canvas, RectF frame)
+    {
+        float height = Math.Min(frame.Height, 32f);
+        float y = frame.Y + (frame.Height - height) / 2f;
+        canvas.FillColor = Background ?? Colors.DimGray;
+        canvas.FillRoundedRectangle(frame.X, y, frame.Width, height, 6);
+        canvas.FontColor = TextColor;
+        canvas.FontSize = 26;
+        canvas.DrawString("-", frame.X, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString("+", frame.X + frame.Width / 2, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString($"{StepperValue:0.##}", frame.X, frame.Y - 22, frame.Width, 20, HorizontalAlignment.Center, VerticalAlignment.Center);
+    }
+
+    private void DrawRadioButton(MauiCanvas canvas, RectF frame)
+    {
+        float side = Math.Min(Math.Min(frame.Width, frame.Height), 26f);
+        float cx = frame.X + side / 2 + 2;
+        float cy = frame.Y + frame.Height / 2f;
+        canvas.StrokeColor = RadioColor;
+        canvas.StrokeSize = 2;
+        canvas.DrawCircle(cx, cy, side / 2);
+        if (RadioChecked)
+        {
+            canvas.FillColor = RadioColor;
+            canvas.FillCircle(cx, cy, side / 2 - 4);
+        }
+        if (!string.IsNullOrEmpty(Text))
+        {
+            canvas.FontColor = TextColor;
+            canvas.FontSize = FontSize;
+            canvas.DrawString(Text, cx + side, frame.Y, frame.Width - side - 4, frame.Height,
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
     }
 
     private void DrawNavigationBar(MauiCanvas canvas, RectF frame)
@@ -328,6 +428,41 @@ public class OpenHarmonyView
         foreach (OpenHarmonyView child in Children)
         {
             handled |= child.OnTouch(down, up, x, y);
+        }
+        if (IsStepper)
+        {
+            if (down && HitTest(x, y))
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                if (HitTest(x, y))
+                {
+                    bool increment = x >= Frame.X + Frame.Width / 2;
+                    StepperStep?.Invoke(increment);
+                }
+                return true;
+            }
+        }
+        if (IsRadioButton)
+        {
+            if (down && HitTest(x, y))
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                if (HitTest(x, y))
+                {
+                    Tap?.Invoke();
+                }
+                return true;
+            }
         }
         if (IsNavigationPage)
         {

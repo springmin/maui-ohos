@@ -58,6 +58,7 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
     {
         PlatformView.ViewChildren.Clear();
         _items.Clear();
+        RectF frame = PlatformView.Frame;
         double y = 0;
         if (VirtualView?.ItemsSource is not null)
         {
@@ -66,13 +67,28 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
                 IView view = CreateItemView(item);
                 view.Measure(width, double.PositiveInfinity);
                 Size size = view.DesiredSize;
-                view.Arrange(new Rect(0, y, width, size.Height));
+                view.Arrange(new Rect(frame.X, frame.Y + y, width, size.Height));
+                if (view.Handler?.PlatformView is OpenHarmonyView itemPlatform)
+                {
+                    // Tapping anywhere in an item selects it (the slice dispatches taps itself).
+                    object? captured = item;
+                    itemPlatform.Tap = () => Select(captured);
+                }
                 PlatformView.ViewChildren.Add(view);
                 _items.Add(view);
                 y += size.Height + 6;
             }
         }
         _contentHeight = y;
+    }
+
+    private void Select(object? item)
+    {
+        if (VirtualView is { } collection && collection.SelectionMode != SelectionMode.None)
+        {
+            collection.SelectedItem = item;
+            OpenHarmonyBridge.RequestRedraw();
+        }
     }
 
     private IView CreateItemView(object? item)

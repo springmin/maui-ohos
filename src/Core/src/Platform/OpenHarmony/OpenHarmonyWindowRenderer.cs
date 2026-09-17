@@ -72,6 +72,30 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
+            // View transforms (animations set these): opacity, translation, scale, rotation.
+            bool transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
+                               view.Scale != 1.0 || view.Rotation != 0;
+            if (transformed)
+            {
+                _canvas.SaveState();
+                _canvas.Alpha = (float)Math.Clamp(view.Opacity, 0, 1);
+                if (view.TranslationX != 0 || view.TranslationY != 0)
+                {
+                    _canvas.Translate((float)view.TranslationX, (float)view.TranslationY);
+                }
+                if (view.Rotation != 0 || view.Scale != 1.0)
+                {
+                    RectF frame = platform.Frame;
+                    _canvas.Rotate((float)view.Rotation, frame.Center.X, frame.Center.Y);
+                    if (view.Scale != 1.0)
+                    {
+                        // ICanvas.Scale has no centre overload: translate around the centre.
+                        _canvas.Translate(frame.Center.X, frame.Center.Y);
+                        _canvas.Scale((float)view.Scale, (float)view.Scale);
+                        _canvas.Translate(-frame.Center.X, -frame.Center.Y);
+                    }
+                }
+            }
             platform.Draw(_canvas);
             if (platform.IsScrollView)
             {
@@ -100,6 +124,13 @@ public sealed class OpenHarmonyWindowRenderer
     private OpenHarmonyView? _dragScrollTarget;
     private OpenHarmonyView? _dragSliderTarget;
     private float _dragLastY;
+    private IView? _panTarget;
+    private int _panGestureId = -1;
+    private float _panStartX;
+    private float _panStartY;
+    private float _downX;
+    private float _downY;
+    private bool _moved;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
     public bool HasAnimations(IView? root) => TreeHasAnimations(root);
@@ -127,6 +158,16 @@ public sealed class OpenHarmonyWindowRenderer
     /// <summary>Handles a touch/mouse move: drags the slider or scrolls the scroll view captured on down.</summary>
     public bool HandleMove(float x, float y)
     {
+        // Touch slop: a drag must not end up as a tap/selection.
+        if (!_moved && (Math.Abs(x - _downX) > 8 || Math.Abs(y - _downY) > 8))
+        {
+            _moved = true;
+        }
+        if (_panTarget is { } panTarget)
+        {
+            OpenHarmonyGestures.SendPan(panTarget, x - _panStartX, y - _panStartY, _panGestureId);
+            return true;
+        }
         if (_dragSliderTarget is { IsSlider: true } slider)
         {
             float fraction = slider.SliderValueFromX(x);
@@ -155,12 +196,31 @@ public sealed class OpenHarmonyWindowRenderer
         // overwrite it as it descends into leaves.
         if (down)
         {
+            _downX = x;
+            _downY = y;
+            _moved = false;
             _dragScrollTarget = FindScrollView(root, x, y);
             _dragSliderTarget = FindSlider(root, x, y);
             _dragLastY = y;
+            _panTarget = null;
+            _panGestureId = -1;
+            if (FindGestureTarget(root, x, y) is { } panCandidate &&
+                OpenHarmonyGestures.HasPan(panCandidate))
+            {
+                _panTarget = panCandidate;
+                _panStartX = x;
+                _panStartY = y;
+                _panGestureId = OpenHarmonyGestures.StartPan(panCandidate, x, y);
+            }
         }
         else if (up)
         {
+            if (_panTarget is { } panTarget)
+            {
+                OpenHarmonyGestures.CompletePan(panTarget, _panGestureId);
+                _panTarget = null;
+                _panGestureId = -1;
+            }
             if (_dragSliderTarget is { IsSlider: true } slider)
             {
                 _dragSliderTarget = null;
@@ -190,11 +250,49 @@ public sealed class OpenHarmonyWindowRenderer
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
             // Views handle their own touches (buttons, navigation bars); plain views ignore them.
-            handled |= platform.OnTouch(down, up, x, y);
+            // A drag never counts as a tap.
+            handled |= platform.OnTouch(down, up && !_moved, x, y);
             // Scroll views consume touches inside them (drag scrolling).
             handled |= platform.IsScrollView && platform.Frame.Contains(x, y);
+            // Gesture recognizers run for the deepest view under the finger.
+            if (platform.Frame.Contains(x, y) && OpenHarmonyGestures.HasGestures(view))
+            {
+                if (up && !_moved)
+                {
+                    handled |= OpenHarmonyGestures.SendTap(view, x, y);
+                }
+                else if (down)
+                {
+                    handled = true;
+                }
+            }
         }
         return handled;
+    }
+
+    /// <summary>Deepest view containing the point that owns gesture recognizers.</summary>
+    private IView? FindGestureTarget(IView view, float x, float y)
+    {
+        IView? found = null;
+        float localX = x;
+        float localY = y;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            if (!platform.Frame.Contains(x, y))
+            {
+                return null;
+            }
+            if (platform.IsScrollView)
+            {
+                localX += platform.ScrollOffsetX;
+                localY += platform.ScrollOffsetY;
+            }
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            found = FindGestureTarget(child, localX, localY) ?? found;
+        }
+        return found ?? (OpenHarmonyGestures.HasGestures(view) ? view : null);
     }
 
     /// <summary>Slider containing the point (the nearest ancestor wins).</summary>
@@ -306,6 +404,10 @@ public sealed class OpenHarmonyWindowRenderer
         if (platform is { IsRadioButton: true })
         {
             sb.Append($" radio={platform.RadioChecked}");
+        }
+        if (view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 || view.Scale != 1.0 || view.Rotation != 0)
+        {
+            sb.Append($" transform=(opacity={view.Opacity:0.##} t=({view.TranslationX:0.#},{view.TranslationY:0.#}) scale={view.Scale:0.##} rot={view.Rotation:0.#})");
         }
         if (platform is { IsNavigationPage: true })
         {

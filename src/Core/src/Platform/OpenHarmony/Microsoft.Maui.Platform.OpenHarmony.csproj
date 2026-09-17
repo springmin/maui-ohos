@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <AssemblyName>Microsoft.Maui.Platform.OpenHarmony</AssemblyName>
+    <RootNamespace>Microsoft.Maui.Platform</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>$(NoWarn);CA1418</NoWarn>
+    <!-- The platform bridge (Microsoft.OpenHarmony.Hosting) ships in the OpenHarmony platform
+         workload packs; point this at a built or installed copy when building outside the
+         workload repo. -->
+    <OpenHarmonyHostingAssembly Condition=" '$(OpenHarmonyHostingAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Hosting/bin/Release/net11.0/Microsoft.OpenHarmony.Hosting.dll</OpenHarmonyHostingAssembly>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Core" Version="11.0.0-rc.1.26451.6" />
+    <PackageReference Include="Microsoft.Maui.Graphics" Version="11.0.0-rc.1.26451.6" />
+    <Reference Include="Microsoft.OpenHarmony.Hosting">
+      <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

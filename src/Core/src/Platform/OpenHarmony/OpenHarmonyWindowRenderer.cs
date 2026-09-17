@@ -207,7 +207,10 @@ public sealed class OpenHarmonyWindowRenderer
     {
         // An open dropdown owns all touches until it is used or dismissed. The popup is found
         // in the tree (it must also work when nothing has been drawn yet, e.g. in tests).
-        _popupView ??= FindOpenPopup(root);
+        if (_popupView is not { PopupVisible: true })
+        {
+            _popupView = FindOpenPopup(root);
+        }
         if (_popupView is { PopupVisible: true } popup)
         {
             if (down)

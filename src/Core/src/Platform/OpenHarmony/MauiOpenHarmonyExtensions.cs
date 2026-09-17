@@ -35,6 +35,8 @@ public static class MauiOpenHarmonyExtensions
         [typeof(IRadioButton)] = typeof(OpenHarmonyRadioButtonHandler),
         [typeof(ISearchBar)] = typeof(OpenHarmonySearchBarHandler),
         [typeof(IPicker)] = typeof(OpenHarmonyPickerHandler),
+        [typeof(IDatePicker)] = typeof(OpenHarmonyDatePickerHandler),
+        [typeof(ITimePicker)] = typeof(OpenHarmonyTimePickerHandler),
         [typeof(Microsoft.Maui.Controls.TabbedPage)] = typeof(OpenHarmonyTabbedPageHandler),
     };
 

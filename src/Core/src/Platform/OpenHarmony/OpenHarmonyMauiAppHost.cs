@@ -54,22 +54,31 @@ public sealed class OpenHarmonyMauiAppHost
 
         OpenHarmonyBridge.LifecycleChanged += e =>
         {
-            switch (e)
+            // MAUI's IWindow lifecycle expects a platform window handler; until this slice
+            // provides one the events are best-effort (an exception must not stop the app).
+            try
             {
-                case OpenHarmonyLifecycleEvent.Create:
-                    _window?.Activated();
-                    break;
-                case OpenHarmonyLifecycleEvent.Foreground:
-                    _window?.Resumed();
-                    break;
-                case OpenHarmonyLifecycleEvent.Background:
-                    _window?.Stopped();
-                    break;
-                case OpenHarmonyLifecycleEvent.Destroy:
-                    _window?.Destroying();
-                    break;
+                switch (e)
+                {
+                    case OpenHarmonyLifecycleEvent.Create:
+                        _window?.Activated();
+                        break;
+                    case OpenHarmonyLifecycleEvent.Foreground:
+                        _window?.Resumed();
+                        break;
+                    case OpenHarmonyLifecycleEvent.Background:
+                        _window?.Stopped();
+                        break;
+                    case OpenHarmonyLifecycleEvent.Destroy:
+                        _window?.Destroying();
+                        break;
+                }
+                OpenHarmonyBridge.WriteStatus($"[maui] lifecycle {e} (window={_window?.GetType().Name})");
             }
-            OpenHarmonyBridge.WriteStatus($"[maui] lifecycle {e} (window={_window?.GetType().Name})");
+            catch (Exception ex)
+            {
+                OpenHarmonyBridge.WriteStatus($"[maui] lifecycle {e} ignored: {ex.GetType().Name}: {ex.Message}");
+            }
         };
     }
 
@@ -88,7 +97,7 @@ public sealed class OpenHarmonyMauiAppHost
         ConnectTree(_window);
         ConnectTree(_window.Content);
         OpenHarmonyBridge.WriteStatus($"[maui] window created ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
-        _window.Activated();
+        // The platform's Create lifecycle event activates the window.
         _dirty = true;
     }
 

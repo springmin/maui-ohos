@@ -97,6 +97,25 @@ public class OpenHarmonyView
     public bool RadioChecked { get; set; }
     public Color RadioColor { get; set; } = Colors.DodgerBlue;
 
+    // Picker support (inline dropdown rendered as an overlay)
+    public bool IsPicker { get; set; }
+    public List<string> PopupItems { get; } = new();
+    public bool PopupVisible { get; set; }
+    public int PopupSelectedIndex { get; set; } = -1;
+    public string? PopupTitle { get; set; }
+    public Action<int>? PopupSelect { get; set; }
+    public Action? PopupClosed { get; set; }
+
+    /// <summary>Height of one dropdown row.</summary>
+    public const float PopupRowHeight = 46f;
+
+    // Tabbed page support
+    public bool IsTabbedPage { get; set; }
+    public List<string> TabTitles { get; } = new();
+    public int SelectedTab { get; set; }
+    public Action<int>? TabSelected { get; set; }
+    public const float TabBarHeight = 56f;
+
     // Navigation page support
     public bool IsNavigationPage { get; set; }
     public float NavBarHeight { get; set; } = 48f;
@@ -163,6 +182,16 @@ public class OpenHarmonyView
         if (IsShape || IsBorder)
         {
             DrawShape(canvas, frame);
+            return;
+        }
+        if (IsPicker)
+        {
+            DrawPicker(canvas, frame);
+            return;
+        }
+        if (IsTabbedPage)
+        {
+            DrawTabBar(canvas, frame);
             return;
         }
         if (IsStepper)
@@ -248,6 +277,102 @@ public class OpenHarmonyView
         }
         Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
             ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
+    }
+
+    private void DrawPicker(MauiCanvas canvas, RectF frame)
+    {
+        canvas.FontColor = TextColor;
+        canvas.FontSize = FontSize;
+        string text = Text ?? string.Empty;
+        canvas.DrawString(text, frame.X + 12, frame.Y, frame.Width - 44, frame.Height,
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+        canvas.StrokeColor = TextColor;
+        canvas.StrokeSize = 2;
+        float cx = frame.X + frame.Width - 20;
+        float cy = frame.Y + frame.Height / 2f;
+        canvas.DrawLine(cx - 8, cy - 4, cx, cy + 5);
+        canvas.DrawLine(cx, cy + 5, cx + 8, cy - 4);
+    }
+
+    /// <summary>Draws the open dropdown on top of everything else.</summary>
+    public void DrawPopup(MauiCanvas canvas)
+    {
+        RectF frame = Frame;
+        if (!PopupVisible || PopupItems.Count == 0)
+        {
+            return;
+        }
+        float width = Math.Max(frame.Width, 220f);
+        float height = PopupItems.Count * PopupRowHeight;
+        float x = frame.X;
+        float y = frame.Y + frame.Height;
+        canvas.FillColor = Colors.Black;
+        canvas.FillRectangle(x, y, width, height);
+        canvas.StrokeColor = Colors.Gray;
+        canvas.StrokeSize = 1;
+        canvas.DrawRectangle(x, y, width, height);
+        canvas.FontSize = FontSize;
+        for (int i = 0; i < PopupItems.Count; i++)
+        {
+            float rowY = y + i * PopupRowHeight;
+            canvas.FontColor = i == PopupSelectedIndex ? Colors.DodgerBlue : Colors.White;
+            canvas.DrawString(PopupItems[i], x + 16, rowY, width - 32, PopupRowHeight,
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+    }
+
+    /// <summary>Index of the dropdown row at the point (-1 when outside the popup).</summary>
+    public int PopupIndexAt(float x, float y)
+    {
+        RectF frame = Frame;
+        if (!PopupVisible)
+        {
+            return -1;
+        }
+        float width = Math.Max(frame.Width, 220f);
+        float top = frame.Y + frame.Height;
+        if (x < frame.X || x > frame.X + width || y < top)
+        {
+            return -1;
+        }
+        int index = (int)((y - top) / PopupRowHeight);
+        return index >= 0 && index < PopupItems.Count ? index : -1;
+    }
+
+    private void DrawTabBar(MauiCanvas canvas, RectF frame)
+    {
+        float barY = frame.Y + frame.Height - TabBarHeight;
+        canvas.FillColor = Colors.Black;
+        canvas.FillRectangle(frame.X, barY, frame.Width, TabBarHeight);
+        if (TabTitles.Count == 0)
+        {
+            return;
+        }
+        float tabWidth = frame.Width / TabTitles.Count;
+        canvas.FontSize = FontSize;
+        for (int i = 0; i < TabTitles.Count; i++)
+        {
+            canvas.FontColor = i == SelectedTab ? Colors.DodgerBlue : Colors.Gray;
+            canvas.DrawString(TabTitles[i], frame.X + i * tabWidth, barY, tabWidth, TabBarHeight,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+    }
+
+    /// <summary>Tab index at the point (-1 when outside the tab bar).</summary>
+    public int TabIndexAt(float x, float y)
+    {
+        RectF frame = Frame;
+        if (!IsTabbedPage || TabTitles.Count == 0)
+        {
+            return -1;
+        }
+        if (y < frame.Y + frame.Height - TabBarHeight || x < frame.X || x > frame.X + frame.Width)
+        {
+            return -1;
+        }
+        float tabWidth = frame.Width / TabTitles.Count;
+        int index = (int)((x - frame.X) / tabWidth);
+        return index >= 0 && index < TabTitles.Count ? index : -1;
     }
 
     /// <summary>Fills/strokes a shape (IShape.PathForBounds) inside the frame.</summary>
@@ -428,6 +553,41 @@ public class OpenHarmonyView
         foreach (OpenHarmonyView child in Children)
         {
             handled |= child.OnTouch(down, up, x, y);
+        }
+        if (IsTabbedPage)
+        {
+            int tab = TabIndexAt(x, y);
+            if (down && tab >= 0)
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                if (tab >= 0)
+                {
+                    TabSelected?.Invoke(tab);
+                }
+                return true;
+            }
+        }
+        if (IsPicker)
+        {
+            if (down && HitTest(x, y))
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                if (HitTest(x, y))
+                {
+                    Tap?.Invoke();
+                }
+                return true;
+            }
         }
         if (IsStepper)
         {

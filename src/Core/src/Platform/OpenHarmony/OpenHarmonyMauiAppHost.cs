@@ -20,6 +20,10 @@ public sealed class OpenHarmonyMauiAppHost
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
         _context = new MauiContext(services);
+        // Bindable objects created outside the service scope (TabbedPage/MultiPage, ...) resolve
+        // their dispatcher through this provider.
+        Microsoft.Maui.Dispatching.DispatcherProvider.SetCurrent(
+            new OpenHarmonyDispatcherProvider(services.GetRequiredService<Microsoft.Maui.Dispatching.IDispatcher>()));
         _renderer = services.GetRequiredService<OpenHarmonyWindowRenderer>();
         _surface = services.GetRequiredService<OpenHarmonyWindowSurface>();
 

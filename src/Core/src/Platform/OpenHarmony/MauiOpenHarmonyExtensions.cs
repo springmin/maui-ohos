@@ -34,6 +34,8 @@ public static class MauiOpenHarmonyExtensions
         [typeof(IStepper)] = typeof(OpenHarmonyStepperHandler),
         [typeof(IRadioButton)] = typeof(OpenHarmonyRadioButtonHandler),
         [typeof(ISearchBar)] = typeof(OpenHarmonySearchBarHandler),
+        [typeof(IPicker)] = typeof(OpenHarmonyPickerHandler),
+        [typeof(Microsoft.Maui.Controls.TabbedPage)] = typeof(OpenHarmonyTabbedPageHandler),
     };
 
     /// <summary>
@@ -43,6 +45,10 @@ public static class MauiOpenHarmonyExtensions
     public static MauiAppBuilder UseOpenHarmony(this MauiAppBuilder builder)
     {
         builder.Services.AddSingleton<IDispatcher, OpenHarmonyDispatcher>();
+        builder.Services.AddSingleton<Microsoft.Maui.Dispatching.IDispatcherProvider, OpenHarmonyDispatcherProvider>();
+        // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
+        builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
+        builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();
         builder.Services.AddSingleton<OpenHarmonyWindowSurface>();
         builder.Services.AddSingleton<OpenHarmonyWindowRenderer>();
         builder.Services.AddSingleton<OpenHarmonyMauiAppHost>();

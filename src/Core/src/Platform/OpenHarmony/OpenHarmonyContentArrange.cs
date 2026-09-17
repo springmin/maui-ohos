@@ -14,6 +14,9 @@ internal static class OpenHarmonyContentArrange
         {
             return;
         }
+        // Pages can appear after the tree was connected (tab switches, navigation): make sure
+        // every view in the chain has its handler before it is measured.
+        OpenHarmonyHandlerConnector.ConnectTree(view);
         if (view is NavigationPage navigation)
         {
             // Containers keep a frame of their own: hit-testing walks the parent chain.

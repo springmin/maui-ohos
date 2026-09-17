@@ -2,6 +2,7 @@
 // Microsoft.Maui.Graphics canvas and route taps to the handlers' platform views.
 using System.Text;
 using Microsoft.Maui.Graphics;
+using Microsoft.OpenHarmony.Hosting;
 using HostCanvas = Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas;
 using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
 
@@ -26,7 +27,13 @@ public sealed class OpenHarmonyWindowRenderer
         }
         _canvas.FillColor = BackgroundColor;
         _canvas.FillRectangle(0, 0, width, height);
+        _popupView = null;
         DrawView(content);
+        if (_popupView is { PopupVisible: true } popup)
+        {
+            // Dropdowns float above the rest of the tree.
+            popup.DrawPopup(_canvas);
+        }
         HostCanvas.Present();
         return true;
     }
@@ -97,6 +104,11 @@ public sealed class OpenHarmonyWindowRenderer
                 }
             }
             platform.Draw(_canvas);
+            if (platform.PopupVisible)
+            {
+                // Drawn last so the dropdown floats above the rest of the tree.
+                _popupView = platform;
+            }
             if (platform.IsScrollView)
             {
                 // Clip to the viewport and translate the content by the scroll offsets.
@@ -131,6 +143,7 @@ public sealed class OpenHarmonyWindowRenderer
     private float _downX;
     private float _downY;
     private bool _moved;
+    private OpenHarmonyView? _popupView;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
     public bool HasAnimations(IView? root) => TreeHasAnimations(root);
@@ -192,6 +205,34 @@ public sealed class OpenHarmonyWindowRenderer
 
     public bool HandleTouch(IView root, bool down, bool up, float x, float y)
     {
+        // An open dropdown owns all touches until it is used or dismissed. The popup is found
+        // in the tree (it must also work when nothing has been drawn yet, e.g. in tests).
+        _popupView ??= FindOpenPopup(root);
+        if (_popupView is { PopupVisible: true } popup)
+        {
+            if (down)
+            {
+                _downX = x;
+                _downY = y;
+                _moved = false;
+                return true;
+            }
+            if (up && !_moved)
+            {
+                int index = popup.PopupIndexAt(x, y);
+                if (index >= 0)
+                {
+                    popup.PopupSelect?.Invoke(index);
+                }
+                else
+                {
+                    popup.PopupVisible = false;
+                    popup.PopupClosed?.Invoke();
+                    OpenHarmonyBridge.RequestRedraw();
+                }
+            }
+            return true;
+        }
         // The drag target is resolved once at the top level; the recursive walk must not
         // overwrite it as it descends into leaves.
         if (down)
@@ -268,6 +309,24 @@ public sealed class OpenHarmonyWindowRenderer
             }
         }
         return handled;
+    }
+
+    /// <summary>First platform view in the tree with an open dropdown.</summary>
+    private OpenHarmonyView? FindOpenPopup(IView view)
+    {
+        if (view.Handler?.PlatformView is OpenHarmonyView { PopupVisible: true } popup)
+        {
+            return popup;
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            OpenHarmonyView? found = FindOpenPopup(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+        return null;
     }
 
     /// <summary>Deepest view containing the point that owns gesture recognizers.</summary>

@@ -13,6 +13,11 @@ public sealed class OpenHarmonyWindowRenderer
     /// <summary>Canvas factory: tests substitute a managed rasterizer for pixel assertions.</summary>
     public static Func<MauiCanvas>? CanvasFactory { get; set; }
 
+    /// <summary>Surface hooks: tests report a virtual surface so rendering runs without a device.</summary>
+    public static Func<int, int, bool>? SurfaceBegin { get; set; }
+
+    public static Action? SurfacePresent { get; set; }
+
     private readonly MauiCanvas _canvas;
 
     public OpenHarmonyWindowRenderer()
@@ -28,7 +33,8 @@ public sealed class OpenHarmonyWindowRenderer
         content.Measure(width, height);
         content.Arrange(new Rect(0, 0, width, height));
 
-        if (!HostCanvas.Begin(width, height))
+        bool surfaceReady = SurfaceBegin is not null ? SurfaceBegin(width, height) : HostCanvas.Begin(width, height);
+        if (!surfaceReady)
         {
             // No surface yet (or the host refuses); the tree is still arranged.
             return false;
@@ -48,7 +54,14 @@ public sealed class OpenHarmonyWindowRenderer
             // Dropdowns float above the rest of the tree.
             popup.DrawPopup(_canvas);
         }
-        HostCanvas.Present();
+        if (SurfacePresent is not null)
+        {
+            SurfacePresent();
+        }
+        else
+        {
+            HostCanvas.Present();
+        }
         return true;
     }
 

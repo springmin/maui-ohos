@@ -15,6 +15,7 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
         {
             [nameof(ItemsView.ItemsSource)] = MapItemsSource,
             [nameof(ItemsView.ItemTemplate)] = MapItemTemplate,
+            [nameof(SelectableItemsView.SelectedItem)] = MapSelectedItem,
         };
 
     public OpenHarmonyCollectionViewHandler() : base(Mapper) { }
@@ -76,7 +77,7 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
         if (VirtualView is { } collection && collection.SelectionMode != SelectionMode.None)
         {
             collection.SelectedItem = item;
-            OpenHarmonyBridge.RequestRedraw();
+            MapSelectedItem(this, collection);
         }
     }
 
@@ -100,4 +101,24 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
 
     public static void MapItemTemplate(OpenHarmonyCollectionViewHandler handler, CollectionView collectionView)
         => handler._materializer?.Reset();
+
+    /// <summary>Highlights the selected row by tinting the materialized items.</summary>
+    public static void MapSelectedItem(OpenHarmonyCollectionViewHandler handler, CollectionView collectionView)
+    {
+        if (handler.PlatformView is not OpenHarmonyView platform)
+        {
+            return;
+        }
+        foreach (IView child in platform.ViewChildren)
+        {
+            if (child.Handler?.PlatformView is OpenHarmonyView itemPlatform)
+            {
+                bool selected = collectionView.SelectedItem is not null &&
+                                ReferenceEquals((child as Microsoft.Maui.Controls.BindableObject)?.BindingContext,
+                                                collectionView.SelectedItem);
+                itemPlatform.Background = selected ? Colors.DodgerBlue.WithAlpha(0.35f) : null;
+            }
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
 }

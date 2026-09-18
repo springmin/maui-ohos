@@ -10,7 +10,15 @@ namespace Microsoft.Maui.Platform;
 
 public sealed class OpenHarmonyWindowRenderer
 {
-    private readonly MauiCanvas _canvas = new();
+    /// <summary>Canvas factory: tests substitute a managed rasterizer for pixel assertions.</summary>
+    public static Func<MauiCanvas>? CanvasFactory { get; set; }
+
+    private readonly MauiCanvas _canvas;
+
+    public OpenHarmonyWindowRenderer()
+    {
+        _canvas = CanvasFactory?.Invoke() ?? new MauiCanvas();
+    }
 
     public Color BackgroundColor { get; set; } = Colors.DarkSlateBlue;
 

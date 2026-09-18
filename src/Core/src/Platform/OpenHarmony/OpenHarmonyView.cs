@@ -78,6 +78,14 @@ public class OpenHarmonyView
     /// <summary>Raised when image bytes are blitted (tests observe the destination rect).</summary>
     public static Action<RectF>? ImageDrawn;
 
+    // Indicator view support
+    public bool IsIndicatorView { get; set; }
+    public int IndicatorCount { get; set; }
+    public int IndicatorPosition { get; set; }
+    public Color DotsColor { get; set; } = Colors.Gray;
+    public Color SelectedDotsColor { get; set; } = Colors.White;
+    public float DotsSize { get; set; } = 6f;
+
     // Shape support (Rectangle/Ellipse/Line/Path/Polygon/Polyline/RoundRectangle)
     public bool IsShape { get; set; }
     public Microsoft.Maui.Graphics.IShape? Shape { get; set; }
@@ -89,6 +97,10 @@ public class OpenHarmonyView
     public bool IsBorder { get; set; }
     public Color BorderStroke { get; set; } = Colors.Gray;
     public float BorderStrokeThickness { get; set; } = 1f;
+
+    /// <summary>Optional stroke drawn around the view's frame (buttons, frames).</summary>
+    public Color? StrokeColor { get; set; }
+    public float StrokeThickness { get; set; }
 
     /// <summary>Disabled views paint their colours at half alpha (set by the renderer).</summary>
     public bool Dimmed { get; set; }
@@ -402,6 +414,11 @@ public class OpenHarmonyView
             DrawFlyoutChrome(canvas, frame);
             return;
         }
+        if (IsIndicatorView)
+        {
+            DrawIndicatorView(canvas, frame);
+            return;
+        }
         if (IsPicker)
         {
             DrawPicker(canvas, frame);
@@ -454,6 +471,19 @@ public class OpenHarmonyView
         {
             DrawActivityIndicator(canvas, frame);
             return;
+        }
+        if (StrokeColor is { } outline && StrokeThickness > 0)
+        {
+            canvas.StrokeColor = outline;
+            canvas.StrokeSize = StrokeThickness;
+            if (CornerRadius > 0)
+            {
+                canvas.DrawRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
+            }
+            else
+            {
+                canvas.DrawRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+            }
         }
         if (ImageBytes is { Length: > 0 })
         {
@@ -662,6 +692,23 @@ public class OpenHarmonyView
         {
             float lineY = frame.Y + 15 + line * 7;
             canvas.DrawLine(frame.X + 13, lineY, frame.X + 31, lineY);
+        }
+    }
+
+    private void DrawIndicatorView(MauiCanvas canvas, RectF frame)
+    {
+        if (IndicatorCount <= 1)
+        {
+            return;
+        }
+        float spacing = Math.Max(DotsSize * 2.5f, 12f);
+        float startX = frame.X + (frame.Width - IndicatorCount * spacing) / 2f + spacing / 2f;
+        float y = frame.Y + frame.Height / 2f;
+        for (int i = 0; i < IndicatorCount; i++)
+        {
+            bool active = i == IndicatorPosition;
+            canvas.FillColor = active ? SelectedDotsColor : DotsColor;
+            canvas.FillCircle(startX + i * spacing, y, active ? DotsSize * 1.2f : DotsSize);
         }
     }
 

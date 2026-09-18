@@ -45,6 +45,30 @@ public static class MauiOpenHarmonyExtensions
     };
 
     /// <summary>
+    /// Wires the Essentials statics to the OpenHarmony implementations. MAUI keeps
+    /// Preferences.Current / FileSystem.Current as internal members set by the platform
+    /// assembly, which does not exist for this slice, so they are assigned reflectively.
+    /// </summary>
+    private static void InstallEssentials(Microsoft.Maui.Storage.IPreferences preferences,
+                                           Microsoft.Maui.Storage.IFileSystem fileSystem)
+    {
+        const System.Reflection.BindingFlags Static =
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        try
+        {
+            typeof(Microsoft.Maui.Storage.Preferences).GetProperty("Current", Static)
+                ?.SetValue(null, preferences);
+            typeof(Microsoft.Maui.Storage.FileSystem).GetProperty("Current", Static)
+                ?.SetValue(null, fileSystem);
+        }
+        catch (Exception ex)
+        {
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                $"[maui] essentials wiring failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
     /// Registers the OpenHarmony platform services (dispatcher + window surface) and the
     /// handler set with the MAUI app builder.
     /// </summary>
@@ -52,6 +76,13 @@ public static class MauiOpenHarmonyExtensions
     {
         builder.Services.AddSingleton<IDispatcher, OpenHarmonyDispatcher>();
         builder.Services.AddSingleton<Microsoft.Maui.Dispatching.IDispatcherProvider, OpenHarmonyDispatcherProvider>();
+        // Essentials: file-backed preferences/filesystem (the Essentials assembly ships with the
+        // MAUI controls package, so apps can use Preferences/FileSystem directly).
+        var preferences = new OpenHarmonyPreferences();
+        var fileSystem = new OpenHarmonyFileSystem();
+        builder.Services.AddSingleton<Microsoft.Maui.Storage.IPreferences>(preferences);
+        builder.Services.AddSingleton<Microsoft.Maui.Storage.IFileSystem>(fileSystem);
+        InstallEssentials(preferences, fileSystem);
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
         builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();

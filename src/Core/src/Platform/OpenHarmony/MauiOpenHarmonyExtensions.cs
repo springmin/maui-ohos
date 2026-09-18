@@ -59,7 +59,12 @@ public static class MauiOpenHarmonyExtensions
                                            Microsoft.Maui.Networking.IConnectivity connectivity,
                                            Microsoft.Maui.ApplicationModel.ILauncher launcher,
                                            Microsoft.Maui.ApplicationModel.IBrowser browser,
-                                           Microsoft.Maui.ApplicationModel.DataTransfer.IShare share)
+                                           Microsoft.Maui.ApplicationModel.DataTransfer.IShare share,
+                                           Microsoft.Maui.Devices.IVibration vibration,
+                                           Microsoft.Maui.ApplicationModel.IPermissions permissions,
+                                           Microsoft.Maui.Devices.Sensors.IGeolocation geolocation,
+                                           Microsoft.Maui.Storage.IFilePicker filePicker,
+                                           Microsoft.Maui.Media.IMediaPicker mediaPicker)
     {
         const System.Reflection.BindingFlags Static =
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
@@ -87,6 +92,16 @@ public static class MauiOpenHarmonyExtensions
                 ?.SetValue(null, browser);
             typeof(Microsoft.Maui.ApplicationModel.DataTransfer.Share).GetProperty("Current", Static)
                 ?.SetValue(null, share);
+            typeof(Microsoft.Maui.Devices.Vibration).GetProperty("Default", Static)
+                ?.SetValue(null, vibration);
+            typeof(Microsoft.Maui.ApplicationModel.Permissions).GetProperty("Default", Static)
+                ?.SetValue(null, permissions);
+            typeof(Microsoft.Maui.Devices.Sensors.Geolocation).GetProperty("Default", Static)
+                ?.SetValue(null, geolocation);
+            typeof(Microsoft.Maui.Storage.FilePicker).GetProperty("Default", Static)
+                ?.SetValue(null, filePicker);
+            typeof(Microsoft.Maui.Media.MediaPicker).GetProperty("Default", Static)
+                ?.SetValue(null, mediaPicker);
         }
         catch (Exception ex)
         {
@@ -118,6 +133,11 @@ public static class MauiOpenHarmonyExtensions
         var launcher = new OpenHarmonyLauncher();
         var browser = new OpenHarmonyBrowser();
         var share = new OpenHarmonyShare();
+        var vibration = new OpenHarmonyVibration();
+        var permissions = new OpenHarmonyPermissions();
+        var geolocation = new OpenHarmonyGeolocation();
+        var filePicker = new OpenHarmonyFilePicker();
+        var mediaPicker = new OpenHarmonyMediaPicker();
         builder.Services.AddSingleton<Microsoft.Maui.Storage.ISecureStorage>(secureStorage);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IAppInfo>(appInfo);
         builder.Services.AddSingleton<Microsoft.Maui.Devices.IDeviceInfo>(deviceInfo);
@@ -127,8 +147,14 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.ILauncher>(launcher);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IBrowser>(browser);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.DataTransfer.IShare>(share);
+        builder.Services.AddSingleton<Microsoft.Maui.Devices.IVibration>(vibration);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IPermissions>(permissions);
+        builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeolocation>(geolocation);
+        builder.Services.AddSingleton<Microsoft.Maui.Storage.IFilePicker>(filePicker);
+        builder.Services.AddSingleton<Microsoft.Maui.Media.IMediaPicker>(mediaPicker);
         InstallEssentials(preferences, fileSystem, secureStorage, appInfo, deviceInfo, versionTracking,
-            clipboard, connectivity, launcher, browser, share);
+            clipboard, connectivity, launcher, browser, share, vibration, permissions, geolocation,
+            filePicker, mediaPicker);
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
         builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();

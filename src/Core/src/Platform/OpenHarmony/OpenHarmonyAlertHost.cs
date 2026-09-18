@@ -4,6 +4,13 @@ using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 
+internal enum OpenHarmonyAlertKind
+{
+    Alert,
+    ActionSheet,
+    Prompt,
+}
+
 internal sealed class OpenHarmonyAlertState
 {
     public required string? Title { get; init; }
@@ -11,6 +18,12 @@ internal sealed class OpenHarmonyAlertState
     public required string? Accept { get; init; }
     public required string? Cancel { get; init; }
     public required Action<bool> Complete { get; init; }
+    public OpenHarmonyAlertKind Kind { get; init; } = OpenHarmonyAlertKind.Alert;
+    /// <summary>Action sheet entries (both option buttons and the cancel title).</summary>
+    public IReadOnlyList<string> Options { get; init; } = Array.Empty<string>();
+    public Action<string>? CompleteOption { get; init; }
+    public Action<string?>? CompleteText { get; init; }
+    public string PromptText { get; set; } = string.Empty;
 }
 
 internal static class OpenHarmonyAlertHost
@@ -50,6 +63,50 @@ internal static class OpenHarmonyAlertHost
             float width = (float)Math.Min(640, Math.Max(320, Width - 160));
             float height = 260;
             return new RectF((float)((Width - width) / 2), (float)((Height - height) / 2), width, height);
+        }
+    }
+
+    /// <summary>Row rects of an action sheet (options then cancel).</summary>
+    public static RectF OptionRect(int index)
+    {
+        RectF box = BoxRect;
+        float rowHeight = 64;
+        return new RectF(box.X, box.Y + 56 + index * rowHeight, box.Width, rowHeight);
+    }
+
+    public static int OptionIndexAt(float x, float y)
+    {
+        if (Current is not { Kind: OpenHarmonyAlertKind.ActionSheet } sheet)
+        {
+            return -1;
+        }
+        for (int i = 0; i < sheet.Options.Count; i++)
+        {
+            if (OptionRect(i).Contains(x, y))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public static RectF PromptAcceptRect => AcceptRect;
+
+    public static void PromptAppend(string text)
+    {
+        if (Current is { Kind: OpenHarmonyAlertKind.Prompt } prompt)
+        {
+            prompt.PromptText += text;
+            Changed?.Invoke();
+        }
+    }
+
+    public static void PromptBackspace()
+    {
+        if (Current is { Kind: OpenHarmonyAlertKind.Prompt } prompt && prompt.PromptText.Length > 0)
+        {
+            prompt.PromptText = prompt.PromptText[..^1];
+            Changed?.Invoke();
         }
     }
 

@@ -87,6 +87,28 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas.DrawString(alert.Message ?? string.Empty, box.X + 20, box.Y + 60, box.Width - 40, box.Height - 140,
             HorizontalAlignment.Left, VerticalAlignment.Top);
         _canvas.FontSize = 26;
+        if (alert.Kind == OpenHarmonyAlertKind.ActionSheet)
+        {
+            for (int i = 0; i < alert.Options.Count; i++)
+            {
+                RectF row = OpenHarmonyAlertHost.OptionRect(i);
+                _canvas.FillColor = i == alert.Options.Count - 1 ? Colors.Gray : Colors.DodgerBlue;
+                _canvas.FillRoundedRectangle(row.X + 12, row.Y + 4, row.Width - 24, row.Height - 8, 8);
+                _canvas.FontColor = Colors.White;
+                _canvas.DrawString(alert.Options[i], row.X, row.Y, row.Width, row.Height,
+                    HorizontalAlignment.Center, VerticalAlignment.Center);
+            }
+            return;
+        }
+        if (alert.Kind == OpenHarmonyAlertKind.Prompt)
+        {
+            RectF field = OpenHarmonyAlertHost.BoxRect;
+            _canvas.FillColor = Colors.Black;
+            _canvas.FillRoundedRectangle(field.X + 20, field.Y + 110, field.Width - 40, 56, 8);
+            _canvas.FontColor = Colors.White;
+            _canvas.DrawString(alert.PromptText, field.X + 32, field.Y + 110, field.Width - 64, 56,
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
         if (!string.IsNullOrEmpty(alert.Accept))
         {
             RectF accept = OpenHarmonyAlertHost.AcceptRect;
@@ -395,17 +417,25 @@ public sealed class OpenHarmonyWindowRenderer
             }
             if (up)
             {
-                RectF accept = OpenHarmonyAlertHost.AcceptRect;
-                RectF cancel = OpenHarmonyAlertHost.CancelRect;
-                if (accept.Contains(x, y))
+                int optionIndex = OpenHarmonyAlertHost.OptionIndexAt(x, y);
+                if (optionIndex >= 0 && alertState.Options.Count > optionIndex)
                 {
                     OpenHarmonyAlertHost.Hide();
+                    alertState.CompleteOption?.Invoke(alertState.Options[optionIndex]);
+                    return true;
+                }
+                RectF accept = OpenHarmonyAlertHost.AcceptRect;
+                RectF cancel = OpenHarmonyAlertHost.CancelRect;
+                // Complete first: the prompt reads its text from the (still current) state.
+                if (accept.Contains(x, y))
+                {
                     alertState.Complete(true);
+                    OpenHarmonyAlertHost.Hide();
                 }
                 else if (cancel.Contains(x, y))
                 {
-                    OpenHarmonyAlertHost.Hide();
                     alertState.Complete(false);
+                    OpenHarmonyAlertHost.Hide();
                 }
                 return true;
             }

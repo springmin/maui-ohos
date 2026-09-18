@@ -39,14 +39,50 @@ public sealed class OpenHarmonyAlertManager : IAlertManager
 
     public void RequestActionSheet(Page page, ActionSheetArguments arguments)
     {
-        // Shown as an alert-style list: every option plus the cancel title behave like buttons;
-        // choosing one resolves the sheet. (A full list overlay is the next refinement.)
-        OpenHarmonyBridge.WriteStatus("[maui] action sheet shown as an alert overlay");
+        var options = new List<string>();
+        if (arguments.Buttons is { } buttons)
+        {
+            options.AddRange(buttons);
+        }
+        if (!string.IsNullOrEmpty(arguments.Cancel))
+        {
+            options.Add(arguments.Cancel);
+        }
+        OpenHarmonyAlertHost.Show(new OpenHarmonyAlertState
+        {
+            Kind = OpenHarmonyAlertKind.ActionSheet,
+            Title = arguments.Title,
+            Message = null,
+            Accept = null,
+            Cancel = null,
+            Options = options,
+            Complete = _ => { },
+            CompleteOption = chosen =>
+            {
+                arguments.SetResult(chosen);
+                OpenHarmonyBridge.RequestRedraw();
+            },
+        });
     }
 
     public void RequestPrompt(Page page, PromptArguments arguments)
     {
-        OpenHarmonyBridge.WriteStatus("[maui] prompt requests need text input in the overlay");
-        arguments.SetResult(null);
+        // The prompt edits text through the same keyboard bridge as Entry/Editor.
+        OpenHarmonyAlertHost.Show(new OpenHarmonyAlertState
+        {
+            Kind = OpenHarmonyAlertKind.Prompt,
+            Title = arguments.Title,
+            Message = arguments.Message,
+            Accept = arguments.Accept,
+            Cancel = arguments.Cancel,
+            Complete = accepted =>
+            {
+                arguments.SetResult(accepted ? OpenHarmonyAlertHost.Current?.PromptText ?? string.Empty : null);
+                OpenHarmonyBridge.RequestRedraw();
+            },
+            CompleteText = value => arguments.SetResult(value),
+        });
+        OpenHarmonyBridge.SetKeyboardText(string.Empty);
+        OpenHarmonyBridge.RequestTextInput(true);
     }
 }

@@ -20,6 +20,8 @@ public sealed class OpenHarmonyMauiAppHost
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
         _context = new MauiContext(services);
+        // Keystore results arrive from the ArkTS sink through the bridge.
+        OpenHarmonyBridge.KeystoreResult += (requestId, rc, data) => OpenHarmonyKeystore.Complete(requestId, rc, data);
         // Bindable objects created outside the service scope (TabbedPage/MultiPage, ...) resolve
         // their dispatcher through this provider.
         Microsoft.Maui.Dispatching.DispatcherProvider.SetCurrent(

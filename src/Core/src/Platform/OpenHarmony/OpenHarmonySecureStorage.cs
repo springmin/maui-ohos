@@ -1,6 +1,6 @@
-// ISecureStorage for OpenHarmony: values are obfuscated with a per-install key stored next to
-// the data file. This is NOT hardware-backed (the platform keystore/HUKS integration is a
-// later iteration), so treat it as tamper-obfuscation rather than real secret protection.
+// ISecureStorage for OpenHarmony: values are encrypted through HUKS (Universal KeyStore) when
+// the ArkTS sink is available; otherwise they fall back to a per-install obfuscation key next
+// to the data file (documented as not hardware-backed).
 using System.Text;
 using Microsoft.Maui.Storage;
 
@@ -34,18 +34,40 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
         }
     }
 
-    public Task<string?> GetAsync(string key)
+    private const string Alias = "dotnet.securestorage.1";
+    private const string KeystorePrefix = "k1:";
+
+    public async Task<string?> GetAsync(string key)
     {
         Dictionary<string, string> values = Load();
-        return Task.FromResult(values.TryGetValue(key, out string? value) ? value : null);
+        if (!values.TryGetValue(key, out string? value))
+        {
+            return null;
+        }
+        if (value.StartsWith(KeystorePrefix, StringComparison.Ordinal))
+        {
+            byte[]? plain = await OpenHarmonyKeystore.DecryptAsync(Alias, Convert.FromBase64String(value[KeystorePrefix.Length..]));
+            return plain is null ? null : Encoding.UTF8.GetString(plain);
+        }
+        return value;
     }
 
-    public Task SetAsync(string key, string value)
+    public async Task SetAsync(string key, string value)
     {
         Dictionary<string, string> values = Load();
+        // Prefer the hardware-backed keystore; the wrapper never throws.
+        if (await OpenHarmonyKeystore.EnsureKeyAsync(Alias))
+        {
+            byte[]? cipher = await OpenHarmonyKeystore.EncryptAsync(Alias, Encoding.UTF8.GetBytes(value));
+            if (cipher is not null)
+            {
+                values[key] = KeystorePrefix + Convert.ToBase64String(cipher);
+                Save(values);
+                return;
+            }
+        }
         values[key] = value;
         Save(values);
-        return Task.CompletedTask;
     }
 
     public bool Remove(string key)

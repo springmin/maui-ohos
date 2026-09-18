@@ -70,6 +70,10 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
     private void SetFocus(bool focused)
     {
         PlatformView.IsFocused = focused;
+        if (focused)
+        {
+            OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
+        }
         OpenHarmonyBridge.RequestTextInput(focused);
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element && element.IsFocused != focused)
         {

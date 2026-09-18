@@ -311,6 +311,9 @@ public class OpenHarmonyView
     public bool IsTabbedPage { get; set; }
     public List<string> TabTitles { get; } = new();
 
+    /// <summary>False hides the bottom bar (Shell.TabBarIsVisible).</summary>
+    public bool TabTitlesVisible { get; set; } = true;
+
     /// <summary>Optional tab icons (encoded bytes) aligned with TabTitles.</summary>
     public List<byte[]?> TabIcons { get; } = new();
     public int SelectedTab { get; set; }
@@ -737,7 +740,7 @@ public class OpenHarmonyView
         float barY = frame.Y + frame.Height - TabBarHeight;
         canvas.FillColor = Colors.Black;
         canvas.FillRectangle(frame.X, barY, frame.Width, TabBarHeight);
-        if (TabTitles.Count == 0)
+        if (!TabTitlesVisible || TabTitles.Count == 0)
         {
             return;
         }

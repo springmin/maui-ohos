@@ -48,6 +48,24 @@ public sealed class OpenHarmonyTabbedPageHandler : OpenHarmonyViewHandler<Micros
         OpenHarmonyBridge.RequestRedraw();
     }
 
+    /// <summary>Loads a file-based tab icon; other source kinds need the image service.</summary>
+    private static byte[]? ResolveIcon(Microsoft.Maui.Controls.ImageSource? icon)
+    {
+        try
+        {
+            if (icon is Microsoft.Maui.Controls.FileImageSource file &&
+                !string.IsNullOrEmpty(file.File) && File.Exists(file.File))
+            {
+                return File.ReadAllBytes(file.File);
+            }
+        }
+        catch
+        {
+            // Icons are optional.
+        }
+        return null;
+    }
+
     private void SelectTab(int index)
     {
         if (VirtualView is { } tabbedPage && index >= 0 && index < tabbedPage.Children.Count)
@@ -75,9 +93,11 @@ public sealed class OpenHarmonyTabbedPageHandler : OpenHarmonyViewHandler<Micros
     {
         OpenHarmonyView view = handler.PlatformView;
         view.TabTitles.Clear();
+        view.TabIcons.Clear();
         foreach (Microsoft.Maui.Controls.Page page in tabbedPage.Children)
         {
             view.TabTitles.Add(page.Title ?? string.Empty);
+            view.TabIcons.Add(ResolveIcon(page.IconImageSource as Microsoft.Maui.Controls.ImageSource));
         }
         view.SelectedTab = Math.Max(0, tabbedPage.Children.IndexOf(tabbedPage.CurrentPage));
     }

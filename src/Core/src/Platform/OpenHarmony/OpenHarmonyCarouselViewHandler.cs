@@ -36,8 +36,10 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
             {
                 int count = Count(carousel);
                 int position = carousel.Position + (deltaX < 0 ? 1 : -1);
-                // Loop around the ends instead of clamping.
-                position = count > 0 ? (position + count) % count : 0;
+                // Loop around the ends when the carousel asks for it, otherwise clamp.
+                position = carousel.Loop && count > 0
+                    ? (position + count) % count
+                    : Math.Clamp(position, 0, Math.Max(0, count - 1));
                 carousel.Position = position;
                 Rebuild();
                 OpenHarmonyBridge.RequestRedraw();

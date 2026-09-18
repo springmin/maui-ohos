@@ -108,7 +108,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         view.SelectedTab = Math.Max(0, index);
         // Chrome: title bar with the current page's title and a back button when the shell can
         // navigate back.
-        view.ShowsTitleBar = true;
+        view.ShowsTitleBar = shell.GetValue(Microsoft.Maui.Controls.Shell.NavBarIsVisibleProperty) is not bool navBar || navBar;
         view.TitleText = shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
         view.ShowsBack = CurrentStackDepth(shell) > 1;
         if (view.ShowsBack)
@@ -182,9 +182,12 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         }
         Rect frame = PlatformView.Frame;
         OpenHarmonyHandlerConnector.ConnectTree(content);
+        bool tabBar = VirtualView?.GetValue(Microsoft.Maui.Controls.Shell.TabBarIsVisibleProperty) is not bool visible || visible;
+        PlatformView.TabTitlesVisible = tabBar;
         double top = PlatformView.ShowsTitleBar ? OpenHarmonyView.TitleBarHeight : 0;
+        double bottom = tabBar ? OpenHarmonyView.TabBarHeight : 0;
         var contentFrame = new Rect(frame.X, frame.Y + top, frame.Width,
-            Math.Max(0, frame.Height - OpenHarmonyView.TabBarHeight - top));
+            Math.Max(0, frame.Height - bottom - top));
         content.Measure(contentFrame.Width, contentFrame.Height);
         content.Arrange(contentFrame);
     }

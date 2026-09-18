@@ -11,15 +11,22 @@ namespace Microsoft.Maui.Platform;
 
 public sealed class OpenHarmonyVibration : IVibration
 {
-    public bool IsSupported => false;
+    /// <summary>Vibration goes through the platform NDK (OH_Vibrator_PlayVibration).</summary>
+    public bool IsSupported => OpenHarmonyBridge.CheckSelfPermission("ohos.permission.VIBRATE");
 
     public void Vibrate()
     {
-        OpenHarmonyBridge.RequestVibration(100);
-        OpenHarmonyBridge.WriteStatus("[maui] vibration needs the vibrator kit in the ArkTS shell");
+        if (!OpenHarmonyBridge.Vibrate(100))
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] vibration unavailable (permission or host)");
+        }
     }
 
-    public void Vibrate(TimeSpan duration) => Vibrate();
+    public void Vibrate(TimeSpan duration)
+    {
+        int ms = (int)Math.Clamp(duration.TotalMilliseconds, 1, 3000);
+        OpenHarmonyBridge.Vibrate(ms);
+    }
 
     public void Cancel()
     {
@@ -28,8 +35,30 @@ public sealed class OpenHarmonyVibration : IVibration
 
 public sealed class OpenHarmonyPermissions : IPermissions
 {
+    /// <summary>MAUI permission types mapped to OpenHarmony permission names.</summary>
+    private static readonly Dictionary<Type, string> PermissionNames = new()
+    {
+        [typeof(Permissions.Camera)] = "ohos.permission.CAMERA",
+        [typeof(Permissions.Microphone)] = "ohos.permission.MICROPHONE",
+        [typeof(Permissions.LocationWhenInUse)] = "ohos.permission.APPROXIMATELY_LOCATION",
+        [typeof(Permissions.LocationAlways)] = "ohos.permission.LOCATION",
+        [typeof(Permissions.StorageRead)] = "ohos.permission.READ_IMAGEVIDEO",
+        [typeof(Permissions.StorageWrite)] = "ohos.permission.WRITE_IMAGEVIDEO",
+        [typeof(Permissions.Photos)] = "ohos.permission.READ_IMAGEVIDEO",
+        [typeof(Permissions.Vibrate)] = "ohos.permission.VIBRATE",
+        [typeof(Permissions.NetworkState)] = "ohos.permission.GET_NETWORK_INFO",
+    };
+
     public Task<PermissionStatus> CheckStatusAsync<TPermission>() where TPermission : Permissions.BasePermission, new()
-        => Task.FromResult(PermissionStatus.Unknown);
+    {
+        if (!PermissionNames.TryGetValue(typeof(TPermission), out string? name))
+        {
+            return Task.FromResult(PermissionStatus.Unknown);
+        }
+        return Task.FromResult(OpenHarmonyBridge.CheckSelfPermission(name)
+            ? PermissionStatus.Granted
+            : PermissionStatus.Denied);
+    }
 
     public Task<PermissionStatus> RequestAsync<TPermission>() where TPermission : Permissions.BasePermission, new()
     {

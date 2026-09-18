@@ -31,11 +31,14 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
                 shell.CurrentItem = shell.Items[index];
             }
         };
+        view.ChromeRefresh = () => MapShell(this, VirtualView!);
         view.BackTapped = () =>
         {
             if (VirtualView is { } shell)
             {
-                _ = shell.GoToAsync("..");
+                // The shell section owns the navigation stack.
+                var navigation = shell.CurrentItem?.CurrentItem?.Navigation ?? shell.Navigation;
+                _ = navigation.PopAsync();
             }
         };
         view.FlyoutRequested = () =>
@@ -61,6 +64,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         if (VirtualView is { } shell)
         {
             shell.PropertyChanged += OnShellPropertyChanged;
+            shell.Navigated += OnShellNavigated;
         }
         MapShell(this, VirtualView!);
     }
@@ -70,8 +74,16 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         if (VirtualView is { } shell)
         {
             shell.PropertyChanged -= OnShellPropertyChanged;
+            shell.Navigated -= OnShellNavigated;
         }
         base.DisconnectHandler(platformView);
+    }
+
+    private void OnShellNavigated(object? sender, ShellNavigatedEventArgs args)
+    {
+        MapShell(this, VirtualView!);
+        ArrangeContent();
+        OpenHarmonyBridge.RequestRedraw();
     }
 
     private void OnShellPropertyChanged(object? sender, PropertyChangedEventArgs args)
@@ -98,7 +110,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         // navigate back.
         view.ShowsTitleBar = true;
         view.TitleText = shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
-        view.ShowsBack = (shell.CurrentPage?.Navigation?.NavigationStack?.Count ?? 1) > 1;
+        view.ShowsBack = CurrentStackDepth(shell) > 1;
         if (view.ShowsBack)
         {
             view.ShowsHamburger = false;
@@ -106,9 +118,11 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         // Flyout (hamburger + drawer) shows the shell items.
         view.ShowsHamburger = shell.FlyoutBehavior != FlyoutBehavior.Disabled;
         view.FlyoutItems.Clear();
+        view.TabIcons.Clear();
         foreach (ShellItem item in shell.Items)
         {
             view.FlyoutItems.Add(item.Title ?? string.Empty);
+            view.TabIcons.Add(ResolveIcon(item.Icon));
         }
         // Shell contents are created lazily: realise the current one so it can be rendered.
         if (shell.CurrentPage is null &&
@@ -122,6 +136,28 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             OpenHarmonyHandlerConnector.ConnectTree(page);
         }
     }
+
+    /// <summary>Loads a file-based tab icon; other source kinds need the image service.</summary>
+    private static byte[]? ResolveIcon(Microsoft.Maui.Controls.ImageSource? icon)
+    {
+        try
+        {
+            if (icon is Microsoft.Maui.Controls.FileImageSource file && !string.IsNullOrEmpty(file.File) && File.Exists(file.File))
+            {
+                return File.ReadAllBytes(file.File);
+            }
+        }
+        catch
+        {
+            // Icons are optional.
+        }
+        return null;
+    }
+
+    private static int CurrentStackDepth(Shell shell)
+        => shell.CurrentItem?.CurrentItem?.Navigation?.NavigationStack?.Count
+           ?? shell.CurrentPage?.Navigation?.NavigationStack?.Count
+           ?? 1;
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
     {

@@ -106,6 +106,8 @@ public class OpenHarmonyView
 
     // Shell chrome (title bar + back button)
     public bool ShowsTitleBar { get; set; }
+    /// <summary>Re-syncs the chrome (title/back) with the virtual view before drawing.</summary>
+    public Action? ChromeRefresh { get; set; }
     public string? TitleText { get; set; }
     public bool ShowsBack { get; set; }
     public const float TitleBarHeight = 56f;
@@ -308,6 +310,9 @@ public class OpenHarmonyView
     // Tabbed page support
     public bool IsTabbedPage { get; set; }
     public List<string> TabTitles { get; } = new();
+
+    /// <summary>Optional tab icons (encoded bytes) aligned with TabTitles.</summary>
+    public List<byte[]?> TabIcons { get; } = new();
     public int SelectedTab { get; set; }
     public Action<int>? TabSelected { get; set; }
     public const float TabBarHeight = 56f;
@@ -740,8 +745,25 @@ public class OpenHarmonyView
         canvas.FontSize = FontSize;
         for (int i = 0; i < TabTitles.Count; i++)
         {
-            canvas.FontColor = i == SelectedTab ? Colors.DodgerBlue : Colors.Gray;
-            canvas.DrawString(TabTitles[i], frame.X + i * tabWidth, barY, tabWidth, TabBarHeight,
+            float tabX = frame.X + i * tabWidth;
+            bool active = i == SelectedTab;
+            if (i < TabIcons.Count && TabIcons[i] is { Length: > 0 } icon)
+            {
+                // Icon above a smaller caption, like the platform tab bars.
+                const float iconSize = 24f;
+                int width = (int)Math.Min(iconSize, tabWidth - 8);
+                int height = width;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
+                    icon, (int)(tabX + (tabWidth - width) / 2f), (int)(barY + 6), width, height);
+                canvas.FontColor = active ? Colors.DodgerBlue : Colors.Gray;
+                canvas.FontSize = 18;
+                canvas.DrawString(TabTitles[i], tabX, barY + 6 + iconSize, tabWidth, TabBarHeight - iconSize - 8,
+                    HorizontalAlignment.Center, VerticalAlignment.Center);
+                canvas.FontSize = FontSize;
+                continue;
+            }
+            canvas.FontColor = active ? Colors.DodgerBlue : Colors.Gray;
+            canvas.DrawString(TabTitles[i], tabX, barY, tabWidth, TabBarHeight,
                 HorizontalAlignment.Center, VerticalAlignment.Center);
         }
     }

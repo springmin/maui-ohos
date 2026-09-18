@@ -98,6 +98,12 @@ public sealed class OpenHarmonyWindowRenderer
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
             // View transforms (animations set these): opacity, translation, scale, rotation.
+            if (platform.ShowsTitleBar)
+            {
+                // Shell navigation happens in managed code without a platform callback, so the
+                // chrome is re-synced whenever it is drawn.
+                platform.ChromeRefresh?.Invoke();
+            }
             bool transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
                                view.Scale != 1.0 || view.Rotation != 0;
             if (transformed)
@@ -507,7 +513,8 @@ public sealed class OpenHarmonyWindowRenderer
         {
             handled |= HandleTouchCore(child, down, up, childX, childY);
         }
-        if (view.Handler?.PlatformView is OpenHarmonyView { IsTextEntry: true } textEntry && !_moved)
+        if (view.Handler?.PlatformView is OpenHarmonyView { IsTextEntry: true } textEntry && !_moved &&
+            textEntry.Frame.Contains(x, y) && textEntry.IsFocused)
         {
             if (down)
             {

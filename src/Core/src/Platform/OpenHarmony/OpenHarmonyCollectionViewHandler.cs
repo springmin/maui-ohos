@@ -49,11 +49,26 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
         if (_materializer is not null && VirtualView is { } collection)
         {
             _materializer.Span = collection.ItemsLayout is GridItemsLayout grid ? Math.Max(1, grid.Span) : 1;
-            _materializer.SetItems(collection.ItemsSource);
+            _materializer.headerTextFactory = HeaderText;
+            _materializer.headerViewFactory = HeaderView;
+            _materializer.SetItems(collection.ItemsSource, collection.IsGrouped);
             _materializer.Update(force: true);
         }
         PlatformView.ScrollContentWidth = (float)frame.Width;
         PlatformView.ScrollContentHeight = (float)(_materializer?.TotalHeight ?? 0);
+    }
+
+    private View HeaderView(string text)
+        => new Label { Text = text, FontSize = 24, TextColor = Colors.Gold };
+
+    private string HeaderText(object? group)
+    {
+        if (VirtualView?.GroupHeaderTemplate?.CreateContent() is Label label)
+        {
+            label.BindingContext = group;
+            return label.Text ?? group?.ToString() ?? string.Empty;
+        }
+        return group?.ToString() ?? string.Empty;
     }
 
     private void Select(object? item)

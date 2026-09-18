@@ -15,10 +15,16 @@ internal sealed class OpenHarmonyItemListMaterializer
     private readonly Func<object?, View> _createItemView;
     private readonly Action<object?> _select;
     private readonly List<object?> _data = new();
+    private readonly HashSet<int> _headerRows = new();
     private readonly Dictionary<int, View> _materialized = new();
     private readonly List<View> _pool = new();
     private int _windowFirst = -1;
     private int _windowLast = -1;
+    /// <summary>Group header factory, supplied by the list handlers.</summary>
+    public Func<object?, string>? headerTextFactory;
+
+    /// <summary>Creates the platform view of a group header row.</summary>
+    public Func<string, View>? headerViewFactory;
 
     public OpenHarmonyItemListMaterializer(OpenHarmonyView platformView, Func<object?, View> createItemView, Action<object?> select)
     {
@@ -38,19 +44,39 @@ internal sealed class OpenHarmonyItemListMaterializer
 
     public double TotalHeight => RowCount * SlotHeight;
 
-    /// <summary>Replaces the data behind the list.</summary>
-    public void SetItems(System.Collections.IEnumerable? source)
+    /// <summary>Replaces the data behind the list (grouped sources become header rows).</summary>
+    public void SetItems(System.Collections.IEnumerable? source, bool grouped = false, Func<object?, string>? headerText = null)
     {
         _data.Clear();
+        _headerRows.Clear();
         if (source is not null)
         {
             foreach (object? item in source)
             {
-                _data.Add(item);
+                if (grouped && item is System.Collections.IEnumerable group and not string)
+                {
+                    _data.Add(item);
+                    _headerRows.Add(_data.Count - 1);
+                    foreach (object? child in group)
+                    {
+                        _data.Add(child);
+                    }
+                }
+                else
+                {
+                    _data.Add(item);
+                }
             }
         }
         Reset();
     }
+
+    /// <summary>True when the row at the index is a group header.</summary>
+    public bool IsHeader(int index) => _headerRows.Contains(index);
+
+    /// <summary>Text of a group header row.</summary>
+    public string HeaderText(int index, Func<object?, string>? headerText)
+        => headerText?.Invoke(_data[index]) ?? _data[index]?.ToString() ?? string.Empty;
 
     public double GetItemY(int index) => Span <= 1 ? index * SlotHeight : (index / Span) * SlotHeight;
 
@@ -131,12 +157,22 @@ internal sealed class OpenHarmonyItemListMaterializer
     private View Materialize(int index)
     {
         object? item = _data[index];
-        View view = TakeFromPool() ?? _createItemView(item);
-        view.BindingContext = item;
+        bool isHeader = IsHeader(index);
+        View view = isHeader
+            ? CreateHeaderView(HeaderText(index, headerTextFactory))
+            : TakeFromPool() ?? _createItemView(item);
+        view.BindingContext = isHeader ? null : item;
         if (view.Handler?.PlatformView is OpenHarmonyView itemPlatform)
         {
-            object? captured = item;
-            itemPlatform.Tap = () => _select(captured);
+            if (isHeader)
+            {
+                itemPlatform.Tap = null;
+            }
+            else
+            {
+                object? captured = item;
+                itemPlatform.Tap = () => _select(captured);
+            }
         }
         RectF frame = _platformView.Frame;
         double width = frame.Width > 0 ? frame.Width : 1080;
@@ -149,6 +185,14 @@ internal sealed class OpenHarmonyItemListMaterializer
         }
         view.Arrange(new Rect(frame.X + GetItemX(index, width), frame.Y + GetItemY(index),
             itemWidth, Math.Max(size.Height, ItemHeight)));
+        return view;
+    }
+
+    private View CreateHeaderView(string text)
+    {
+        // Headers are re-created (they are cheap and pooling would fight template bindings).
+        View view = headerViewFactory?.Invoke(text) ?? new Label { Text = text, FontSize = 24 };
+        OpenHarmonyHandlerConnector.ConnectTree(view);
         return view;
     }
 

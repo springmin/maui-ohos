@@ -29,7 +29,12 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas.FillRectangle(0, 0, width, height);
         _popupView = null;
         _flyoutPanelView = null;
+        _carouselViews.Clear();
         DrawView(content);
+        foreach (OpenHarmonyView carousel in _carouselViews)
+        {
+            DrawCarouselIndicator(carousel);
+        }
         if (_popupView is { PopupVisible: true } popup)
         {
             // Dropdowns float above the rest of the tree.
@@ -126,6 +131,10 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 _flyoutPanelView = platform;
             }
+            if (view is Microsoft.Maui.Controls.CarouselView)
+            {
+                _carouselViews.Add(platform);
+            }
             if (platform.IsFlyoutPage)
             {
                 // Detail fills the window; the flyout is an overlay clipped to its panel.
@@ -183,11 +192,35 @@ public sealed class OpenHarmonyWindowRenderer
     private bool _moved;
     private OpenHarmonyView? _popupView;
     private OpenHarmonyView? _flyoutPanelView;
+    private readonly List<OpenHarmonyView> _carouselViews = new();
     private OpenHarmonyView? _textDragTarget;
     private int _textDragAnchor;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
     public bool HasAnimations(IView? root) => TreeHasAnimations(root);
+
+    /// <summary>Page indicator dots for a carousel.</summary>
+    private void DrawCarouselIndicator(OpenHarmonyView carousel)
+    {
+        if (carousel.VirtualView is not Microsoft.Maui.Controls.CarouselView view || view.ItemsSource is not { } source)
+        {
+            return;
+        }
+        int count = source.Cast<object?>().Count();
+        if (count <= 1)
+        {
+            return;
+        }
+        RectF frame = carousel.Frame;
+        float spacing = 16f;
+        float startX = frame.X + (frame.Width - count * spacing) / 2f + spacing / 2f;
+        float y = frame.Y + frame.Height - 16f;
+        for (int i = 0; i < count; i++)
+        {
+            _canvas.FillColor = i == view.Position ? Colors.White : Colors.Gray;
+            _canvas.FillCircle(startX + i * spacing, y, i == view.Position ? 6f : 4f);
+        }
+    }
 
     private static void ApplyTextSelection(OpenHarmonyView entry, int index)
     {

@@ -165,6 +165,8 @@ public class OpenHarmonyView
     public float ScrollOffsetY { get; set; }
     public float ScrollContentWidth { get; set; }
     public float ScrollContentHeight { get; set; }
+    /// <summary>Invoked when the scroll offset changes (virtualized lists slide their window).</summary>
+    public Action? ScrollOffsetChanged { get; set; }
 
     public List<OpenHarmonyView> Children { get; } = new();
 

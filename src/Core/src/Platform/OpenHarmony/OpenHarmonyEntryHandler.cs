@@ -37,12 +37,23 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
     {
         base.ConnectHandler(platformView);
         OpenHarmonyBridge.TextInput += OnTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
         OpenHarmonyBridge.TextInput -= OnTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
         base.DisconnectHandler(platformView);
+    }
+
+    private void OnTextSubmitted()
+    {
+        // The return key completes the focused entry (raises User's Completed handler).
+        if (PlatformView.IsFocused && VirtualView is IEntry entry)
+        {
+            entry.Completed();
+        }
     }
 
     private void OnTextInput(string text)

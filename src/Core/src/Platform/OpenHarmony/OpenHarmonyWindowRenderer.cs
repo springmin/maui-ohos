@@ -232,6 +232,7 @@ public sealed class OpenHarmonyWindowRenderer
         {
             virtualScroll.VerticalOffset = scroll.ScrollOffsetY;
         }
+        scroll.ScrollOffsetChanged?.Invoke();
         return true;
     }
 

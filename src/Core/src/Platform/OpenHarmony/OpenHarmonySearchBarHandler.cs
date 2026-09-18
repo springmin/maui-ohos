@@ -33,11 +33,13 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
     {
         base.ConnectHandler(platformView);
         OpenHarmonyBridge.TextInput += OnTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
         OpenHarmonyBridge.TextInput -= OnTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
         base.DisconnectHandler(platformView);
     }
 
@@ -72,6 +74,14 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element && element.IsFocused != focused)
         {
             element.SetValue(Microsoft.Maui.Controls.VisualElement.IsFocusedPropertyKey, focused);
+        }
+    }
+
+    private void OnTextSubmitted()
+    {
+        if (PlatformView.IsFocused && VirtualView is ISearchBar searchBar)
+        {
+            searchBar.SearchButtonPressed();
         }
     }
 

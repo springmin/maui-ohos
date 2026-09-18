@@ -357,6 +357,68 @@ public class OpenHarmonyView
     /// <summary>Width of the tappable back area in the navigation bar.</summary>
     public const float NavBackWidth = 88f;
 
+    // SwipeView support
+    public bool IsSwipeView { get; set; }
+    public bool IsSwipeOpen { get; private set; }
+    public bool SwipeOpenToRight { get; private set; }
+    public List<(string Text, Color Background, Action Activate)> SwipeItems { get; } = new();
+    public float SwipeItemWidth { get; set; } = 140f;
+    public Action<bool>? SwipeOpenChanged { get; set; }
+
+    /// <summary>Revealed swipe item rectangle (drawing and hit testing share it).</summary>
+    public RectF SwipeItemRect(int index)
+    {
+        RectF frame = Frame;
+        float height = frame.Height / Math.Max(1, SwipeItems.Count);
+        float x = SwipeOpenToRight ? frame.Right - SwipeItemWidth : frame.X;
+        return new RectF(x, frame.Y + index * height, SwipeItemWidth, height);
+    }
+
+    public int SwipeItemAt(float x, float y)
+    {
+        if (!IsSwipeOpen)
+        {
+            return -1;
+        }
+        for (int i = 0; i < SwipeItems.Count; i++)
+        {
+            if (SwipeItemRect(i).Contains(x, y))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public void SetSwipeOpen(bool open, bool notify = true)
+    {
+        if (open && SwipeItems.Count == 0)
+        {
+            open = false;
+        }
+        if (IsSwipeOpen == open)
+        {
+            return;
+        }
+        IsSwipeOpen = open;
+        if (notify)
+        {
+            SwipeOpenChanged?.Invoke(open);
+        }
+    }
+
+    /// <summary>Called by the renderer when a drag over this view completes.</summary>
+    public void SwipeDrag(float dx, float dy)
+    {
+        if (!IsSwipeView || Math.Abs(dx) < 40)
+        {
+            return;
+        }
+        // Dragging left reveals the trailing (right) items, dragging right the leading ones.
+        SwipeOpenToRight = dx < 0;
+        SetSwipeOpen(true);
+    }
+
     /// <summary>Toolbar items of the current page: label plus activation, drawn right-aligned.</summary>
     public List<(string Text, Action Activate)> ToolbarItems { get; } = new();
     public float ToolbarItemWidth { get; set; } = 140f;
@@ -443,6 +505,10 @@ public class OpenHarmonyView
         {
             DrawFlyoutChrome(canvas, frame);
             return;
+        }
+        if (IsSwipeView && IsSwipeOpen)
+        {
+            DrawSwipePanel(canvas, frame);
         }
         if (IsGraphicsView)
         {
@@ -946,6 +1012,20 @@ public class OpenHarmonyView
         }
     }
 
+    private void DrawSwipePanel(MauiCanvas canvas, RectF frame)
+    {
+        canvas.FontSize = 24;
+        for (int i = 0; i < SwipeItems.Count; i++)
+        {
+            RectF item = SwipeItemRect(i);
+            canvas.FillColor = SwipeItems[i].Background;
+            canvas.FillRectangle(item.X, item.Y, item.Width, item.Height);
+            canvas.FontColor = Colors.White;
+            canvas.DrawString(SwipeItems[i].Text, item.X, item.Y, item.Width, item.Height,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+    }
+
     private void DrawNavigationBar(MauiCanvas canvas, RectF frame)
     {
         canvas.FillColor = NavBarColor;
@@ -1178,6 +1258,26 @@ public class OpenHarmonyView
                 else if (InBackRegion(x, y))
                 {
                     BackTapped?.Invoke();
+                }
+                return true;
+            }
+        }
+        if (IsSwipeView && IsSwipeOpen)
+        {
+            if (down && SwipeItemAt(x, y) >= 0)
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                int swipeIndex = SwipeItemAt(x, y);
+                if (swipeIndex >= 0)
+                {
+                    (string Text, Color Background, Action Activate) item = SwipeItems[swipeIndex];
+                    SetSwipeOpen(false);
+                    item.Activate();
                 }
                 return true;
             }

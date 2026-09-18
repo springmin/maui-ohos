@@ -41,6 +41,7 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.FlyoutPage)] = typeof(OpenHarmonyFlyoutPageHandler),
         [typeof(Microsoft.Maui.Controls.Shell)] = typeof(OpenHarmonyShellHandler),
         [typeof(Microsoft.Maui.Controls.ListView)] = typeof(OpenHarmonyListViewHandler),
+        [typeof(Microsoft.Maui.Controls.SwipeView)] = typeof(OpenHarmonySwipeViewHandler),
         [typeof(Microsoft.Maui.Controls.CarouselView)] = typeof(OpenHarmonyCarouselViewHandler),
         [typeof(Microsoft.Maui.Controls.BoxView)] = typeof(OpenHarmonyBoxViewHandler),
         [typeof(IIndicatorView)] = typeof(OpenHarmonyIndicatorViewHandler),

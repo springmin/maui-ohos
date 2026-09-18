@@ -540,7 +540,15 @@ public sealed class OpenHarmonyWindowRenderer
             _panGestureId = -1;
             if (FindGestureTarget(root, x, y) is { } panCandidate)
             {
-                if (OpenHarmonyGestures.HasPan(panCandidate))
+                if (!OpenHarmonyGestures.HasPan(panCandidate) && OpenHarmonyGestures.HasSwipe(panCandidate))
+                {
+                    // Swipe recognizers use the same drag tracking as pan.
+                    _panTarget = panCandidate;
+                    _panStartX = x;
+                    _panStartY = y;
+                    _panGestureId = -2;
+                }
+                else if (OpenHarmonyGestures.HasPan(panCandidate))
                 {
                     _panTarget = panCandidate;
                     _panStartX = x;
@@ -560,7 +568,14 @@ public sealed class OpenHarmonyWindowRenderer
             _textDragTarget = null;
             if (_panTarget is { } panTarget)
             {
-                OpenHarmonyGestures.CompletePan(panTarget, _panGestureId);
+                if (_panGestureId == -2)
+                {
+                    OpenHarmonyGestures.SendSwiped(panTarget, x - _panStartX, y - _panStartY);
+                }
+                else
+                {
+                    OpenHarmonyGestures.CompletePan(panTarget, _panGestureId);
+                }
                 _panTarget = null;
                 _panGestureId = -1;
             }

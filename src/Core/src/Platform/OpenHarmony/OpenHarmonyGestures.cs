@@ -78,6 +78,47 @@ internal static class OpenHarmonyGestures
         }
     }
 
+    /// <summary>Dispatches a completed swipe to the view's SwipeGestureRecognizers.</summary>
+    /// <remarks>
+    /// MAUI's recognizer contract is two phase: <c>SendSwipe</c> only records the travelled
+    /// deltas, and <c>DetectSwipe</c> evaluates them against the threshold and raises the
+    /// Swiped event (also executing the command).
+    /// </remarks>
+    public static bool SendSwiped(IView view, float totalX, float totalY)
+    {
+        if (view is not View controlsView)
+        {
+            return false;
+        }
+        SwipeDirection direction;
+        if (Math.Abs(totalX) >= Math.Abs(totalY))
+        {
+            direction = totalX < 0 ? SwipeDirection.Left : SwipeDirection.Right;
+        }
+        else
+        {
+            direction = totalY < 0 ? SwipeDirection.Up : SwipeDirection.Down;
+        }
+        bool handled = false;
+        foreach (IGestureRecognizer recognizer in controlsView.GestureRecognizers)
+        {
+            if (recognizer is SwipeGestureRecognizer swipe)
+            {
+                if ((swipe.Direction & direction) == 0)
+                {
+                    continue;
+                }
+                var controller = (ISwipeGestureController)swipe;
+                controller.SendSwipe(controlsView, totalX, totalY);
+                handled |= controller.DetectSwipe(controlsView, direction);
+            }
+        }
+        return handled;
+    }
+
+    public static bool HasSwipe(IView view)
+        => view is View controlsView && controlsView.GestureRecognizers.OfType<SwipeGestureRecognizer>().Any();
+
     public static bool HasPan(IView view)
         => view is View controlsView && controlsView.GestureRecognizers.OfType<PanGestureRecognizer>().Any();
 

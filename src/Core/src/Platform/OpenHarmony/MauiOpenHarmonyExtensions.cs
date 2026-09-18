@@ -39,6 +39,7 @@ public static class MauiOpenHarmonyExtensions
         [typeof(ITimePicker)] = typeof(OpenHarmonyTimePickerHandler),
         [typeof(Microsoft.Maui.Controls.TabbedPage)] = typeof(OpenHarmonyTabbedPageHandler),
         [typeof(Microsoft.Maui.Controls.FlyoutPage)] = typeof(OpenHarmonyFlyoutPageHandler),
+        [typeof(Microsoft.Maui.Controls.Shell)] = typeof(OpenHarmonyShellHandler),
     };
 
     /// <summary>

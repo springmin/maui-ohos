@@ -451,6 +451,14 @@ public sealed class OpenHarmonyWindowRenderer
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
     {
         bool handled = false;
+        if (view.Handler?.PlatformView is OpenHarmonyView { ShowsTitleBar: true } chromeView)
+        {
+            if (down && chromeView.InBackButton(x, y))
+            {
+                chromeView.BackTapped?.Invoke();
+                return true;
+            }
+        }
         if (view.Handler?.PlatformView is OpenHarmonyView { ShowsHamburger: true } shellView)
         {
             if (down && shellView.InHamburger(x, y) && !shellView.FlyoutOpen)

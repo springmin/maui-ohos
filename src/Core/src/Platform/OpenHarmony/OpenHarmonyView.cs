@@ -104,6 +104,20 @@ public class OpenHarmonyView
     /// <summary>(deltaX, deltaY) when a pan ends on this view (carousel paging).</summary>
     public Action<float, float>? Swipe { get; set; }
 
+    // Shell chrome (title bar + back button)
+    public bool ShowsTitleBar { get; set; }
+    public string? TitleText { get; set; }
+    public bool ShowsBack { get; set; }
+    public const float TitleBarHeight = 56f;
+
+    public bool InBackButton(float x, float y)
+    {
+        RectF frame = Frame;
+        return ShowsTitleBar && ShowsBack &&
+               x >= frame.X && x <= frame.X + 56 &&
+               y >= frame.Y && y <= frame.Y + TitleBarHeight;
+    }
+
     // Shell flyout support
     public bool ShowsHamburger { get; set; }
     public bool FlyoutOpen { get; set; }
@@ -380,8 +394,12 @@ public class OpenHarmonyView
         }
         if (IsTabbedPage)
         {
+            if (ShowsTitleBar)
+            {
+                DrawTitleBar(canvas, frame);
+            }
             DrawTabBar(canvas, frame);
-            if (ShowsHamburger && !FlyoutOpen)
+            if (ShowsHamburger && !ShowsBack && !FlyoutOpen)
             {
                 DrawHamburger(canvas, frame);
             }
@@ -688,6 +706,25 @@ public class OpenHarmonyView
         }
         int index = (int)((y - top) / PopupRowHeight);
         return index >= 0 && index < PopupItems.Count ? index : -1;
+    }
+
+    private void DrawTitleBar(MauiCanvas canvas, RectF frame)
+    {
+        canvas.FillColor = Colors.Black;
+        canvas.FillRectangle(frame.X, frame.Y, frame.Width, TitleBarHeight);
+        if (ShowsBack)
+        {
+            float cx = frame.X + 26f;
+            float cy = frame.Y + TitleBarHeight / 2f;
+            canvas.StrokeColor = Colors.White;
+            canvas.StrokeSize = 3;
+            canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
+            canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+        }
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = 28;
+        canvas.DrawString(TitleText ?? string.Empty, frame.X + 56, frame.Y, frame.Width - 112, TitleBarHeight,
+            HorizontalAlignment.Center, VerticalAlignment.Center);
     }
 
     private void DrawTabBar(MauiCanvas canvas, RectF frame)

@@ -31,6 +31,13 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
                 shell.CurrentItem = shell.Items[index];
             }
         };
+        view.BackTapped = () =>
+        {
+            if (VirtualView is { } shell)
+            {
+                _ = shell.GoToAsync("..");
+            }
+        };
         view.FlyoutRequested = () =>
         {
             view.FlyoutOpen = true;
@@ -87,6 +94,15 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         }
         int index = shell.CurrentItem is { } current ? shell.Items.IndexOf(current) : -1;
         view.SelectedTab = Math.Max(0, index);
+        // Chrome: title bar with the current page's title and a back button when the shell can
+        // navigate back.
+        view.ShowsTitleBar = true;
+        view.TitleText = shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
+        view.ShowsBack = (shell.CurrentPage?.Navigation?.NavigationStack?.Count ?? 1) > 1;
+        if (view.ShowsBack)
+        {
+            view.ShowsHamburger = false;
+        }
         // Flyout (hamburger + drawer) shows the shell items.
         view.ShowsHamburger = shell.FlyoutBehavior != FlyoutBehavior.Disabled;
         view.FlyoutItems.Clear();
@@ -130,7 +146,9 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         }
         Rect frame = PlatformView.Frame;
         OpenHarmonyHandlerConnector.ConnectTree(content);
-        var contentFrame = new Rect(frame.X, frame.Y, frame.Width, Math.Max(0, frame.Height - OpenHarmonyView.TabBarHeight));
+        double top = PlatformView.ShowsTitleBar ? OpenHarmonyView.TitleBarHeight : 0;
+        var contentFrame = new Rect(frame.X, frame.Y + top, frame.Width,
+            Math.Max(0, frame.Height - OpenHarmonyView.TabBarHeight - top));
         content.Measure(contentFrame.Width, contentFrame.Height);
         content.Arrange(contentFrame);
     }

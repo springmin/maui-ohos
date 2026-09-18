@@ -54,7 +54,12 @@ public static class MauiOpenHarmonyExtensions
                                            Microsoft.Maui.Storage.ISecureStorage secureStorage,
                                            Microsoft.Maui.ApplicationModel.IAppInfo appInfo,
                                            Microsoft.Maui.Devices.IDeviceInfo deviceInfo,
-                                           Microsoft.Maui.ApplicationModel.IVersionTracking versionTracking)
+                                           Microsoft.Maui.ApplicationModel.IVersionTracking versionTracking,
+                                           Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard clipboard,
+                                           Microsoft.Maui.Networking.IConnectivity connectivity,
+                                           Microsoft.Maui.ApplicationModel.ILauncher launcher,
+                                           Microsoft.Maui.ApplicationModel.IBrowser browser,
+                                           Microsoft.Maui.ApplicationModel.DataTransfer.IShare share)
     {
         const System.Reflection.BindingFlags Static =
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
@@ -72,6 +77,16 @@ public static class MauiOpenHarmonyExtensions
                 ?.SetValue(null, deviceInfo);
             typeof(Microsoft.Maui.ApplicationModel.VersionTracking).GetProperty("Current", Static)
                 ?.SetValue(null, versionTracking);
+            typeof(Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard).GetProperty("Current", Static)
+                ?.SetValue(null, clipboard);
+            typeof(Microsoft.Maui.Networking.Connectivity).GetProperty("Current", Static)
+                ?.SetValue(null, connectivity);
+            typeof(Microsoft.Maui.ApplicationModel.Launcher).GetProperty("Current", Static)
+                ?.SetValue(null, launcher);
+            typeof(Microsoft.Maui.ApplicationModel.Browser).GetProperty("Current", Static)
+                ?.SetValue(null, browser);
+            typeof(Microsoft.Maui.ApplicationModel.DataTransfer.Share).GetProperty("Current", Static)
+                ?.SetValue(null, share);
         }
         catch (Exception ex)
         {
@@ -98,11 +113,22 @@ public static class MauiOpenHarmonyExtensions
         var appInfo = new OpenHarmonyAppInfo();
         var deviceInfo = new OpenHarmonyDeviceInfo();
         var versionTracking = new OpenHarmonyVersionTracking(preferences);
+        var clipboard = new OpenHarmonyClipboard();
+        var connectivity = new OpenHarmonyConnectivity();
+        var launcher = new OpenHarmonyLauncher();
+        var browser = new OpenHarmonyBrowser();
+        var share = new OpenHarmonyShare();
         builder.Services.AddSingleton<Microsoft.Maui.Storage.ISecureStorage>(secureStorage);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IAppInfo>(appInfo);
         builder.Services.AddSingleton<Microsoft.Maui.Devices.IDeviceInfo>(deviceInfo);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IVersionTracking>(versionTracking);
-        InstallEssentials(preferences, fileSystem, secureStorage, appInfo, deviceInfo, versionTracking);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard>(clipboard);
+        builder.Services.AddSingleton<Microsoft.Maui.Networking.IConnectivity>(connectivity);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.ILauncher>(launcher);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IBrowser>(browser);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.DataTransfer.IShare>(share);
+        InstallEssentials(preferences, fileSystem, secureStorage, appInfo, deviceInfo, versionTracking,
+            clipboard, connectivity, launcher, browser, share);
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
         builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();

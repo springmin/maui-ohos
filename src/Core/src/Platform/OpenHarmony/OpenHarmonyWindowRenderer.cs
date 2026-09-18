@@ -127,6 +127,9 @@ public sealed class OpenHarmonyWindowRenderer
             }
             bool transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
                                view.Scale != 1.0 || view.Rotation != 0;
+            if (view is Microsoft.Maui.Controls.Button)
+            {
+            }
             if (transformed)
             {
                 _canvas.SaveState();

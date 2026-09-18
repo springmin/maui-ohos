@@ -28,6 +28,7 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas.FillColor = BackgroundColor;
         _canvas.FillRectangle(0, 0, width, height);
         _popupView = null;
+        _flyoutPanelView = null;
         DrawView(content);
         if (_popupView is { PopupVisible: true } popup)
         {
@@ -121,6 +122,10 @@ public sealed class OpenHarmonyWindowRenderer
                 // Drawn last so the dropdown floats above the rest of the tree.
                 _popupView = platform;
             }
+            if (platform.FlyoutOpen)
+            {
+                _flyoutPanelView = platform;
+            }
             if (platform.IsFlyoutPage)
             {
                 // Detail fills the window; the flyout is an overlay clipped to its panel.
@@ -177,9 +182,30 @@ public sealed class OpenHarmonyWindowRenderer
     private float _downY;
     private bool _moved;
     private OpenHarmonyView? _popupView;
+    private OpenHarmonyView? _flyoutPanelView;
+    private OpenHarmonyView? _textDragTarget;
+    private int _textDragAnchor;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
     public bool HasAnimations(IView? root) => TreeHasAnimations(root);
+
+    private static void ApplyTextSelection(OpenHarmonyView entry, int index)
+    {
+        // The drag anchor is the cursor position when the press started.
+        int anchor = entry.TextAnchor >= 0 ? entry.TextAnchor : index;
+        int length = Math.Abs(index - anchor);
+        entry.TextAnchor = anchor;
+        entry.CursorPosition = index;
+        entry.SelectionLength = length;
+        if (entry.VirtualView is Microsoft.Maui.Controls.Entry control)
+        {
+            // SelectionLength must be assigned before CursorPosition (MAUI clamps the cursor to
+            // the selection).
+            control.SelectionLength = length;
+            control.CursorPosition = index;
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
 
     private static bool TreeHasAnimations(IView? view)
     {
@@ -209,15 +235,26 @@ public sealed class OpenHarmonyWindowRenderer
         {
             _moved = true;
         }
-        if (_panTarget is { } panTarget)
-        {
-            OpenHarmonyGestures.SendPan(panTarget, x - _panStartX, y - _panStartY, _panGestureId);
-            return true;
-        }
         if (_dragSliderTarget is { IsSlider: true } slider)
         {
             float fraction = slider.SliderValueFromX(x);
             slider.SliderDrag?.Invoke(fraction, false);
+            return true;
+        }
+        if (_textDragTarget is { IsTextEntry: true } textEntry)
+        {
+            // Selection extension is approximate (proportional text metrics); keep the caret
+            // stable when the estimate does not move.
+            int index = textEntry.CursorIndexFromX(x);
+            if (index != textEntry.CursorPosition)
+            {
+                ApplyTextSelection(textEntry, index);
+            }
+            return true;
+        }
+        if (_panTarget is { } panTarget)
+        {
+            OpenHarmonyGestures.SendPan(panTarget, x - _panStartX, y - _panStartY, _panGestureId);
             return true;
         }
         if (_dragScrollTarget is not { IsScrollView: true } scroll)
@@ -245,6 +282,33 @@ public sealed class OpenHarmonyWindowRenderer
         {
             _popupView = FindOpenPopup(root);
         }
+        // Shell flyout panels behave the same way.
+        if (_flyoutPanelView is not { FlyoutOpen: true })
+        {
+            _flyoutPanelView = FindOpenFlyout(root);
+        }
+        if (_flyoutPanelView is { FlyoutOpen: true } flyoutPanel)
+        {
+            if (down || flyoutPanel.InHamburger(x, y))
+            {
+                // Consume the press (and the release of the tap that opened the drawer).
+                return true;
+            }
+            if (up)
+            {
+                int index = flyoutPanel.FlyoutItemAt(x, y);
+                if (index >= 0)
+                {
+                    flyoutPanel.FlyoutSelect?.Invoke(index);
+                }
+                else
+                {
+                    flyoutPanel.FlyoutOpen = false;
+                    OpenHarmonyBridge.RequestRedraw();
+                }
+            }
+            return true;
+        }
         if (_popupView is { PopupVisible: true } popup)
         {
             if (down)
@@ -256,16 +320,41 @@ public sealed class OpenHarmonyWindowRenderer
             }
             if (up && !_moved)
             {
-                int index = popup.PopupIndexAt(x, y);
-                if (index >= 0)
+                if (popup.IsCalendar)
                 {
-                    popup.PopupSelect?.Invoke(index);
+                    int hit = popup.CalendarHit(x, y);
+                    if (hit == -2)
+                    {
+                        popup.CalendarPreviousMonth?.Invoke();
+                    }
+                    else if (hit == -3)
+                    {
+                        popup.CalendarNextMonth?.Invoke();
+                    }
+                    else if (hit >= 1)
+                    {
+                        popup.CalendarSelectDay?.Invoke(new DateTime(popup.CalendarYear, popup.CalendarMonth, hit));
+                    }
+                    else if (hit == -1)
+                    {
+                        popup.PopupVisible = false;
+                        popup.PopupClosed?.Invoke();
+                        OpenHarmonyBridge.RequestRedraw();
+                    }
                 }
                 else
                 {
-                    popup.PopupVisible = false;
-                    popup.PopupClosed?.Invoke();
-                    OpenHarmonyBridge.RequestRedraw();
+                    int index = popup.PopupIndexAt(x, y);
+                    if (index >= 0)
+                    {
+                        popup.PopupSelect?.Invoke(index);
+                    }
+                    else
+                    {
+                        popup.PopupVisible = false;
+                        popup.PopupClosed?.Invoke();
+                        OpenHarmonyBridge.RequestRedraw();
+                    }
                 }
             }
             return true;
@@ -282,6 +371,7 @@ public sealed class OpenHarmonyWindowRenderer
             _dragLastY = y;
             _panTarget = null;
             _swipeTarget = null;
+            _textDragTarget = null;
             _panGestureId = -1;
             if (FindGestureTarget(root, x, y) is { } panCandidate)
             {
@@ -302,6 +392,7 @@ public sealed class OpenHarmonyWindowRenderer
         }
         else if (up)
         {
+            _textDragTarget = null;
             if (_panTarget is { } panTarget)
             {
                 OpenHarmonyGestures.CompletePan(panTarget, _panGestureId);
@@ -326,6 +417,14 @@ public sealed class OpenHarmonyWindowRenderer
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
     {
         bool handled = false;
+        if (view.Handler?.PlatformView is OpenHarmonyView { ShowsHamburger: true } shellView)
+        {
+            if (down && shellView.InHamburger(x, y) && !shellView.FlyoutOpen)
+            {
+                shellView.FlyoutRequested?.Invoke();
+                return true;
+            }
+        }
         if (view.Handler?.PlatformView is OpenHarmonyView { IsFlyoutPage: true } flyoutPage)
         {
             if (down)
@@ -366,6 +465,21 @@ public sealed class OpenHarmonyWindowRenderer
         {
             handled |= HandleTouchCore(child, down, up, childX, childY);
         }
+        if (view.Handler?.PlatformView is OpenHarmonyView { IsTextEntry: true } textEntry && !_moved)
+        {
+            if (down)
+            {
+                // Pressing inside a text entry moves the cursor and starts a selection drag.
+                _textDragTarget = textEntry;
+                _textDragAnchor = textEntry.CursorIndexFromX(x);
+                ApplyTextSelection(textEntry, _textDragAnchor);
+                handled = true;
+            }
+            else if (up)
+            {
+                _textDragTarget = null;
+            }
+        }
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
             // Views handle their own touches (buttons, navigation bars); plain views ignore them.
@@ -387,6 +501,24 @@ public sealed class OpenHarmonyWindowRenderer
             }
         }
         return handled;
+    }
+
+    /// <summary>Applies a cursor/selection update to the entry (platform + virtual view).</summary>
+    private OpenHarmonyView? FindOpenFlyout(IView view)
+    {
+        if (view.Handler?.PlatformView is OpenHarmonyView { FlyoutOpen: true } flyout)
+        {
+            return flyout;
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            OpenHarmonyView? found = FindOpenFlyout(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+        return null;
     }
 
     /// <summary>First platform view in the tree with an open dropdown.</summary>

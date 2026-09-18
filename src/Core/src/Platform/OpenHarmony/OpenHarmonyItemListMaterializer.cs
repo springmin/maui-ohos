@@ -29,9 +29,14 @@ internal sealed class OpenHarmonyItemListMaterializer
 
     public double ItemHeight { get; private set; } = 40;
 
+    /// <summary>Columns per row (CollectionView GridItemsLayout span).</summary>
+    public int Span { get; set; } = 1;
+
     public double SlotHeight => ItemHeight + Spacing;
 
-    public double TotalHeight => _data.Count == 0 ? 0 : _data.Count * SlotHeight;
+    private int RowCount => _data.Count == 0 ? 0 : (_data.Count + Span - 1) / Span;
+
+    public double TotalHeight => RowCount * SlotHeight;
 
     /// <summary>Replaces the data behind the list.</summary>
     public void SetItems(System.Collections.IEnumerable? source)
@@ -47,7 +52,19 @@ internal sealed class OpenHarmonyItemListMaterializer
         Reset();
     }
 
-    public double GetItemY(int index) => index * SlotHeight;
+    public double GetItemY(int index) => Span <= 1 ? index * SlotHeight : (index / Span) * SlotHeight;
+
+    public double GetItemX(int index, double width)
+    {
+        if (Span <= 1)
+        {
+            return 0;
+        }
+        int column = index % Span;
+        return column * (width / Span);
+    }
+
+    public double GetItemWidth(double width) => Span <= 1 ? width : width / Span - Spacing;
 
     /// <summary>Drops all materialized views (template changed).</summary>
     public void Reset()
@@ -68,8 +85,10 @@ internal sealed class OpenHarmonyItemListMaterializer
         int last = -1;
         if (frame.Height > 0 && frame.Width > 0 && _data.Count > 0)
         {
-            first = Math.Max(0, (int)Math.Floor((offset - WindowMargin) / SlotHeight));
-            last = Math.Min(_data.Count - 1, (int)Math.Ceiling((offset + frame.Height + WindowMargin) / SlotHeight));
+            int firstRow = Math.Max(0, (int)Math.Floor((offset - WindowMargin) / SlotHeight));
+            int lastRow = Math.Min(RowCount - 1, (int)Math.Ceiling((offset + frame.Height + WindowMargin) / SlotHeight));
+            first = firstRow * Span;
+            last = Math.Min(_data.Count - 1, (lastRow + 1) * Span - 1);
         }
         if (!force && first == _windowFirst && last == _windowLast)
         {
@@ -121,13 +140,15 @@ internal sealed class OpenHarmonyItemListMaterializer
         }
         RectF frame = _platformView.Frame;
         double width = frame.Width > 0 ? frame.Width : 1080;
-        view.Measure(width, double.PositiveInfinity);
+        double itemWidth = GetItemWidth(width);
+        view.Measure(itemWidth, double.PositiveInfinity);
         Size size = view.DesiredSize;
         if (index == 0 && size.Height > 0)
         {
             ItemHeight = size.Height;
         }
-        view.Arrange(new Rect(frame.X, frame.Y + GetItemY(index), width, Math.Max(size.Height, ItemHeight)));
+        view.Arrange(new Rect(frame.X + GetItemX(index, width), frame.Y + GetItemY(index),
+            itemWidth, Math.Max(size.Height, ItemHeight)));
         return view;
     }
 

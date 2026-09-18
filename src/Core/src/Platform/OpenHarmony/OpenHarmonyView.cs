@@ -26,6 +26,8 @@ public class OpenHarmonyView
     public bool IsFocused { get; set; }
     public int CursorPosition { get; set; } = -1;
     public int SelectionLength { get; set; }
+    /// <summary>Anchor of an in-progress selection drag (-1 when none).</summary>
+    public int TextAnchor { get; set; } = -1;
 
     // Image support
     public byte[]? ImageBytes { get; set; }
@@ -102,6 +104,159 @@ public class OpenHarmonyView
     /// <summary>(deltaX, deltaY) when a pan ends on this view (carousel paging).</summary>
     public Action<float, float>? Swipe { get; set; }
 
+    // Shell flyout support
+    public bool ShowsHamburger { get; set; }
+    public bool FlyoutOpen { get; set; }
+    public List<string> FlyoutItems { get; } = new();
+    public Action<int>? FlyoutSelect { get; set; }
+    public Action? FlyoutRequested { get; set; }
+
+    public void DrawFlyoutPanel(MauiCanvas canvas)
+    {
+        RectF frame = Frame;
+        float width = Math.Min(320f, frame.Width);
+        canvas.FillColor = Colors.Black.WithAlpha(0.5f);
+        canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+        canvas.FillColor = Colors.DimGray;
+        canvas.FillRectangle(frame.X, frame.Y, width, frame.Height);
+        canvas.FontSize = 26;
+        canvas.FontColor = Colors.White;
+        for (int i = 0; i < FlyoutItems.Count; i++)
+        {
+            float rowY = frame.Y + 16 + i * 52;
+            canvas.DrawString(FlyoutItems[i], frame.X + 20, rowY, width - 40, 44,
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+    }
+
+    /// <summary>Index of the flyout row at the point (-1 outside the panel, -2 dismiss).</summary>
+    public int FlyoutItemAt(float x, float y)
+    {
+        RectF frame = Frame;
+        float width = Math.Min(320f, frame.Width);
+        if (x > frame.X + width)
+        {
+            return -2;
+        }
+        float relative = y - frame.Y - 16;
+        if (relative < 0)
+        {
+            return -1;
+        }
+        int index = (int)(relative / 52);
+        return index >= 0 && index < FlyoutItems.Count ? index : -1;
+    }
+
+    // Calendar (DatePicker) support
+    public bool IsCalendar { get; set; }
+    public int CalendarYear { get; set; }
+    public int CalendarMonth { get; set; } = 1;
+    public int CalendarSelectedDay { get; set; }
+    public Action? CalendarPreviousMonth { get; set; }
+    public Action? CalendarNextMonth { get; set; }
+    public Action<DateTime>? CalendarSelectDay { get; set; }
+
+    public const float CalendarWidth = 380f;
+    public const float CalendarHeaderHeight = 52f;
+    public const float CalendarRowHeight = 46f;
+    public const int CalendarWeeks = 6;
+
+    public static float CalendarHeight => CalendarHeaderHeight + CalendarRowHeight * (CalendarWeeks + 1);
+
+    /// <summary>Draws the month calendar overlay.</summary>
+    public void DrawCalendar(MauiCanvas canvas)
+    {
+        RectF frame = Frame;
+        float x = frame.X;
+        float y = frame.Y + frame.Height;
+        float width = CalendarWidth;
+        canvas.FillColor = Colors.Black;
+        canvas.FillRectangle(x, y, width, CalendarHeight);
+        canvas.StrokeColor = Colors.Gray;
+        canvas.StrokeSize = 1;
+        canvas.DrawRectangle(x, y, width, CalendarHeight);
+
+        // Header: < Month Year >
+        canvas.FontSize = 26;
+        canvas.FontColor = Colors.White;
+        canvas.DrawString("<", x + 8, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString($"{CalendarYear:0000}-{CalendarMonth:00}", x + 48, y, width - 96, CalendarHeaderHeight,
+            HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString(">", x + width - 48, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        // Weekday header (Monday first).
+        string[] names = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
+        canvas.FontSize = 20;
+        canvas.FontColor = Colors.Gray;
+        for (int column = 0; column < 7; column++)
+        {
+            canvas.DrawString(names[column], x + column * width / 7f, y + CalendarHeaderHeight,
+                width / 7f, CalendarRowHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+
+        // Day grid.
+        DateTime first = new(CalendarYear, CalendarMonth, 1);
+        int leading = ((int)first.DayOfWeek + 6) % 7;
+        int days = DateTime.DaysInMonth(CalendarYear, CalendarMonth);
+        DateTime today = DateTime.Today;
+        canvas.FontSize = 22;
+        for (int day = 1; day <= days; day++)
+        {
+            int cell = leading + day - 1;
+            int row = cell / 7;
+            int column = cell % 7;
+            float cellX = x + column * width / 7f;
+            float cellY = y + CalendarHeaderHeight + (row + 1) * CalendarRowHeight;
+            if (row >= CalendarWeeks)
+            {
+                break;
+            }
+            bool isSelected = day == CalendarSelectedDay;
+            bool isToday = CalendarYear == today.Year && CalendarMonth == today.Month && day == today.Day;
+            if (isSelected)
+            {
+                canvas.FillColor = Colors.DodgerBlue;
+                canvas.FillCircle(cellX + width / 14f, cellY + CalendarRowHeight / 2f, CalendarRowHeight / 2f - 2);
+            }
+            canvas.FontColor = isSelected ? Colors.White : isToday ? Colors.DodgerBlue : Colors.White;
+            canvas.DrawString(day.ToString(), cellX, cellY, width / 7f, CalendarRowHeight,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+    }
+
+    /// <summary>Hit test for the calendar: -1 outside, -2 previous, -3 next, 1..31 day.</summary>
+    public int CalendarHit(float x, float y)
+    {
+        RectF frame = Frame;
+        float left = frame.X;
+        float top = frame.Y + frame.Height;
+        float width = CalendarWidth;
+        if (x < left || x > left + width || y < top || y > top + CalendarHeight)
+        {
+            return -1;
+        }
+        if (y < top + CalendarHeaderHeight)
+        {
+            if (x < left + 48)
+            {
+                return -2;
+            }
+            return x > left + width - 48 ? -3 : 0;
+        }
+        float rowY = y - top - CalendarHeaderHeight;
+        int row = (int)(rowY / CalendarRowHeight);
+        int column = (int)((x - left) / (width / 7f));
+        if (row < 1 || column < 0 || column > 6)
+        {
+            return 0;
+        }
+        DateTime first = new(CalendarYear, CalendarMonth, 1);
+        int leading = ((int)first.DayOfWeek + 6) % 7;
+        int day = (row - 1) * 7 + column - leading + 1;
+        int days = DateTime.DaysInMonth(CalendarYear, CalendarMonth);
+        return day >= 1 && day <= days ? day : 0;
+    }
+
     // Flyout page support
     public bool IsFlyoutPage { get; set; }
     public bool FlyoutPresented { get; set; }
@@ -119,7 +274,8 @@ public class OpenHarmonyView
     public bool InHamburger(float x, float y)
     {
         RectF frame = Frame;
-        return !FlyoutPresented && x >= frame.X && x <= frame.X + HamburgerSize &&
+        return (IsFlyoutPage && !FlyoutPresented || ShowsHamburger) &&
+               x >= frame.X && x <= frame.X + HamburgerSize &&
                y >= frame.Y && y <= frame.Y + HamburgerSize;
     }
 
@@ -225,6 +381,10 @@ public class OpenHarmonyView
         if (IsTabbedPage)
         {
             DrawTabBar(canvas, frame);
+            if (ShowsHamburger && !FlyoutOpen)
+            {
+                DrawHamburger(canvas, frame);
+            }
             return;
         }
         if (IsStepper)
@@ -287,6 +447,7 @@ public class OpenHarmonyView
             float padding = IsTextEntry ? 12f : (CornerRadius > 0 ? 24f : 0f);
             if (IsTextEntry && IsFocused)
             {
+                DrawSelection(canvas, frame, text);
                 DrawCaret(canvas, frame, text);
             }
             canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
@@ -294,6 +455,29 @@ public class OpenHarmonyView
         }
         // Children are drawn by OpenHarmonyWindowRenderer walking the MAUI tree; the list here
         // is used for hit-testing.
+    }
+
+    /// <summary>Approximate caret index for an x coordinate inside a text entry.</summary>
+    public int CursorIndexFromX(float x)
+    {
+        string text = Text ?? string.Empty;
+        if (text.Length == 0)
+        {
+            return 0;
+        }
+        RectF frame = Frame;
+        float left = frame.X + 12;
+        float width = 0;
+        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(text, FontSize, out int measured, out int _) && measured > 0)
+        {
+            width = measured;
+        }
+        if (width <= 0)
+        {
+            width = text.Length * FontSize * 0.55f;
+        }
+        float relative = Math.Clamp((x - left) / width, 0f, 1f);
+        return (int)Math.Round(relative * text.Length);
     }
 
     /// <summary>Draws the caret at the entry's cursor position (falls back to the text end).</summary>
@@ -317,6 +501,34 @@ public class OpenHarmonyView
         canvas.FillRectangle(frame.X + 12 + caretWidth, frame.Y + 8, 2, frame.Height - 16);
     }
 
+    private void DrawSelection(MauiCanvas canvas, RectF frame, string text)
+    {
+        if (SelectionLength <= 0)
+        {
+            return;
+        }
+        int start = Math.Clamp(Math.Min(CursorPosition, CursorPosition - SelectionLength), 0, text.Length);
+        int end = Math.Clamp(Math.Max(CursorPosition, CursorPosition - SelectionLength), 0, text.Length);
+        float left = frame.X + 12;
+        float right = left + EstimateWidth(text, FontSize);
+        float startX = left + (text.Length > 0 ? (right - left) * start / text.Length : 0);
+        float endX = left + (text.Length > 0 ? (right - left) * end / text.Length : 0);
+        if (endX > startX)
+        {
+            canvas.FillColor = Colors.DodgerBlue.WithAlpha(0.4f);
+            canvas.FillRectangle(startX, frame.Y + 8, endX - startX, frame.Height - 16);
+        }
+    }
+
+    private static float EstimateWidth(string text, float fontSize)
+    {
+        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(text, fontSize, out int measured, out int _) && measured > 0)
+        {
+            return measured;
+        }
+        return text.Length * fontSize * 0.55f;
+    }
+
     private void DrawImage(MauiCanvas canvas, RectF frame)
     {
         float imageWidth = frame.Width;
@@ -338,6 +550,11 @@ public class OpenHarmonyView
 
     private void DrawFlyoutChrome(MauiCanvas canvas, RectF frame)
     {
+        if (ShowsHamburger)
+        {
+            DrawHamburger(canvas, frame);
+            return;
+        }
         if (!FlyoutPresented)
         {
             // Hamburger button in the top-left corner of the detail.
@@ -358,6 +575,19 @@ public class OpenHarmonyView
         canvas.StrokeColor = Colors.Gray;
         canvas.StrokeSize = 1;
         canvas.DrawLine(frame.X + width, frame.Y, frame.X + width, frame.Y + frame.Height);
+    }
+
+    private void DrawHamburger(MauiCanvas canvas, RectF frame)
+    {
+        canvas.FillColor = Colors.Black;
+        canvas.FillRoundedRectangle(frame.X + 8, frame.Y + 8, 28, 28, 4);
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+        for (int line = 0; line < 3; line++)
+        {
+            float lineY = frame.Y + 15 + line * 7;
+            canvas.DrawLine(frame.X + 13, lineY, frame.X + 31, lineY);
+        }
     }
 
     private void DrawPicker(MauiCanvas canvas, RectF frame)

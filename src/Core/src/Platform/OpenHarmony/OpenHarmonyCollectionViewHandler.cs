@@ -46,8 +46,12 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        _materializer?.SetItems(VirtualView?.ItemsSource);
-        _materializer?.Update(force: true);
+        if (_materializer is not null && VirtualView is { } collection)
+        {
+            _materializer.Span = collection.ItemsLayout is GridItemsLayout grid ? Math.Max(1, grid.Span) : 1;
+            _materializer.SetItems(collection.ItemsSource);
+            _materializer.Update(force: true);
+        }
         PlatformView.ScrollContentWidth = (float)frame.Width;
         PlatformView.ScrollContentHeight = (float)(_materializer?.TotalHeight ?? 0);
     }

@@ -50,7 +50,11 @@ public static class MauiOpenHarmonyExtensions
     /// assembly, which does not exist for this slice, so they are assigned reflectively.
     /// </summary>
     private static void InstallEssentials(Microsoft.Maui.Storage.IPreferences preferences,
-                                           Microsoft.Maui.Storage.IFileSystem fileSystem)
+                                           Microsoft.Maui.Storage.IFileSystem fileSystem,
+                                           Microsoft.Maui.Storage.ISecureStorage secureStorage,
+                                           Microsoft.Maui.ApplicationModel.IAppInfo appInfo,
+                                           Microsoft.Maui.Devices.IDeviceInfo deviceInfo,
+                                           Microsoft.Maui.ApplicationModel.IVersionTracking versionTracking)
     {
         const System.Reflection.BindingFlags Static =
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
@@ -60,6 +64,14 @@ public static class MauiOpenHarmonyExtensions
                 ?.SetValue(null, preferences);
             typeof(Microsoft.Maui.Storage.FileSystem).GetProperty("Current", Static)
                 ?.SetValue(null, fileSystem);
+            typeof(Microsoft.Maui.Storage.SecureStorage).GetProperty("Current", Static)
+                ?.SetValue(null, secureStorage);
+            typeof(Microsoft.Maui.ApplicationModel.AppInfo).GetProperty("Current", Static)
+                ?.SetValue(null, appInfo);
+            typeof(Microsoft.Maui.Devices.DeviceInfo).GetProperty("Current", Static)
+                ?.SetValue(null, deviceInfo);
+            typeof(Microsoft.Maui.ApplicationModel.VersionTracking).GetProperty("Current", Static)
+                ?.SetValue(null, versionTracking);
         }
         catch (Exception ex)
         {
@@ -82,7 +94,15 @@ public static class MauiOpenHarmonyExtensions
         var fileSystem = new OpenHarmonyFileSystem();
         builder.Services.AddSingleton<Microsoft.Maui.Storage.IPreferences>(preferences);
         builder.Services.AddSingleton<Microsoft.Maui.Storage.IFileSystem>(fileSystem);
-        InstallEssentials(preferences, fileSystem);
+        var secureStorage = new OpenHarmonySecureStorage();
+        var appInfo = new OpenHarmonyAppInfo();
+        var deviceInfo = new OpenHarmonyDeviceInfo();
+        var versionTracking = new OpenHarmonyVersionTracking(preferences);
+        builder.Services.AddSingleton<Microsoft.Maui.Storage.ISecureStorage>(secureStorage);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IAppInfo>(appInfo);
+        builder.Services.AddSingleton<Microsoft.Maui.Devices.IDeviceInfo>(deviceInfo);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IVersionTracking>(versionTracking);
+        InstallEssentials(preferences, fileSystem, secureStorage, appInfo, deviceInfo, versionTracking);
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
         builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();

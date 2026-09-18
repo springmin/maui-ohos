@@ -22,25 +22,41 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
 
     protected override OpenHarmonyView CreatePlatformView()
     {
-        var view = new OpenHarmonyView { IsPicker = true, Background = Colors.DimGray, FontSize = 26 };
+        var view = new OpenHarmonyView { IsPicker = true, IsCalendar = true, Background = Colors.DimGray, FontSize = 26 };
         view.Tap = () =>
         {
-            RebuildItems();
+            DateTime current = (VirtualView?.Date ?? DateTime.Today).Date;
+            view.CalendarYear = current.Year;
+            view.CalendarMonth = current.Month;
+            view.CalendarSelectedDay = current.Day;
             view.PopupVisible = true;
             OpenHarmonyBridge.RequestRedraw();
         };
-        view.PopupSelect = index =>
+        view.CalendarPreviousMonth = () =>
         {
-            if (VirtualView is { } picker && index >= 0 && index < view.PopupItems.Count)
+            DateTime month = new DateTime(view.CalendarYear, view.CalendarMonth, 1).AddMonths(-1);
+            view.CalendarYear = month.Year;
+            view.CalendarMonth = month.Month;
+            OpenHarmonyBridge.RequestRedraw();
+        };
+        view.CalendarNextMonth = () =>
+        {
+            DateTime month = new DateTime(view.CalendarYear, view.CalendarMonth, 1).AddMonths(1);
+            view.CalendarYear = month.Year;
+            view.CalendarMonth = month.Month;
+            OpenHarmonyBridge.RequestRedraw();
+        };
+        view.CalendarSelectDay = date =>
+        {
+            if (VirtualView is { } picker)
             {
-                DateTime today = (picker.Date ?? DateTime.Today).Date;
-                DateTime chosen = today.AddDays(index - DaysAroundCurrent);
                 switch (picker)
                 {
                     case Microsoft.Maui.Controls.DatePicker control:
-                        control.Date = chosen;
+                        control.Date = date;
                         break;
                 }
+                view.CalendarSelectedDay = date.Day;
                 MapDate(this, picker);
             }
             view.PopupVisible = false;

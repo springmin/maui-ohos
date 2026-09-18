@@ -31,6 +31,20 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
                 shell.CurrentItem = shell.Items[index];
             }
         };
+        view.FlyoutRequested = () =>
+        {
+            view.FlyoutOpen = true;
+            OpenHarmonyBridge.RequestRedraw();
+        };
+        view.FlyoutSelect = index =>
+        {
+            view.FlyoutOpen = false;
+            if (VirtualView is { } shell && index >= 0 && index < shell.Items.Count)
+            {
+                shell.CurrentItem = shell.Items[index];
+            }
+            OpenHarmonyBridge.RequestRedraw();
+        };
         return view;
     }
 
@@ -73,6 +87,13 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         }
         int index = shell.CurrentItem is { } current ? shell.Items.IndexOf(current) : -1;
         view.SelectedTab = Math.Max(0, index);
+        // Flyout (hamburger + drawer) shows the shell items.
+        view.ShowsHamburger = shell.FlyoutBehavior != FlyoutBehavior.Disabled;
+        view.FlyoutItems.Clear();
+        foreach (ShellItem item in shell.Items)
+        {
+            view.FlyoutItems.Add(item.Title ?? string.Empty);
+        }
         // Shell contents are created lazily: realise the current one so it can be rendered.
         if (shell.CurrentPage is null &&
             shell.CurrentItem?.CurrentItem is ShellSection { CurrentItem: ShellContent content } &&

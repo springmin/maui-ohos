@@ -151,6 +151,15 @@ public sealed class OpenHarmonyMauiAppHost
         // in this slice, so arrange the first descendant that has one.
         OpenHarmonyHandlerConnector.ConnectTree(content);
         var bounds = new Rect(0, 0, width, height);
+        if (OpenHarmonyBridge.TryGetAvoidArea(out int avoidTop, out int avoidBottom, out int avoidLeft, out int avoidRight))
+        {
+            var inset = new Rect(avoidLeft, avoidTop,
+                Math.Max(1, width - avoidLeft - avoidRight), Math.Max(1, height - avoidTop - avoidBottom));
+            if (inset.Width > 1 && inset.Height > 1)
+            {
+                bounds = inset;
+            }
+        }
         // Pages have no platform layout of their own, so the content chain is arranged directly
         // (navigation bars are subtracted on the way down).
         OpenHarmonyContentArrange.Arrange(content, bounds);

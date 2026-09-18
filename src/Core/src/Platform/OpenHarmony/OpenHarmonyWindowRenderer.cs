@@ -133,6 +133,9 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 _canvas.SaveState();
                 double effectiveOpacity = dimmed ? view.Opacity * 0.5 : view.Opacity;
+                if (view is Microsoft.Maui.Controls.Button)
+                {
+                }
                 _canvas.Alpha = (float)Math.Clamp(effectiveOpacity, 0, 1);
                 if (view.TranslationX != 0 || view.TranslationY != 0)
                 {

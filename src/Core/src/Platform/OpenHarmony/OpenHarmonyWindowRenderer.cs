@@ -61,6 +61,18 @@ public sealed class OpenHarmonyWindowRenderer
         {
             yield return currentPage;
         }
+        // Flyout pages: the detail is always visible, the flyout only while presented.
+        if (view is Microsoft.Maui.Controls.FlyoutPage flyoutPage)
+        {
+            if (flyoutPage.Detail is IView flyoutDetail)
+            {
+                yield return flyoutDetail;
+            }
+            if (flyoutPage.IsPresented && flyoutPage.Flyout is IView flyoutContent)
+            {
+                yield return flyoutContent;
+            }
+        }
         // Platform-owned children (collection view items) are part of the rendered tree.
         if (view.Handler?.PlatformView is OpenHarmonyView { ViewChildren.Count: > 0 } platform)
         {
@@ -108,6 +120,26 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 // Drawn last so the dropdown floats above the rest of the tree.
                 _popupView = platform;
+            }
+            if (platform.IsFlyoutPage)
+            {
+                // Detail fills the window; the flyout is an overlay clipped to its panel.
+                IReadOnlyList<IView> flyoutChildren = ChildrenOf(view).ToList();
+                if (flyoutChildren.Count > 0)
+                {
+                    DrawView(flyoutChildren[0]);
+                }
+                if (platform.FlyoutPresented && flyoutChildren.Count > 1)
+                {
+                    RectF flyoutFrame = platform.Frame;
+                    _canvas.FillColor = Colors.Black.WithAlpha(0.5f);
+                    _canvas.FillRectangle(flyoutFrame.X, flyoutFrame.Y, flyoutFrame.Width, flyoutFrame.Height);
+                    _canvas.SaveState();
+                    _canvas.ClipRectangle(flyoutFrame.X, flyoutFrame.Y, platform.FlyoutWidth, flyoutFrame.Height);
+                    DrawView(flyoutChildren[1]);
+                    _canvas.RestoreState();
+                }
+                return;
             }
             if (platform.IsScrollView)
             {
@@ -278,6 +310,33 @@ public sealed class OpenHarmonyWindowRenderer
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
     {
         bool handled = false;
+        if (view.Handler?.PlatformView is OpenHarmonyView { IsFlyoutPage: true } flyoutPage)
+        {
+            if (down)
+            {
+                if (flyoutPage.FlyoutPresented && !flyoutPage.InFlyoutPanel(x, y))
+                {
+                    flyoutPage.FlyoutDismiss?.Invoke();
+                    return true;
+                }
+                if (flyoutPage.InHamburger(x, y))
+                {
+                    flyoutPage.OpenFlyout?.Invoke();
+                    return true;
+                }
+            }
+            // While the panel is open only it receives touches; otherwise only the detail does.
+            foreach (IView child in ChildrenOf(view))
+            {
+                bool isFlyout = ReferenceEquals(child, (view as Microsoft.Maui.Controls.FlyoutPage)?.Flyout);
+                bool isDetail = !isFlyout;
+                if (flyoutPage.FlyoutPresented ? isFlyout : isDetail)
+                {
+                    handled |= HandleTouchCore(child, down, up, x, y);
+                }
+            }
+            return handled || (down && flyoutPage.FlyoutPresented);
+        }
         // Children of a scrolled view are shifted by the scroll offset; navigation page
         // content is already arranged below its bar.
         float childX = x;

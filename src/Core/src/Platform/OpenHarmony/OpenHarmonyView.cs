@@ -24,6 +24,8 @@ public class OpenHarmonyView
     public bool IsTextEntry { get; set; }
     public string? Placeholder { get; set; }
     public bool IsFocused { get; set; }
+    public int CursorPosition { get; set; } = -1;
+    public int SelectionLength { get; set; }
 
     // Image support
     public byte[]? ImageBytes { get; set; }
@@ -96,6 +98,27 @@ public class OpenHarmonyView
     public bool IsRadioButton { get; set; }
     public bool RadioChecked { get; set; }
     public Color RadioColor { get; set; } = Colors.DodgerBlue;
+
+    // Flyout page support
+    public bool IsFlyoutPage { get; set; }
+    public bool FlyoutPresented { get; set; }
+    public float FlyoutWidth { get; set; } = 320f;
+    public Action? OpenFlyout { get; set; }
+    public Action? FlyoutDismiss { get; set; }
+    public const float HamburgerSize = 40f;
+
+    public bool InFlyoutPanel(float x, float y)
+    {
+        RectF frame = Frame;
+        return FlyoutPresented && x >= frame.X && x <= frame.X + FlyoutWidth;
+    }
+
+    public bool InHamburger(float x, float y)
+    {
+        RectF frame = Frame;
+        return !FlyoutPresented && x >= frame.X && x <= frame.X + HamburgerSize &&
+               y >= frame.Y && y <= frame.Y + HamburgerSize;
+    }
 
     // Picker support (inline dropdown rendered as an overlay)
     public bool IsPicker { get; set; }
@@ -184,6 +207,11 @@ public class OpenHarmonyView
             DrawShape(canvas, frame);
             return;
         }
+        if (IsFlyoutPage)
+        {
+            DrawFlyoutChrome(canvas, frame);
+            return;
+        }
         if (IsPicker)
         {
             DrawPicker(canvas, frame);
@@ -243,8 +271,7 @@ public class OpenHarmonyView
                 HorizontalAlignment.Left, VerticalAlignment.Center);
             if (IsFocused)
             {
-                canvas.FillColor = Colors.White;
-                canvas.FillRectangle(frame.X + 12, frame.Y + 8, 2, frame.Height - 16);
+                DrawCaret(canvas, frame, string.Empty);
             }
             return;
         }
@@ -253,11 +280,36 @@ public class OpenHarmonyView
             canvas.FontColor = TextColor;
             canvas.FontSize = FontSize;
             float padding = IsTextEntry ? 12f : (CornerRadius > 0 ? 24f : 0f);
+            if (IsTextEntry && IsFocused)
+            {
+                DrawCaret(canvas, frame, text);
+            }
             canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
         // Children are drawn by OpenHarmonyWindowRenderer walking the MAUI tree; the list here
         // is used for hit-testing.
+    }
+
+    /// <summary>Draws the caret at the entry's cursor position (falls back to the text end).</summary>
+    private void DrawCaret(MauiCanvas canvas, RectF frame, string text)
+    {
+        int caretIndex = CursorPosition >= 0 && CursorPosition <= text.Length ? CursorPosition : text.Length;
+        float caretWidth = 0;
+        if (caretIndex > 0)
+        {
+            string prefix = text[..caretIndex];
+            if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(prefix, FontSize, out int measured, out int _) && measured > 0)
+            {
+                caretWidth = measured;
+            }
+            else
+            {
+                caretWidth = prefix.Length * FontSize * 0.55f;
+            }
+        }
+        canvas.FillColor = Colors.White;
+        canvas.FillRectangle(frame.X + 12 + caretWidth, frame.Y + 8, 2, frame.Height - 16);
     }
 
     private void DrawImage(MauiCanvas canvas, RectF frame)
@@ -277,6 +329,30 @@ public class OpenHarmonyView
         }
         Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
             ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
+    }
+
+    private void DrawFlyoutChrome(MauiCanvas canvas, RectF frame)
+    {
+        if (!FlyoutPresented)
+        {
+            // Hamburger button in the top-left corner of the detail.
+            canvas.FillColor = Colors.Black;
+            canvas.FillRoundedRectangle(frame.X + 8, frame.Y + 8, 28, 28, 4);
+            canvas.StrokeColor = Colors.White;
+            canvas.StrokeSize = 2;
+            for (int line = 0; line < 3; line++)
+            {
+                float lineY = frame.Y + 15 + line * 7;
+                canvas.DrawLine(frame.X + 13, lineY, frame.X + 31, lineY);
+            }
+            return;
+        }
+        float width = Math.Min(FlyoutWidth, frame.Width);
+        canvas.FillColor = Colors.DimGray;
+        canvas.FillRectangle(frame.X, frame.Y, width, frame.Height);
+        canvas.StrokeColor = Colors.Gray;
+        canvas.StrokeSize = 1;
+        canvas.DrawLine(frame.X + width, frame.Y, frame.X + width, frame.Y + frame.Height);
     }
 
     private void DrawPicker(MauiCanvas canvas, RectF frame)

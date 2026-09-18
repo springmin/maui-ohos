@@ -16,6 +16,8 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
             [nameof(ITextStyle.TextColor)] = MapTextColor,
             [nameof(ITextStyle.Font)] = MapFont,
             [nameof(IPlaceholder.Placeholder)] = MapPlaceholder,
+            [nameof(ITextInput.CursorPosition)] = MapCursor,
+            [nameof(ITextInput.SelectionLength)] = MapCursor,
         };
 
     public OpenHarmonyEntryHandler() : base(Mapper) { }
@@ -120,4 +122,10 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
 
     public static void MapPlaceholder(OpenHarmonyEntryHandler handler, IEntry entry)
         => handler.PlatformView.Placeholder = ((IPlaceholder)entry).Placeholder;
+
+    public static void MapCursor(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.CursorPosition = ((ITextInput)entry).CursorPosition;
+        handler.PlatformView.SelectionLength = ((ITextInput)entry).SelectionLength;
+    }
 }

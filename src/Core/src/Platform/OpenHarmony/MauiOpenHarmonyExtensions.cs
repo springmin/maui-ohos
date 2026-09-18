@@ -40,6 +40,8 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.TabbedPage)] = typeof(OpenHarmonyTabbedPageHandler),
         [typeof(Microsoft.Maui.Controls.FlyoutPage)] = typeof(OpenHarmonyFlyoutPageHandler),
         [typeof(Microsoft.Maui.Controls.Shell)] = typeof(OpenHarmonyShellHandler),
+        [typeof(Microsoft.Maui.Controls.ListView)] = typeof(OpenHarmonyListViewHandler),
+        [typeof(Microsoft.Maui.Controls.CarouselView)] = typeof(OpenHarmonyCarouselViewHandler),
     };
 
     /// <summary>

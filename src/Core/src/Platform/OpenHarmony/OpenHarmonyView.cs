@@ -99,6 +99,9 @@ public class OpenHarmonyView
     public bool RadioChecked { get; set; }
     public Color RadioColor { get; set; } = Colors.DodgerBlue;
 
+    /// <summary>(deltaX, deltaY) when a pan ends on this view (carousel paging).</summary>
+    public Action<float, float>? Swipe { get; set; }
+
     // Flyout page support
     public bool IsFlyoutPage { get; set; }
     public bool FlyoutPresented { get; set; }

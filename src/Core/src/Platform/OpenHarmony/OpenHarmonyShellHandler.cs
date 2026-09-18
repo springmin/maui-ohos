@@ -87,7 +87,13 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
     }
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
-        => new(widthConstraint, heightConstraint);
+    {
+        var element = VirtualView as Microsoft.Maui.Controls.VisualElement;
+        double height = element?.HeightRequest > 0
+            ? element.HeightRequest
+            : (double.IsFinite(heightConstraint) ? heightConstraint : 600);
+        return new Size(widthConstraint, height);
+    }
 
     public override void PlatformArrange(Rect frame)
     {

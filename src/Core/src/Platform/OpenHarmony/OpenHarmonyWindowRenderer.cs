@@ -169,6 +169,7 @@ public sealed class OpenHarmonyWindowRenderer
     private OpenHarmonyView? _dragSliderTarget;
     private float _dragLastY;
     private IView? _panTarget;
+    private OpenHarmonyView? _swipeTarget;
     private int _panGestureId = -1;
     private float _panStartX;
     private float _panStartY;
@@ -280,14 +281,23 @@ public sealed class OpenHarmonyWindowRenderer
             _dragSliderTarget = FindSlider(root, x, y);
             _dragLastY = y;
             _panTarget = null;
+            _swipeTarget = null;
             _panGestureId = -1;
-            if (FindGestureTarget(root, x, y) is { } panCandidate &&
-                OpenHarmonyGestures.HasPan(panCandidate))
+            if (FindGestureTarget(root, x, y) is { } panCandidate)
             {
-                _panTarget = panCandidate;
-                _panStartX = x;
-                _panStartY = y;
-                _panGestureId = OpenHarmonyGestures.StartPan(panCandidate, x, y);
+                if (OpenHarmonyGestures.HasPan(panCandidate))
+                {
+                    _panTarget = panCandidate;
+                    _panStartX = x;
+                    _panStartY = y;
+                    _panGestureId = OpenHarmonyGestures.StartPan(panCandidate, x, y);
+                }
+                else if (panCandidate.Handler?.PlatformView is OpenHarmonyView { Swipe: not null } swipeView)
+                {
+                    _swipeTarget = swipeView;
+                    _panStartX = x;
+                    _panStartY = y;
+                }
             }
         }
         else if (up)
@@ -297,6 +307,11 @@ public sealed class OpenHarmonyWindowRenderer
                 OpenHarmonyGestures.CompletePan(panTarget, _panGestureId);
                 _panTarget = null;
                 _panGestureId = -1;
+            }
+            if (_swipeTarget is { } swipeView)
+            {
+                swipeView.Swipe?.Invoke(x - _panStartX, y - _panStartY);
+                _swipeTarget = null;
             }
             if (_dragSliderTarget is { IsSlider: true } slider)
             {
@@ -414,7 +429,8 @@ public sealed class OpenHarmonyWindowRenderer
         {
             found = FindGestureTarget(child, localX, localY) ?? found;
         }
-        return found ?? (OpenHarmonyGestures.HasGestures(view) ? view : null);
+        return found ?? (OpenHarmonyGestures.HasGestures(view) ||
+                         view.Handler?.PlatformView is OpenHarmonyView { Swipe: not null } ? view : null);
     }
 
     /// <summary>Slider containing the point (the nearest ancestor wins).</summary>

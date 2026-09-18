@@ -1,4 +1,5 @@
-// CollectionView handler for OpenHarmony: virtualized vertical list (shared materializer).
+// Legacy ListView handler for OpenHarmony: shares the virtualized list pipeline. Cells are
+// rendered through their inner view (ViewCell) or as text (TextCell/ImageCell).
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
@@ -6,18 +7,18 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<CollectionView>
+public sealed class OpenHarmonyListViewHandler : OpenHarmonyViewHandler<ListView>
 {
     private OpenHarmonyItemListMaterializer? _materializer;
 
-    public static readonly IPropertyMapper<CollectionView, OpenHarmonyCollectionViewHandler> Mapper =
-        new PropertyMapper<CollectionView, OpenHarmonyCollectionViewHandler>(ViewMapper)
+    public static readonly IPropertyMapper<ListView, OpenHarmonyListViewHandler> Mapper =
+        new PropertyMapper<ListView, OpenHarmonyListViewHandler>(ViewMapper)
         {
-            [nameof(ItemsView.ItemsSource)] = MapItemsSource,
-            [nameof(ItemsView.ItemTemplate)] = MapItemTemplate,
+            [nameof(ListView.ItemsSource)] = MapItemsSource,
+            [nameof(ListView.ItemTemplate)] = MapItemTemplate,
         };
 
-    public OpenHarmonyCollectionViewHandler() : base(Mapper) { }
+    public OpenHarmonyListViewHandler() : base(Mapper) { }
 
     protected override OpenHarmonyView CreatePlatformView()
     {
@@ -54,31 +55,38 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
 
     private void Select(object? item)
     {
-        if (VirtualView is { } collection && collection.SelectionMode != SelectionMode.None)
+        if (VirtualView is { } listView)
         {
-            collection.SelectedItem = item;
+            listView.SelectedItem = item;
             OpenHarmonyBridge.RequestRedraw();
         }
     }
 
     private View CreateItemView(object? item)
     {
-        if (VirtualView?.ItemTemplate?.CreateContent() is View templated)
+        object? content = VirtualView?.ItemTemplate?.CreateContent();
+        if (content is BindableObject bindable && bindable.BindingContext is null)
         {
-            OpenHarmonyHandlerConnector.ConnectTree(templated);
-            return templated;
+            // Cells resolve their bindings from the item before we read their text.
+            bindable.BindingContext = item;
         }
-        var label = new Label { Text = item?.ToString() ?? string.Empty, FontSize = 26 };
-        OpenHarmonyHandlerConnector.Connect(label);
-        return label;
+        View view = content switch
+        {
+            ViewCell cell when cell.View is View inner => inner,
+            TextCell textCell => new Label { Text = textCell.Text ?? string.Empty, FontSize = 26 },
+            View v => v,
+            _ => new Label { Text = content?.ToString() ?? item?.ToString() ?? string.Empty, FontSize = 26 },
+        };
+        OpenHarmonyHandlerConnector.ConnectTree(view);
+        return view;
     }
 
-    public static void MapItemsSource(OpenHarmonyCollectionViewHandler handler, CollectionView collectionView)
+    public static void MapItemsSource(OpenHarmonyListViewHandler handler, ListView listView)
     {
-        handler._materializer?.SetItems(collectionView.ItemsSource);
+        handler._materializer?.SetItems(listView.ItemsSource);
         handler._materializer?.Update(force: true);
     }
 
-    public static void MapItemTemplate(OpenHarmonyCollectionViewHandler handler, CollectionView collectionView)
+    public static void MapItemTemplate(OpenHarmonyListViewHandler handler, ListView listView)
         => handler._materializer?.Reset();
 }

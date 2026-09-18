@@ -227,15 +227,16 @@ public sealed class OpenHarmonyWindowRenderer
         // The drag anchor is the cursor position when the press started.
         int anchor = entry.TextAnchor >= 0 ? entry.TextAnchor : index;
         int length = Math.Abs(index - anchor);
+        // MAUI semantics: the caret sits at the end of the selection and SelectionLength spans
+        // the range (Entry clamps CursorPosition to be at least SelectionLength).
+        int caret = Math.Max(index, anchor);
         entry.TextAnchor = anchor;
-        entry.CursorPosition = index;
+        entry.CursorPosition = caret;
         entry.SelectionLength = length;
         if (entry.VirtualView is Microsoft.Maui.Controls.Entry control)
         {
-            // SelectionLength must be assigned before CursorPosition (MAUI clamps the cursor to
-            // the selection).
+            control.CursorPosition = caret;
             control.SelectionLength = length;
-            control.CursorPosition = index;
         }
         OpenHarmonyBridge.RequestRedraw();
     }

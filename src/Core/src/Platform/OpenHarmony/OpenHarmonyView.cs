@@ -457,7 +457,43 @@ public class OpenHarmonyView
         // is used for hit-testing.
     }
 
-    /// <summary>Approximate caret index for an x coordinate inside a text entry.</summary>
+    private float[]? _charWidths;
+    private string? _charWidthsText;
+    private float _charWidthsFontSize;
+
+    /// <summary>Per-character widths (cached per text/font size) for caret hit testing.</summary>
+    private float[] CharWidths(string text)
+    {
+        if (_charWidths is not null && _charWidthsText == text && Math.Abs(_charWidthsFontSize - FontSize) < 0.01f)
+        {
+            return _charWidths;
+        }
+        var widths = new float[text.Length];
+        float previous = 0;
+        float accumulated = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            string prefix = text[..(i + 1)];
+            float prefixWidth;
+            if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(prefix, FontSize, out int measured, out int _) && measured > 0)
+            {
+                prefixWidth = measured;
+            }
+            else
+            {
+                prefixWidth = prefix.Length * FontSize * 0.55f;
+            }
+            widths[i] = Math.Max(0f, prefixWidth - previous);
+            previous = prefixWidth;
+            accumulated += widths[i];
+        }
+        _charWidths = widths;
+        _charWidthsText = text;
+        _charWidthsFontSize = FontSize;
+        return widths;
+    }
+
+    /// <summary>Caret index for an x coordinate inside a text entry (midpoint hit testing).</summary>
     public int CursorIndexFromX(float x)
     {
         string text = Text ?? string.Empty;
@@ -465,19 +501,23 @@ public class OpenHarmonyView
         {
             return 0;
         }
-        RectF frame = Frame;
-        float left = frame.X + 12;
-        float width = 0;
-        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(text, FontSize, out int measured, out int _) && measured > 0)
+        float left = Frame.X + 12;
+        float relative = x - left;
+        if (relative <= 0)
         {
-            width = measured;
+            return 0;
         }
-        if (width <= 0)
+        float[] widths = CharWidths(text);
+        float accumulated = 0;
+        for (int i = 0; i < widths.Length; i++)
         {
-            width = text.Length * FontSize * 0.55f;
+            if (relative < accumulated + widths[i] / 2f)
+            {
+                return i;
+            }
+            accumulated += widths[i];
         }
-        float relative = Math.Clamp((x - left) / width, 0f, 1f);
-        return (int)Math.Round(relative * text.Length);
+        return text.Length;
     }
 
     /// <summary>Draws the caret at the entry's cursor position (falls back to the text end).</summary>

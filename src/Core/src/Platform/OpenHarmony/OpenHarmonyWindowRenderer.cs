@@ -125,15 +125,15 @@ public sealed class OpenHarmonyWindowRenderer
                 // chrome is re-synced whenever it is drawn.
                 platform.ChromeRefresh?.Invoke();
             }
-            bool transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
+            bool dimmed = !view.IsEnabled ||
+                          (view as Microsoft.Maui.Controls.VisualElement)?.IsEnabled == false;
+            bool transformed = dimmed || view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
                                view.Scale != 1.0 || view.Rotation != 0;
-            if (view is Microsoft.Maui.Controls.Button)
-            {
-            }
             if (transformed)
             {
                 _canvas.SaveState();
-                _canvas.Alpha = (float)Math.Clamp(view.Opacity, 0, 1);
+                double effectiveOpacity = dimmed ? view.Opacity * 0.5 : view.Opacity;
+                _canvas.Alpha = (float)Math.Clamp(effectiveOpacity, 0, 1);
                 if (view.TranslationX != 0 || view.TranslationY != 0)
                 {
                     _canvas.Translate((float)view.TranslationX, (float)view.TranslationY);

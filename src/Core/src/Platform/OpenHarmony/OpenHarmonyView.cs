@@ -357,6 +357,24 @@ public class OpenHarmonyView
     /// <summary>Width of the tappable back area in the navigation bar.</summary>
     public const float NavBackWidth = 88f;
 
+    // RefreshView support
+    public bool IsRefreshView { get; set; }
+    public bool IsRefreshing { get; set; }
+    public Color RefreshColor { get; set; } = Colors.DodgerBlue;
+    public Action<bool>? RefreshChanged { get; set; }
+
+    /// <summary>Called by the renderer when a drag over this view completes.</summary>
+    public void RefreshDrag(float dx, float dy)
+    {
+        if (!IsRefreshView || dy < 60 || IsRefreshing)
+        {
+            return;
+        }
+        // A pull past the threshold starts a refresh; MAUI runs the command when IsRefreshing flips.
+        IsRefreshing = true;
+        RefreshChanged?.Invoke(true);
+    }
+
     // SwipeView support
     public bool IsSwipeView { get; set; }
     public bool IsSwipeOpen { get; private set; }
@@ -509,6 +527,10 @@ public class OpenHarmonyView
         if (IsSwipeView && IsSwipeOpen)
         {
             DrawSwipePanel(canvas, frame);
+        }
+        if (IsRefreshView && IsRefreshing)
+        {
+            DrawRefreshIndicator(canvas, frame);
         }
         if (IsGraphicsView)
         {
@@ -1010,6 +1032,15 @@ public class OpenHarmonyView
             canvas.DrawString(Text, cx + side, frame.Y, frame.Width - side - 4, frame.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
+    }
+
+    private void DrawRefreshIndicator(MauiCanvas canvas, RectF frame)
+    {
+        float cx = frame.Center.X;
+        float cy = frame.Y + 20;
+        canvas.StrokeColor = RefreshColor;
+        canvas.StrokeSize = 4;
+        canvas.DrawArc(cx - 14, cy - 14, 28, 28, 20, 300, false, false);
     }
 
     private void DrawSwipePanel(MauiCanvas canvas, RectF frame)

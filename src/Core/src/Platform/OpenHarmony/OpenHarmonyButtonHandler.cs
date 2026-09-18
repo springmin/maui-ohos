@@ -13,6 +13,7 @@ public sealed class OpenHarmonyButtonHandler : OpenHarmonyViewHandler<IButton>
             [nameof(ITextStyle.TextColor)] = MapTextColor,
             [nameof(IButton.Background)] = MapBackground,
             [nameof(IButtonStroke.CornerRadius)] = MapCornerRadius,
+            [nameof(IImageSourcePart.Source)] = MapSource,
         };
 
     public OpenHarmonyButtonHandler() : base(Mapper) { }
@@ -41,6 +42,16 @@ public sealed class OpenHarmonyButtonHandler : OpenHarmonyViewHandler<IButton>
         => handler.PlatformView.Background = (button as IView)?.Background as SolidPaint is { Color: { } color }
             ? color
             : Colors.MediumSeaGreen;
+
+    public static void MapSource(OpenHarmonyButtonHandler handler, IButton button)
+    {
+        handler.PlatformView.ImageBytes = null;
+        if ((button as IImageSourcePart)?.Source is Microsoft.Maui.Controls.FileImageSource file &&
+            !string.IsNullOrEmpty(file.File) && File.Exists(file.File))
+        {
+            handler.PlatformView.ImageBytes = File.ReadAllBytes(file.File);
+        }
+    }
 
     public static void MapCornerRadius(OpenHarmonyButtonHandler handler, IButton button)
         => handler.PlatformView.CornerRadius = (float)((button as IButtonStroke)?.CornerRadius ?? 24);

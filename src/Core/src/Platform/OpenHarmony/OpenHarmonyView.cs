@@ -78,6 +78,10 @@ public class OpenHarmonyView
     /// <summary>Raised when image bytes are blitted (tests observe the destination rect).</summary>
     public static Action<RectF>? ImageDrawn;
 
+    // GraphicsView support
+    public bool IsGraphicsView { get; set; }
+    public Action<PointF>? GraphicsTap { get; set; }
+
     // Indicator view support
     public bool IsIndicatorView { get; set; }
     public int IndicatorCount { get; set; }
@@ -412,6 +416,14 @@ public class OpenHarmonyView
         if (IsFlyoutPage)
         {
             DrawFlyoutChrome(canvas, frame);
+            return;
+        }
+        if (IsGraphicsView)
+        {
+            if (VirtualView is IGraphicsView graphics && graphics.Drawable is { } drawable)
+            {
+                drawable.Draw(canvas, new RectF(frame.X, frame.Y, frame.Width, frame.Height));
+            }
             return;
         }
         if (IsIndicatorView)
@@ -1042,6 +1054,23 @@ public class OpenHarmonyView
                 if (tab >= 0)
                 {
                     TabSelected?.Invoke(tab);
+                }
+                return true;
+            }
+        }
+        if (IsGraphicsView)
+        {
+            if (down && HitTest(x, y))
+            {
+                Pressed = true;
+                return true;
+            }
+            if (up && Pressed)
+            {
+                Pressed = false;
+                if (HitTest(x, y))
+                {
+                    GraphicsTap?.Invoke(new PointF(x, y));
                 }
                 return true;
             }

@@ -103,6 +103,21 @@ public sealed class OpenHarmonyMauiAppHost
 
     public IWindow? Window => _window;
 
+    /// <summary>The view to render: the top modal page when one is pushed, else the window content.</summary>
+    private IView? RootView
+    {
+        get
+        {
+            if (_window is Microsoft.Maui.Controls.Window window &&
+                window.Navigation.ModalStack.Count > 0 &&
+                window.Navigation.ModalStack[^1] is IView modal)
+            {
+                return modal;
+            }
+            return _window?.Content as IView;
+        }
+    }
+
     /// <summary>Creates the application window and connects the visual tree's handlers.</summary>
     public void Run(IApplication application)
     {
@@ -132,6 +147,7 @@ public sealed class OpenHarmonyMauiAppHost
         }
         // MAUI measures/arranges through handlers; Page/ContentView have no platform handler
         // in this slice, so arrange the first descendant that has one.
+        OpenHarmonyHandlerConnector.ConnectTree(content);
         var bounds = new Rect(0, 0, width, height);
         // Pages have no platform layout of their own, so the content chain is arranged directly
         // (navigation bars are subtracted on the way down).
@@ -178,11 +194,11 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     public bool HandleTouch(bool down, bool up, float x, float y)
-        => _window?.Content is IView content && _renderer.HandleTouch(content, down, up, x, y);
+        => RootView is IView content && _renderer.HandleTouch(content, down, up, x, y);
 
     /// <summary>Handles a touch move (drag scrolling).</summary>
     public bool HandleMove(float x, float y) => _renderer.HandleMove(x, y);
 
-    public string Describe() => _window?.Content is IView content ? _renderer.Describe(content) : "(no window content)";
+    public string Describe() => RootView is IView content ? _renderer.Describe(content) : "(no window content)";
 
 }

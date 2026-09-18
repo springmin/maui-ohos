@@ -788,11 +788,15 @@ public class OpenHarmonyView
     /// <summary>Fills/strokes a shape (IShape.PathForBounds) inside the frame.</summary>
     private void DrawShape(MauiCanvas canvas, RectF frame)
     {
-        Microsoft.Maui.Graphics.PathF? path = Shape?.PathForBounds(new RectF(frame.X, frame.Y, frame.Width, frame.Height));
+        // MAUI's Shape.PathForBounds returns geometry in the shape's own coordinate space
+        // (starting near 0,0), so the canvas is translated to the view's frame instead.
+        Microsoft.Maui.Graphics.PathF? path = Shape?.PathForBounds(new RectF(0, 0, frame.Width, frame.Height));
         if (path is null)
         {
             return;
         }
+        canvas.SaveState();
+        canvas.Translate(frame.X, frame.Y);
         Color? fill = (ShapeFill as SolidPaint)?.Color;
         if (fill is not null)
         {
@@ -807,6 +811,7 @@ public class OpenHarmonyView
             canvas.StrokeSize = thickness;
             canvas.DrawPath(path);
         }
+        canvas.RestoreState();
     }
 
     private void DrawStepper(MauiCanvas canvas, RectF frame)

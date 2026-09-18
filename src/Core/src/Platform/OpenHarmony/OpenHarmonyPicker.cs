@@ -9,6 +9,33 @@ namespace Microsoft.Maui.Platform;
 
 internal static class OpenHarmonyPickerClient
 {
+    [System.Runtime.InteropServices.DllImport("libopenharmonyhost.so", EntryPoint = "ohos_host_get_app_context")]
+    private static extern IntPtr HostProbe();
+
+    private static bool? _deviceAvailable;
+
+    /// <summary>True when running on a device (the host library is loadable).</summary>
+    public static bool IsDeviceAvailable
+    {
+        get
+        {
+            if (_deviceAvailable is { } known)
+            {
+                return known;
+            }
+            try
+            {
+                _ = HostProbe();
+                _deviceAvailable = true;
+            }
+            catch (Exception)
+            {
+                _deviceAvailable = false;
+            }
+            return _deviceAvailable.Value;
+        }
+    }
+
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(string Name, byte[] Data)>> s_pending = new();
     private static int s_nextId;
     private static bool s_unavailable;
@@ -87,7 +114,7 @@ public sealed class OpenHarmonyFilePicker : IFilePicker
 
 public sealed class OpenHarmonyMediaPicker : IMediaPicker
 {
-    public bool IsCaptureSupported => false;
+    public bool IsCaptureSupported => OpenHarmonyPickerClient.IsDeviceAvailable;
 
     public Task<FileResult?> PickPhotoAsync(MediaPickerOptions? options = null)
         => OpenHarmonyPickerClient.PickFileAsync(1, null, "picked-photo");
@@ -102,10 +129,14 @@ public sealed class OpenHarmonyMediaPicker : IMediaPicker
         => PickManyAsync(2, "picked-video");
 
     public Task<FileResult?> CapturePhotoAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Camera capture needs a camera component in the ArkTS shell");
+        => OpenHarmonyPickerClient.IsDeviceAvailable
+        ? OpenHarmonyPickerClient.PickFileAsync(3, null, "captured-photo")
+        : Task.FromResult<FileResult?>(null);
 
     public Task<FileResult?> CaptureVideoAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Camera capture needs a camera component in the ArkTS shell");
+        => OpenHarmonyPickerClient.IsDeviceAvailable
+        ? OpenHarmonyPickerClient.PickFileAsync(4, null, "captured-video")
+        : Task.FromResult<FileResult?>(null);
 
     private static async Task<List<FileResult>> PickManyAsync(int kind, string fallbackName)
     {

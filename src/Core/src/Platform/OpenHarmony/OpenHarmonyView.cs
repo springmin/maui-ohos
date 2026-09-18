@@ -78,6 +78,9 @@ public class OpenHarmonyView
     /// <summary>Raised when image bytes are blitted (tests observe the destination rect).</summary>
     public static Action<RectF>? ImageDrawn;
 
+    // WebView support (the shell owns the ArkWeb component; this view is a placeholder)
+    public bool IsWebView { get; set; }
+
     // GraphicsView support
     public bool IsGraphicsView { get; set; }
     public Action<PointF>? GraphicsTap { get; set; }

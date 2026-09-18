@@ -48,6 +48,7 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.Editor)] = typeof(OpenHarmonyEditorHandler),
         [typeof(IGraphicsView)] = typeof(OpenHarmonyGraphicsViewHandler),
         [typeof(Microsoft.Maui.Controls.TemplatedView)] = typeof(OpenHarmonyContentViewHandler),
+        [typeof(IWebView)] = typeof(OpenHarmonyWebViewHandler),
     };
 
     /// <summary>

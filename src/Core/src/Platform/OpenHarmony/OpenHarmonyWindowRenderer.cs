@@ -54,6 +54,8 @@ public sealed class OpenHarmonyWindowRenderer
             // Dropdowns float above the rest of the tree.
             popup.DrawPopup(_canvas);
         }
+        OpenHarmonyAlertHost.SetSurface(width, height);
+        DrawAlertOverlay();
         if (SurfacePresent is not null)
         {
             SurfacePresent();
@@ -63,6 +65,46 @@ public sealed class OpenHarmonyWindowRenderer
             HostCanvas.Present();
         }
         return true;
+    }
+
+    /// <summary>Draws the alert overlay (scrim, dialog box, buttons) when one is open.</summary>
+    private void DrawAlertOverlay()
+    {
+        if (OpenHarmonyAlertHost.Current is not { } alert)
+        {
+            return;
+        }
+        _canvas.FillColor = Colors.Black.WithAlpha(0.55f);
+        _canvas.FillRectangle(0, 0, (float)OpenHarmonyAlertHost.Width, (float)OpenHarmonyAlertHost.Height);
+        RectF box = OpenHarmonyAlertHost.BoxRect;
+        _canvas.FillColor = Colors.DimGray;
+        _canvas.FillRoundedRectangle(box.X, box.Y, box.Width, box.Height, 12);
+        _canvas.FontColor = Colors.White;
+        _canvas.FontSize = 30;
+        _canvas.DrawString(alert.Title ?? string.Empty, box.X + 20, box.Y + 8, box.Width - 40, 48,
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+        _canvas.FontSize = 24;
+        _canvas.DrawString(alert.Message ?? string.Empty, box.X + 20, box.Y + 60, box.Width - 40, box.Height - 140,
+            HorizontalAlignment.Left, VerticalAlignment.Top);
+        _canvas.FontSize = 26;
+        if (!string.IsNullOrEmpty(alert.Accept))
+        {
+            RectF accept = OpenHarmonyAlertHost.AcceptRect;
+            _canvas.FillColor = Colors.DodgerBlue;
+            _canvas.FillRoundedRectangle(accept.X, accept.Y, accept.Width, accept.Height, 8);
+            _canvas.FontColor = Colors.White;
+            _canvas.DrawString(alert.Accept!, accept.X, accept.Y, accept.Width, accept.Height,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+        if (!string.IsNullOrEmpty(alert.Cancel))
+        {
+            RectF cancel = OpenHarmonyAlertHost.CancelRect;
+            _canvas.FillColor = Colors.Gray;
+            _canvas.FillRoundedRectangle(cancel.X, cancel.Y, cancel.Width, cancel.Height, 8);
+            _canvas.FontColor = Colors.White;
+            _canvas.DrawString(alert.Cancel!, cancel.X, cancel.Y, cancel.Width, cancel.Height,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
     }
 
     /// <summary>Child views of a view: layout children and content-view content (pages).</summary>
@@ -344,6 +386,31 @@ public sealed class OpenHarmonyWindowRenderer
 
     public bool HandleTouch(IView root, bool down, bool up, float x, float y)
     {
+        // An open alert owns all touches until a button is chosen.
+        if (OpenHarmonyAlertHost.Current is { } alertState)
+        {
+            if (down)
+            {
+                return true;
+            }
+            if (up)
+            {
+                RectF accept = OpenHarmonyAlertHost.AcceptRect;
+                RectF cancel = OpenHarmonyAlertHost.CancelRect;
+                if (accept.Contains(x, y))
+                {
+                    OpenHarmonyAlertHost.Hide();
+                    alertState.Complete(true);
+                }
+                else if (cancel.Contains(x, y))
+                {
+                    OpenHarmonyAlertHost.Hide();
+                    alertState.Complete(false);
+                }
+                return true;
+            }
+        }
+
         // An open dropdown owns all touches until it is used or dismissed. The popup is found
         // in the tree (it must also work when nothing has been drawn yet, e.g. in tests).
         if (_popupView is not { PopupVisible: true })

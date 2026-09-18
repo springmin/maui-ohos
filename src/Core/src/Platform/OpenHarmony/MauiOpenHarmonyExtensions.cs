@@ -126,6 +126,7 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<IDispatcher, OpenHarmonyDispatcher>();
         builder.Services.AddSingleton<Microsoft.Maui.Dispatching.IDispatcherProvider, OpenHarmonyDispatcherProvider>();
         builder.Services.AddSingleton<Microsoft.Maui.IFontManager, OpenHarmonyFontManager>();
+        builder.Services.AddSingleton<Microsoft.Maui.Controls.Platform.IAlertManager, OpenHarmonyAlertManager>();
         // Essentials: file-backed preferences/filesystem (the Essentials assembly ships with the
         // MAUI controls package, so apps can use Preferences/FileSystem directly).
         var preferences = new OpenHarmonyPreferences();

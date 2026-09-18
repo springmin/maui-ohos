@@ -357,6 +357,29 @@ public class OpenHarmonyView
     /// <summary>Width of the tappable back area in the navigation bar.</summary>
     public const float NavBackWidth = 88f;
 
+    /// <summary>Toolbar items of the current page: label plus activation, drawn right-aligned.</summary>
+    public List<(string Text, Action Activate)> ToolbarItems { get; } = new();
+    public float ToolbarItemWidth { get; set; } = 140f;
+
+    /// <summary>Rectangle of a toolbar item (drawing and hit testing share it).</summary>
+    public RectF ToolbarItemRect(int index)
+    {
+        RectF frame = Frame;
+        return new RectF(frame.Right - (index + 1) * ToolbarItemWidth, frame.Y, ToolbarItemWidth, NavBarHeight);
+    }
+
+    public int ToolbarItemAt(float x, float y)
+    {
+        for (int i = 0; i < ToolbarItems.Count; i++)
+        {
+            if (ToolbarItemRect(i).Contains(x, y))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     public bool InBackRegion(float x, float y)
     {
         RectF frame = Frame;
@@ -940,6 +963,13 @@ public class OpenHarmonyView
         canvas.FontSize = 30;
         canvas.DrawString(NavTitle ?? string.Empty, frame.X + NavBackWidth, frame.Y,
             frame.Width - NavBackWidth * 2, NavBarHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.FontSize = 26;
+        for (int i = 0; i < ToolbarItems.Count; i++)
+        {
+            RectF item = ToolbarItemRect(i);
+            canvas.DrawString(ToolbarItems[i].Text, item.X, item.Y, item.Width, item.Height,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
         // The current page is drawn by the renderer, translated below the bar.
     }
 
@@ -1132,7 +1162,7 @@ public class OpenHarmonyView
         }
         if (IsNavigationPage)
         {
-            if (down && InBackRegion(x, y))
+            if (down && (InBackRegion(x, y) || ToolbarItemAt(x, y) >= 0))
             {
                 Pressed = true;
                 return true;
@@ -1140,7 +1170,12 @@ public class OpenHarmonyView
             if (up && Pressed)
             {
                 Pressed = false;
-                if (InBackRegion(x, y))
+                int toolbarIndex = ToolbarItemAt(x, y);
+                if (toolbarIndex >= 0)
+                {
+                    ToolbarItems[toolbarIndex].Activate();
+                }
+                else if (InBackRegion(x, y))
                 {
                     BackTapped?.Invoke();
                 }

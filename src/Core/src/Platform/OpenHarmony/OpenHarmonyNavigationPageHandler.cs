@@ -74,10 +74,95 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         OpenHarmonyBridge.RequestRedraw();
     }
 
+    private Page? _toolbarPage;
+
     private void UpdateNavigationBar()
     {
         PlatformView.NavTitle = VirtualView?.CurrentPage?.Title;
         PlatformView.CanGoBack = (VirtualView?.Navigation?.NavigationStack?.Count ?? 1) > 1;
+        UpdateToolbar();
+    }
+
+    /// <summary>
+    /// Mirrors the current page's ToolbarItems into the platform bar and keeps them in sync
+    /// (collection changes and item property changes rebuild the item list).
+    /// </summary>
+    private void UpdateToolbar()
+    {
+        Page? current = VirtualView?.CurrentPage;
+        if (!ReferenceEquals(_toolbarPage, current))
+        {
+            if (_toolbarPage is { } previous)
+            {
+                if (previous.ToolbarItems is System.Collections.Specialized.INotifyCollectionChanged previousCollection)
+                {
+                    previousCollection.CollectionChanged -= OnToolbarCollectionChanged;
+                }
+                foreach (ToolbarItem item in previous.ToolbarItems)
+                {
+                    item.PropertyChanged -= OnToolbarItemChanged;
+                }
+            }
+            _toolbarPage = current;
+            if (current is not null)
+            {
+                if (current.ToolbarItems is System.Collections.Specialized.INotifyCollectionChanged collection)
+                {
+                    collection.CollectionChanged += OnToolbarCollectionChanged;
+                }
+                foreach (ToolbarItem item in current.ToolbarItems)
+                {
+                    item.PropertyChanged += OnToolbarItemChanged;
+                }
+            }
+        }
+        PlatformView.ToolbarItems.Clear();
+        if (current is not null)
+        {
+            foreach (ToolbarItem item in current.ToolbarItems)
+            {
+                ToolbarItem captured = item;
+                PlatformView.ToolbarItems.Add((captured.Text ?? string.Empty, () => ActivateToolbarItem(captured)));
+            }
+        }
+    }
+
+    private void OnToolbarCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
+    {
+        // Re-read the page so the per-item subscriptions follow the collection.
+        if (VirtualView?.CurrentPage is { } current && ReferenceEquals(_toolbarPage, current))
+        {
+            foreach (ToolbarItem item in current.ToolbarItems)
+            {
+                item.PropertyChanged -= OnToolbarItemChanged;
+                item.PropertyChanged += OnToolbarItemChanged;
+            }
+        }
+        UpdateToolbar();
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    private void OnToolbarItemChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        // Text/enabled changes are mirrored by rebuilding the platform item list.
+        UpdateToolbar();
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    private static void ActivateToolbarItem(ToolbarItem item)
+    {
+        if (!item.IsEnabled)
+        {
+            return;
+        }
+        if (item is IMenuItemController controller)
+        {
+            controller.Activate();
+        }
+        else
+        {
+            item.Command?.Execute(item.CommandParameter);
+        }
     }
 
     private void OnBackTapped()

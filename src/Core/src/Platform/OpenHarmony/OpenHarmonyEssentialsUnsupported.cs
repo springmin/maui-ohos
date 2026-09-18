@@ -166,34 +166,3 @@ public sealed class OpenHarmonyGeolocation : IGeolocation
     }
 }
 
-public sealed class OpenHarmonyFilePicker : IFilePicker
-{
-    public Task<FileResult?> PickAsync(PickOptions? options = null)
-        => throw new FeatureNotSupportedException("File picking needs the picker kit in the ArkTS shell");
-
-    public Task<IEnumerable<FileResult>> PickMultipleAsync(PickOptions? options = null)
-        => throw new FeatureNotSupportedException("File picking needs the picker kit in the ArkTS shell");
-}
-
-public sealed class OpenHarmonyMediaPicker : IMediaPicker
-{
-    public bool IsCaptureSupported => false;
-
-    public Task<FileResult?> CapturePhotoAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Media capture needs the camera kit in the ArkTS shell");
-
-    public Task<FileResult?> CaptureVideoAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Media capture needs the camera kit in the ArkTS shell");
-
-    public Task<FileResult?> PickPhotoAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Photo picking needs the photoAccessHelper kit in the ArkTS shell");
-
-    public Task<FileResult?> PickVideoAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Video picking needs the photoAccessHelper kit in the ArkTS shell");
-
-    public Task<List<FileResult>> PickPhotosAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Photo picking needs the photoAccessHelper kit in the ArkTS shell");
-
-    public Task<List<FileResult>> PickVideosAsync(MediaPickerOptions? options = null)
-        => throw new FeatureNotSupportedException("Video picking needs the photoAccessHelper kit in the ArkTS shell");
-}

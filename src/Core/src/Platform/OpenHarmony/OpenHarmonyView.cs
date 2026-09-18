@@ -90,6 +90,9 @@ public class OpenHarmonyView
     public Color BorderStroke { get; set; } = Colors.Gray;
     public float BorderStrokeThickness { get; set; } = 1f;
 
+    /// <summary>Disabled views paint their colours at half alpha (set by the renderer).</summary>
+    public bool Dimmed { get; set; }
+
     // Stepper support
     public bool IsStepper { get; set; }
     public double StepperValue { get; set; }
@@ -373,7 +376,8 @@ public class OpenHarmonyView
         }
         if (Background is not null)
         {
-            canvas.FillColor = Pressed ? Colors.OrangeRed : Background;
+            Color background = Background;
+            canvas.FillColor = Pressed ? Colors.OrangeRed : (Dimmed ? background.WithAlpha(0.5f) : background);
             if (CornerRadius > 0)
             {
                 canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
@@ -471,7 +475,7 @@ public class OpenHarmonyView
         }
         if (!string.IsNullOrEmpty(text))
         {
-            canvas.FontColor = TextColor;
+            canvas.FontColor = Dimmed ? TextColor.WithAlpha(0.5f) : TextColor;
             canvas.FontSize = FontSize;
             float padding = IsTextEntry ? 12f : (CornerRadius > 0 ? 24f : 0f);
             if (IsTextEntry && IsFocused)

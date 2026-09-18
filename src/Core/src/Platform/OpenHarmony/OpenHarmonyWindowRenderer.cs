@@ -127,12 +127,13 @@ public sealed class OpenHarmonyWindowRenderer
             }
             bool dimmed = !view.IsEnabled ||
                           (view as Microsoft.Maui.Controls.VisualElement)?.IsEnabled == false;
-            bool transformed = dimmed || view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
+            platform.Dimmed = dimmed;
+            bool transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
                                view.Scale != 1.0 || view.Rotation != 0;
             if (transformed)
             {
                 _canvas.SaveState();
-                double effectiveOpacity = dimmed ? view.Opacity * 0.5 : view.Opacity;
+                double effectiveOpacity = view.Opacity;
                 if (view is Microsoft.Maui.Controls.Button)
                 {
                 }

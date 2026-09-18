@@ -75,6 +75,9 @@ public class OpenHarmonyView
     /// <summary>True when this view keeps redrawing on its own (activity indicators).</summary>
     public bool NeedsAnimation => IsActivityIndicator && IsRunning;
 
+    /// <summary>Raised when image bytes are blitted (tests observe the destination rect).</summary>
+    public static Action<RectF>? ImageDrawn;
+
     // Shape support (Rectangle/Ellipse/Line/Path/Polygon/Polyline/RoundRectangle)
     public bool IsShape { get; set; }
     public Microsoft.Maui.Graphics.IShape? Shape { get; set; }
@@ -610,6 +613,8 @@ public class OpenHarmonyView
             y += (imageHeight - side) / 2f;
             imageWidth = imageHeight = side;
         }
+        var destination = new RectF(x, y, imageWidth, imageHeight);
+        ImageDrawn?.Invoke(destination);
         Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
             ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
     }

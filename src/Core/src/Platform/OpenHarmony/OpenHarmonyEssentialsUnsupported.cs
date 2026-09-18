@@ -76,26 +76,87 @@ public sealed class OpenHarmonyPermissions : IPermissions
 
 public sealed class OpenHarmonyGeolocation : IGeolocation
 {
-    public bool IsEnabled => false;
+    private static bool s_listening;
 
-    public bool IsListeningForeground => false;
+    /// <summary>Geolocation comes from the platform NDK (OH_Location_*).</summary>
+    public bool IsEnabled => OpenHarmonyBridge.CheckSelfPermission("ohos.permission.APPROXIMATELY_LOCATION");
 
-    public Task<Location?> GetLastKnownLocationAsync() => Task.FromResult<Location?>(null);
+    public bool IsListeningForeground => s_listening;
 
-    public Task<Location?> GetLocationAsync(GeolocationRequest request, CancellationToken cancellationToken = default)
-        => throw new FeatureNotSupportedException("Geolocation needs the location kit in the ArkTS shell");
+    public Task<Location?> GetLastKnownLocationAsync()
+        => Task.FromResult(ReadLocation());
+
+    public async Task<Location?> GetLocationAsync(GeolocationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!OpenHarmonyBridge.StartLocation())
+        {
+            return null;
+        }
+        try
+        {
+            int timeoutMs = request?.Timeout is { TotalMilliseconds: > 0 } timeout ? (int)timeout.TotalMilliseconds : 10000;
+            for (int waited = 0; waited < timeoutMs; waited += 200)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                if (ReadLocation() is { } location)
+                {
+                    return location;
+                }
+                await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            }
+            return ReadLocation();
+        }
+        finally
+        {
+            OpenHarmonyBridge.StopLocation();
+        }
+    }
 
     public Task<bool> StartListeningForegroundAsync(GeolocationListeningRequest request)
-        => Task.FromResult(false);
+    {
+        if (!OpenHarmonyBridge.StartLocation())
+        {
+            return Task.FromResult(false);
+        }
+        s_listening = true;
+        _ = Task.Run(async () =>
+        {
+            Location? previous = null;
+            while (s_listening)
+            {
+                Location? current = ReadLocation();
+                if (current is not null &&
+                    (previous is null || current.Latitude != previous.Latitude || current.Longitude != previous.Longitude))
+                {
+                    previous = current;
+                    s_locationChanged?.Invoke(this, new GeolocationLocationChangedEventArgs(current));
+                }
+                await Task.Delay(500).ConfigureAwait(false);
+            }
+        });
+        return Task.FromResult(true);
+    }
 
     public void StopListeningForeground()
     {
+        s_listening = false;
+        OpenHarmonyBridge.StopLocation();
     }
+
+    private static EventHandler<GeolocationLocationChangedEventArgs>? s_locationChanged;
+
+    private static Location? ReadLocation()
+        => OpenHarmonyBridge.TryGetLocation(out double latitude, out double longitude, out double altitude)
+            ? new Location(latitude, longitude) { Altitude = altitude }
+            : null;
 
     public event EventHandler<GeolocationLocationChangedEventArgs>? LocationChanged
     {
-        add { }
-        remove { }
+        add => s_locationChanged += value;
+        remove => s_locationChanged -= value;
     }
 
     public event EventHandler<GeolocationListeningFailedEventArgs>? ListeningFailed

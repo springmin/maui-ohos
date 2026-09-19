@@ -746,6 +746,30 @@ public sealed class OpenHarmonyWindowRenderer
         return null;
     }
 
+    private IView? _pointerHover;
+
+    /// <summary>
+    /// Hover for mouse moves (the NDK mouse callback arrives as a touch move): pointer recognizers
+    /// receive Exited/Entered when the hovered view changes and Moved on every report.
+    /// </summary>
+    public bool HandlePointerMove(IView root, float x, float y)
+    {
+        IView? target = FindPointerTarget(root, x, y);
+        if (!ReferenceEquals(target, _pointerHover))
+        {
+            if (_pointerHover is { } previous)
+            {
+                OpenHarmonyPointer.Dispatch(previous, OpenHarmonyPointer.Kind.Exited, x, y);
+            }
+            _pointerHover = target;
+            if (target is not null)
+            {
+                OpenHarmonyPointer.Dispatch(target, OpenHarmonyPointer.Kind.Entered, x, y);
+            }
+        }
+        return target is not null && OpenHarmonyPointer.Dispatch(target, OpenHarmonyPointer.Kind.Moved, x, y);
+    }
+
     /// <summary>Routes a shell pinch report to the deepest view that owns a pinch recognizer.</summary>
     public bool HandlePinch(IView root, int phase, double scale, float x, float y)
         => FindPinchTarget(root, x, y) is { } target && OpenHarmonyPinch.Dispatch(target, phase, scale, x, y);

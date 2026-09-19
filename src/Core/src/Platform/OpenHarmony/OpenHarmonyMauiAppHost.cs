@@ -229,7 +229,14 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>Handles a touch move (drag scrolling).</summary>
-    public bool HandleMove(float x, float y) => _renderer.HandleMove(x, y);
+    public bool HandleMove(float x, float y)
+    {
+        if (RootView is IView content)
+        {
+            _renderer.HandlePointerMove(content, x, y);
+        }
+        return _renderer.HandleMove(x, y);
+    }
 
     public string Describe() => RootView is IView content ? _renderer.Describe(content) : "(no window content)";
 

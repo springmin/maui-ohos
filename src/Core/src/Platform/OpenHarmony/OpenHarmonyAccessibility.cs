@@ -19,8 +19,38 @@ public sealed record OpenHarmonyAccessibilityNode(
     bool IsEnabled,
     bool IsFocusable);
 
+/// <summary>Action codes from the ArkUI NDK (ArkUI_Accessibility_ActionType).</summary>
+public enum OpenHarmonyAccessibilityAction
+{
+    Invalid = 0,
+    Click = 0x00000010,
+    LongClick = 0x00000020,
+    GainFocus = 0x00000040,
+    ClearFocus = 0x00000080,
+    ScrollForward = 0x00000100,
+    ScrollBackward = 0x00000200,
+    Copy = 0x00000400,
+    Paste = 0x00000800,
+    Cut = 0x00001000,
+    SelectText = 0x00002000,
+    SetText = 0x00004000,
+    SetCursorPosition = 0x00100000,
+}
+
 public static class OpenHarmonyAccessibility
 {
+    /// <summary>Actions a node with the given role can perform (published to the provider).</summary>
+    public static IReadOnlyList<OpenHarmonyAccessibilityAction> ActionsFor(string role)
+        => role switch
+        {
+            "button" => new[] { OpenHarmonyAccessibilityAction.Click, OpenHarmonyAccessibilityAction.LongClick },
+            "text" => new[] { OpenHarmonyAccessibilityAction.Click },
+            "textInput" => new[] { OpenHarmonyAccessibilityAction.Click, OpenHarmonyAccessibilityAction.SetText, OpenHarmonyAccessibilityAction.SetCursorPosition, OpenHarmonyAccessibilityAction.SelectText, OpenHarmonyAccessibilityAction.Copy, OpenHarmonyAccessibilityAction.Paste, OpenHarmonyAccessibilityAction.Cut },
+            "checkBox" or "switch" => new[] { OpenHarmonyAccessibilityAction.Click },
+            "slider" => new[] { OpenHarmonyAccessibilityAction.ScrollForward, OpenHarmonyAccessibilityAction.ScrollBackward, OpenHarmonyAccessibilityAction.SetText },
+            _ => Array.Empty<OpenHarmonyAccessibilityAction>(),
+        };
+
     private static readonly List<OpenHarmonyAccessibilityNode> s_nodes = new();
 
     /// <summary>Nodes of the last frame (root first, parents before children).</summary>

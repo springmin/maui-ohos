@@ -441,6 +441,24 @@ public sealed class OpenHarmonyWindowRenderer
             }
         }
 
+        // Pointer gestures (pointer recognizers receive enter/press on touch down, release/exit on up).
+        if (down || up)
+        {
+            if (FindPointerTarget(root, x, y) is { } pointerView)
+            {
+                if (up)
+                {
+                    OpenHarmonyPointer.Dispatch(pointerView, OpenHarmonyPointer.Kind.Released, x, y);
+                    OpenHarmonyPointer.Dispatch(pointerView, OpenHarmonyPointer.Kind.Exited, x, y);
+                }
+                else
+                {
+                    OpenHarmonyPointer.Dispatch(pointerView, OpenHarmonyPointer.Kind.Entered, x, y);
+                    OpenHarmonyPointer.Dispatch(pointerView, OpenHarmonyPointer.Kind.Pressed, x, y);
+                }
+            }
+        }
+
         // An open dropdown owns all touches until it is used or dismissed. The popup is found
         // in the tree (it must also work when nothing has been drawn yet, e.g. in tests).
         if (_popupView is not { PopupVisible: true })
@@ -726,6 +744,31 @@ public sealed class OpenHarmonyWindowRenderer
             }
         }
         return null;
+    }
+
+    /// <summary>Deepest view containing the point that owns a pointer recognizer.</summary>
+    private IView? FindPointerTarget(IView view, float x, float y)
+    {
+        IView? found = null;
+        float localX = x;
+        float localY = y;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            if (!platform.Frame.Contains(x, y))
+            {
+                return null;
+            }
+            if (platform.IsScrollView)
+            {
+                localX += platform.ScrollOffsetX;
+                localY += platform.ScrollOffsetY;
+            }
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            found = FindPointerTarget(child, localX, localY) ?? found;
+        }
+        return found ?? (OpenHarmonyPointer.HasPointer(view) ? view : null);
     }
 
     /// <summary>Deepest view containing the point that owns gesture recognizers.</summary>

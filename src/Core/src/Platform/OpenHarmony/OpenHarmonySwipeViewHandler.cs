@@ -91,15 +91,19 @@ public sealed class OpenHarmonySwipeViewHandler : OpenHarmonyViewHandler<SwipeVi
         {
             return;
         }
-        // Same activation path as toolbar items: Clicked handlers and Commands both run.
+        // SwipeItem's own invoked path is ISwipeItem.OnInvoked(), which raises Invoked (and runs
+        // the command); MenuItem-based items fall back to the controller activation.
+        if (item is Microsoft.Maui.ISwipeItem swipe)
+        {
+            swipe.OnInvoked();
+            return;
+        }
         if (item is IMenuItemController controller)
         {
             controller.Activate();
+            return;
         }
-        else
-        {
-            item.Command?.Execute(item.CommandParameter);
-        }
+        item.Command?.Execute(item.CommandParameter);
     }
 
     public static void MapItems(OpenHarmonySwipeViewHandler handler, SwipeView swipeView)

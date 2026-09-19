@@ -127,6 +127,8 @@ public sealed class OpenHarmonyMauiAppHost
     public void Run(IApplication application)
     {
         ArgumentNullException.ThrowIfNull(application);
+        // The ArkTS shell may report the device theme before the application exists; apply it now.
+        OpenHarmonyTheme.Attach(application as Microsoft.Maui.Controls.Application);
         _window = application.CreateWindow(null) ?? application.Windows.FirstOrDefault();
         if (_window is null)
         {

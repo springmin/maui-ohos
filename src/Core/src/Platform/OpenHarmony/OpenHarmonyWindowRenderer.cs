@@ -746,6 +746,24 @@ public sealed class OpenHarmonyWindowRenderer
         return null;
     }
 
+    /// <summary>Routes a shell pinch report to the deepest view that owns a pinch recognizer.</summary>
+    public bool HandlePinch(IView root, int phase, double scale, float x, float y)
+        => FindPinchTarget(root, x, y) is { } target && OpenHarmonyPinch.Dispatch(target, phase, scale, x, y);
+
+    private IView? FindPinchTarget(IView view, float x, float y)
+    {
+        IView? found = null;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform && !platform.Frame.Contains(x, y))
+        {
+            return null;
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            found = FindPinchTarget(child, x, y) ?? found;
+        }
+        return found ?? (OpenHarmonyPinch.HasPinch(view) ? view : null);
+    }
+
     /// <summary>Deepest view containing the point that owns a pointer recognizer.</summary>
     private IView? FindPointerTarget(IView view, float x, float y)
     {

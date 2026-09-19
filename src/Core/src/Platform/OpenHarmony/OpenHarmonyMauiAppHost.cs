@@ -207,8 +207,26 @@ public sealed class OpenHarmonyMauiAppHost
         return _renderer.Render(content, _width, _height);
     }
 
+    private bool _pinchWired;
+
     public bool HandleTouch(bool down, bool up, float x, float y)
-        => RootView is IView content && _renderer.HandleTouch(content, down, up, x, y);
+    {
+        if (!_pinchWired)
+        {
+            _pinchWired = true;
+            OpenHarmonyBridge.RegisterPinchListener();
+            OpenHarmonyBridge.Pinch += OnPinch;
+        }
+        return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y);
+    }
+
+    private void OnPinch(int phase, double scale, float x, float y)
+    {
+        if (RootView is IView content)
+        {
+            _renderer.HandlePinch(content, phase, scale, x, y);
+        }
+    }
 
     /// <summary>Handles a touch move (drag scrolling).</summary>
     public bool HandleMove(float x, float y) => _renderer.HandleMove(x, y);

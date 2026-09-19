@@ -173,6 +173,12 @@ public static class OpenHarmonyAccessibility
     /// <summary>Nodes handed to the host by the last publish pass (0 when unavailable).</summary>
     public static int LastPublishedCount { get; private set; }
 
+    /// <summary>Frames whose publish was skipped because nothing changed (avoids per-frame marshalling).</summary>
+    public static int FramesSkipped { get; private set; }
+
+    /// <summary>Whether the last publish pass would have talked to the host (observable off-device).</summary>
+    public static bool WouldPublish { get; private set; }
+
     private static OpenHarmonyAccessibilityNode[] s_previous = Array.Empty<OpenHarmonyAccessibilityNode>();
 
     /// <summary>
@@ -227,6 +233,14 @@ public static class OpenHarmonyAccessibility
         PendingEventCount = DiffFrames();
         if (!_available || s_nodes.Count == 0)
         {
+            LastPublishedCount = 0;
+            return;
+        }
+        WouldPublish = _available && s_nodes.Count > 0 && PendingEventCount != 0;
+        if (!WouldPublish)
+        {
+            // Nothing moved: skip the native traffic (three calls plus UTF-8 marshalling per node).
+            FramesSkipped++;
             LastPublishedCount = 0;
             return;
         }

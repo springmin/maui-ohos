@@ -14,11 +14,14 @@ internal static class OpenHarmonySensors
     internal const int GyroscopeType = 2;     // SENSOR_TYPE_GYROSCOPE
     internal const int MagneticFieldType = 6; // SENSOR_TYPE_MAGNETIC_FIELD (magnetometer + compass)
     internal const int BarometerType = 8;     // SENSOR_TYPE_BAROMETER
-    internal const int OrientationType = 256; // SENSOR_TYPE_ORIENTATION
+    // The NDK documents SENSOR_TYPE_ORIENTATION (256) as Euler angles around z/x/y, while the
+    // four-component quaternion is SENSOR_TYPE_ROTATION_VECTOR (259): data[0..2] is the vector
+    // part and data[3] is the scalar part, forwarded as w.
+    internal const int OrientationType = 259; // SENSOR_TYPE_ROTATION_VECTOR
     private const string HostLibrary = "libopenharmonyhost.so";
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    internal delegate void SensorCallback(int type, float x, float y, float z, long timestamp);
+    internal delegate void SensorCallback(int type, float x, float y, float z, float w, long timestamp);
 
     [DllImport(HostLibrary, EntryPoint = "ohos_host_sensor_set_listener")]
     private static extern void SensorSetListener(IntPtr listener);
@@ -63,7 +66,7 @@ internal static class OpenHarmonySensors
         catch (Exception) { _available = false; }
     }
 
-    private static void OnReading(int type, float x, float y, float z, long timestamp)
+    private static void OnReading(int type, float x, float y, float z, float w, long timestamp)
     {
         if (type == AccelerometerType) OpenHarmonyAccelerometer.Instance.OnReading(x, y, z);
         else if (type == GyroscopeType) OpenHarmonyGyroscope.Instance.OnReading(x, y, z);
@@ -73,7 +76,7 @@ internal static class OpenHarmonySensors
             OpenHarmonyCompass.Instance.OnReading(x, y, z);
         }
         else if (type == BarometerType) OpenHarmonyBarometer.Instance.OnReading(x);
-        else if (type == OrientationType) OpenHarmonyOrientationSensor.Instance.OnReading(x, y, z);
+        else if (type == OrientationType) OpenHarmonyOrientationSensor.Instance.OnReading(x, y, z, w);
     }
 
     /// <summary>Installs the sensor implementations as the MAUI Essentials defaults.</summary>
@@ -313,11 +316,10 @@ public sealed class OpenHarmonyOrientationSensor : Microsoft.Maui.Devices.Sensor
         _monitoring = false;
     }
 
-    internal void OnReading(float x, float y, float z)
+    internal void OnReading(float x, float y, float z, float w)
     {
-        // The host forwards the normalised vector part of the rotation; rebuild the scalar
-        // component so the reading is a unit quaternion.
-        float w = MathF.Sqrt(MathF.Max(0f, 1f - (x * x + y * y + z * z)));
+        // The host forwards the four components of the rotation vector (data[0..3]); the reading
+        // is used as-is, with no reconstructed scalar part.
         ReadingChanged?.Invoke(this, new Microsoft.Maui.Devices.Sensors.OrientationSensorChangedEventArgs(
             new Microsoft.Maui.Devices.Sensors.OrientationSensorData(x, y, z, w)));
     }

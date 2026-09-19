@@ -75,6 +75,73 @@ public static class OpenHarmonyAccessibility
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
     private static extern int AccessibilityCommit();
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void ActionListener(int nodeId, int action);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_set_action_listener")]
+    private static extern void SetActionListener(IntPtr callback);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event")]
+    private static extern int SendEvent(int eventType);
+
+    private static ActionListener? _actionThunk;
+    private static Action<int, int>? _actionHandler;
+
+    /// <summary>Receives accessibility actions (CLICK, SET_TEXT, SCROLL...) from the framework.</summary>
+    public static void SetActionHandler(Action<int, int>? handler)
+    {
+        _actionHandler = handler;
+        if (!_available || handler is null)
+        {
+            return;
+        }
+        try
+        {
+            _actionThunk ??= OnAction;
+            SetActionListener(Marshal.GetFunctionPointerForDelegate(_actionThunk));
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+    }
+
+    private static void OnAction(int nodeId, int action)
+        => _actionHandler?.Invoke(nodeId, action);
+
+    /// <summary>Pushes the pending frame changes as accessibility events.</summary>
+    public static void FlushEvents()
+    {
+        if (!_available || PendingEventCount == 0 || LastPublishedCount == 0)
+        {
+            return;
+        }
+        try
+        {
+            SendEvent(PendingEventCount);
+            PendingEventCount = 0;
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+    }
+
+    /// <summary>Finds a published node by id (used to route actions back to a hit test).</summary>
+    public static bool TryFindNode(int id, out OpenHarmonyAccessibilityNode node)
+    {
+        foreach (OpenHarmonyAccessibilityNode candidate in s_nodes)
+        {
+            if (candidate.Id == id)
+            {
+                node = candidate;
+                return true;
+            }
+        }
+        node = null!;
+        return false;
+    }
+
     /// <summary>Nodes handed to the host by the last publish pass (0 when unavailable).</summary>
     public static int LastPublishedCount { get; private set; }
 
@@ -151,6 +218,7 @@ public static class OpenHarmonyAccessibility
             }
             AccessibilityCommit();
             LastPublishedCount = s_nodes.Count;
+            FlushEvents();
         }
         catch (DllNotFoundException)
         {

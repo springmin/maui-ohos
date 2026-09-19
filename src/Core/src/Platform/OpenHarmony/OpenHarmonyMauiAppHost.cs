@@ -216,8 +216,29 @@ public sealed class OpenHarmonyMauiAppHost
             _pinchWired = true;
             OpenHarmonyBridge.RegisterPinchListener();
             OpenHarmonyBridge.Pinch += OnPinch;
+            OpenHarmonyAccessibility.SetActionHandler((nodeId, action) => HandleAccessibilityAction(nodeId, action));
         }
         return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y);
+    }
+
+    /// <summary>
+    /// Routes an accessibility action back into the normal input path: CLICK simulates a tap at the
+    /// node centre, which is exactly what a real touch would do.
+    /// </summary>
+    public bool HandleAccessibilityAction(int nodeId, int action)
+    {
+        if (action != 0x10 || !OpenHarmonyAccessibility.TryFindNode(nodeId, out OpenHarmonyAccessibilityNode node))
+        {
+            return false;
+        }
+        if (RootView is not IView content)
+        {
+            return false;
+        }
+        float x = (float)(node.Bounds.X + node.Bounds.Width / 2);
+        float y = (float)(node.Bounds.Y + node.Bounds.Height / 2);
+        _renderer.HandleTouch(content, true, true, x, y);
+        return true;
     }
 
     private void OnPinch(int phase, double scale, float x, float y)

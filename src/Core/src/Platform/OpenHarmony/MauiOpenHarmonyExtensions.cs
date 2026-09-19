@@ -55,69 +55,14 @@ public static class MauiOpenHarmonyExtensions
     };
 
     /// <summary>
-    /// Wires the Essentials statics to the OpenHarmony implementations. MAUI keeps
-    /// Preferences.Current / FileSystem.Current as internal members set by the platform
-    /// assembly, which does not exist for this slice, so they are assigned reflectively.
+    /// Explicit no-op. The Essentials implementations are installed through the DI registrations
+    /// in <see cref="UseOpenHarmony"/> and each feature's [ModuleInitializer] (app-launching,
+    /// haptics, menus, TextToSpeech, theme); the static Current/Default entry points resolve from
+    /// the service provider. The previous reflection loop assigned get-only properties, so the
+    /// first assignment threw and no property was ever set.
     /// </summary>
-    private static void InstallEssentials(Microsoft.Maui.Storage.IPreferences preferences,
-                                           Microsoft.Maui.Storage.IFileSystem fileSystem,
-                                           Microsoft.Maui.Storage.ISecureStorage secureStorage,
-                                           Microsoft.Maui.ApplicationModel.IAppInfo appInfo,
-                                           Microsoft.Maui.Devices.IDeviceInfo deviceInfo,
-                                           Microsoft.Maui.ApplicationModel.IVersionTracking versionTracking,
-                                           Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard clipboard,
-                                           Microsoft.Maui.Networking.IConnectivity connectivity,
-                                           Microsoft.Maui.ApplicationModel.ILauncher launcher,
-                                           Microsoft.Maui.ApplicationModel.IBrowser browser,
-                                           Microsoft.Maui.ApplicationModel.DataTransfer.IShare share,
-                                           Microsoft.Maui.Devices.IVibration vibration,
-                                           Microsoft.Maui.ApplicationModel.IPermissions permissions,
-                                           Microsoft.Maui.Devices.Sensors.IGeolocation geolocation,
-                                           Microsoft.Maui.Storage.IFilePicker filePicker,
-                                           Microsoft.Maui.Media.IMediaPicker mediaPicker)
+    private static void InstallEssentials()
     {
-        const System.Reflection.BindingFlags Static =
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
-        try
-        {
-            typeof(Microsoft.Maui.Storage.Preferences).GetProperty("Current", Static)
-                ?.SetValue(null, preferences);
-            typeof(Microsoft.Maui.Storage.FileSystem).GetProperty("Current", Static)
-                ?.SetValue(null, fileSystem);
-            typeof(Microsoft.Maui.Storage.SecureStorage).GetProperty("Current", Static)
-                ?.SetValue(null, secureStorage);
-            typeof(Microsoft.Maui.ApplicationModel.AppInfo).GetProperty("Current", Static)
-                ?.SetValue(null, appInfo);
-            typeof(Microsoft.Maui.Devices.DeviceInfo).GetProperty("Current", Static)
-                ?.SetValue(null, deviceInfo);
-            typeof(Microsoft.Maui.ApplicationModel.VersionTracking).GetProperty("Current", Static)
-                ?.SetValue(null, versionTracking);
-            typeof(Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard).GetProperty("Current", Static)
-                ?.SetValue(null, clipboard);
-            typeof(Microsoft.Maui.Networking.Connectivity).GetProperty("Current", Static)
-                ?.SetValue(null, connectivity);
-            typeof(Microsoft.Maui.ApplicationModel.Launcher).GetProperty("Current", Static)
-                ?.SetValue(null, launcher);
-            typeof(Microsoft.Maui.ApplicationModel.Browser).GetProperty("Current", Static)
-                ?.SetValue(null, browser);
-            typeof(Microsoft.Maui.ApplicationModel.DataTransfer.Share).GetProperty("Current", Static)
-                ?.SetValue(null, share);
-            typeof(Microsoft.Maui.Devices.Vibration).GetProperty("Default", Static)
-                ?.SetValue(null, vibration);
-            typeof(Microsoft.Maui.ApplicationModel.Permissions).GetProperty("Default", Static)
-                ?.SetValue(null, permissions);
-            typeof(Microsoft.Maui.Devices.Sensors.Geolocation).GetProperty("Default", Static)
-                ?.SetValue(null, geolocation);
-            typeof(Microsoft.Maui.Storage.FilePicker).GetProperty("Default", Static)
-                ?.SetValue(null, filePicker);
-            typeof(Microsoft.Maui.Media.MediaPicker).GetProperty("Default", Static)
-                ?.SetValue(null, mediaPicker);
-        }
-        catch (Exception ex)
-        {
-            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
-                $"[maui] essentials wiring failed: {ex.GetType().Name}");
-        }
     }
 
     /// <summary>
@@ -165,9 +110,7 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeolocation>(geolocation);
         builder.Services.AddSingleton<Microsoft.Maui.Storage.IFilePicker>(filePicker);
         builder.Services.AddSingleton<Microsoft.Maui.Media.IMediaPicker>(mediaPicker);
-        InstallEssentials(preferences, fileSystem, secureStorage, appInfo, deviceInfo, versionTracking,
-            clipboard, connectivity, launcher, browser, share, vibration, permissions, geolocation,
-            filePicker, mediaPicker);
+        InstallEssentials();
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
         builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();

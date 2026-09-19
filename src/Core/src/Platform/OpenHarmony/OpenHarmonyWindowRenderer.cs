@@ -56,6 +56,11 @@ public sealed class OpenHarmonyWindowRenderer
         }
         OpenHarmonyAlertHost.SetSurface(width, height);
         DrawAlertOverlay();
+        OpenHarmonyDiagnostics.Reset();
+        if (OpenHarmonyDiagnostics.Enabled)
+        {
+            DrawDiagnosticsOverlay(content);
+        }
         if (SurfacePresent is not null)
         {
             SurfacePresent();
@@ -65,6 +70,35 @@ public sealed class OpenHarmonyWindowRenderer
             HostCanvas.Present();
         }
         return true;
+    }
+
+    /// <summary>Outlines every view of the tree with its type name (visual diagnostics).</summary>
+    private void DrawDiagnosticsOverlay(IView content)
+    {
+        _canvas.StrokeColor = Colors.Magenta;
+        _canvas.StrokeSize = 2;
+        _canvas.FontColor = Colors.Yellow;
+        _canvas.FontSize = 18;
+        DrawDiagnosticsFor(content);
+    }
+
+    private void DrawDiagnosticsFor(IView view)
+    {
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            RectF frame = platform.Frame;
+            if (frame.Width > 0 && frame.Height > 0)
+            {
+                _canvas.DrawRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+                _canvas.DrawString(view.GetType().Name, frame.X + 4, frame.Y + 2, Math.Max(40, frame.Width - 8), 20,
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                OpenHarmonyDiagnostics.Count();
+            }
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            DrawDiagnosticsFor(child);
+        }
     }
 
     /// <summary>Draws the alert overlay (scrim, dialog box, buttons) when one is open.</summary>

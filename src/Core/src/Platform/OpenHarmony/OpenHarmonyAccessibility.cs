@@ -78,6 +78,43 @@ public static class OpenHarmonyAccessibility
     /// <summary>Nodes handed to the host by the last publish pass (0 when unavailable).</summary>
     public static int LastPublishedCount { get; private set; }
 
+    private static OpenHarmonyAccessibilityNode[] s_previous = Array.Empty<OpenHarmonyAccessibilityNode>();
+
+    /// <summary>
+    /// Changes detected between the last two published frames, as ArkUI accessibility event type
+    /// flags (0x20 page state update, 0x800 page content update, 0x10 text update); the host turns
+    /// these into OH_ArkUI_SendAccessibilityAsyncEvent calls.
+    /// </summary>
+    public static int PendingEventCount { get; private set; }
+
+    public const int EventPageStateUpdate = 0x00000020;
+    public const int EventPageContentUpdate = 0x00000800;
+    public const int EventTextUpdate = 0x00000010;
+
+    private static int DiffFrames()
+    {
+        int events = 0;
+        if (s_previous.Length != s_nodes.Count)
+        {
+            events |= EventPageContentUpdate;
+        }
+        int shared = Math.Min(s_previous.Length, s_nodes.Count);
+        for (int i = 0; i < shared; i++)
+        {
+            if (!string.Equals(s_previous[i].Text, s_nodes[i].Text, StringComparison.Ordinal)
+                || !string.Equals(s_previous[i].Description, s_nodes[i].Description, StringComparison.Ordinal))
+            {
+                events |= EventTextUpdate;
+            }
+            if (s_previous[i].Bounds != s_nodes[i].Bounds)
+            {
+                events |= EventPageStateUpdate;
+            }
+        }
+        s_previous = s_nodes.ToArray();
+        return events;
+    }
+
     /// <summary>Rebuilds the shadow tree for a rendered frame.</summary>
     public static void Refresh(IView root)
     {
@@ -91,6 +128,8 @@ public static class OpenHarmonyAccessibility
     /// </summary>
     public static void Publish()
     {
+        // The event source is managed state, so the diff runs even when the host is unavailable.
+        PendingEventCount = DiffFrames();
         if (!_available || s_nodes.Count == 0)
         {
             LastPublishedCount = 0;

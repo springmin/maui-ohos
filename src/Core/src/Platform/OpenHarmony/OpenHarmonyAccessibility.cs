@@ -16,6 +16,7 @@ public sealed record OpenHarmonyAccessibilityNode(
     string Role,
     string? Text,
     string? Description,
+    string? Hint,
     RectF Bounds,
     bool IsEnabled,
     bool IsFocusable);
@@ -68,6 +69,7 @@ public static class OpenHarmonyAccessibility
         [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? hint,
         float x, float y, float width, float height, int flags, int actions);
 
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
@@ -105,7 +107,7 @@ public static class OpenHarmonyAccessibility
                 {
                     actions |= (int)action;
                 }
-                AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description,
+                AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description, node.Hint,
                     node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, actions);
             }
             AccessibilityCommit();
@@ -132,13 +134,18 @@ public static class OpenHarmonyAccessibility
             bounds = platform.Frame;
         }
         string role = RoleOf(view);
+        if (view is VisualElement heading && SemanticProperties.GetHeadingLevel(heading) != SemanticHeadingLevel.None && role == "text")
+        {
+            role = "header";
+        }
         string? text = view is IText textPart && !string.IsNullOrEmpty(textPart.Text) ? textPart.Text
             : view is ILabel label && !string.IsNullOrEmpty(label.Text) ? label.Text
             : null;
         string? description = view is VisualElement element ? SemanticProperties.GetDescription(element) : null;
+        string? hint = view is VisualElement hintElement ? SemanticProperties.GetHint(hintElement) : null;
         bool enabled = view is not VisualElement visual || visual.IsEnabled;
         bool focusable = view is VisualElement focusableElement && focusableElement.IsEnabled && role != "group";
-        s_nodes.Add(new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, bounds, enabled, focusable));
+        s_nodes.Add(new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable));
         foreach (IView child in ChildrenOf(view))
         {
             Visit(child, id);

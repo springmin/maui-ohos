@@ -335,6 +335,13 @@ public sealed class OpenHarmonyWindowRenderer
     private readonly List<OpenHarmonyView> _carouselViews = new();
     private OpenHarmonyView? _textDragTarget;
     private int _textDragAnchor;
+    private OpenHarmonyDragAndDrop.Session? _dragSession;
+    private IView? _dragCandidate;
+    private IView? _dragRoot;
+    private float _dragPressX;
+    private float _dragPressY;
+    private long _dragPressTicks;
+    private bool _dragRejected;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
     public bool HasAnimations(IView? root) => TreeHasAnimations(root);
@@ -409,6 +416,11 @@ public sealed class OpenHarmonyWindowRenderer
         {
             _moved = true;
         }
+        // A promoted drag owns the pointer before any pan/scroll/selection tracking.
+        if (HandleDragMove(x, y))
+        {
+            return true;
+        }
         if (_dragSliderTarget is { IsSlider: true } slider)
         {
             float fraction = slider.SliderValueFromX(x);
@@ -446,6 +458,66 @@ public sealed class OpenHarmonyWindowRenderer
         }
         scroll.ScrollOffsetChanged?.Invoke();
         return true;
+    }
+
+    /// <summary>
+    /// Long-press promotion and drag tracking for moves. Returns true while a drag is in flight
+    /// (the move is consumed) and false otherwise.
+    /// </summary>
+    private bool HandleDragMove(float x, float y)
+    {
+        if (_dragSession is { } session)
+        {
+            if (_dragRoot is { } sessionRoot)
+            {
+                OpenHarmonyDragAndDrop.Update(session, FindDropTarget(sessionRoot, x, y));
+            }
+            return true;
+        }
+        if (_dragCandidate is null || _dragRejected)
+        {
+            return false;
+        }
+        if (Math.Abs(x - _dragPressX) <= OpenHarmonyDragAndDrop.Slop &&
+            Math.Abs(y - _dragPressY) <= OpenHarmonyDragAndDrop.Slop)
+        {
+            return false;
+        }
+        // The pointer left the slop: only a press held long enough becomes a drag.
+        _dragRejected = true;
+        if (Environment.TickCount64 - _dragPressTicks < OpenHarmonyDragAndDrop.LongPressMilliseconds)
+        {
+            return false;
+        }
+        _dragSession = OpenHarmonyDragAndDrop.Start(_dragCandidate, x, y);
+        if (_dragSession is null)
+        {
+            return false;
+        }
+        AbortDragCompetitors();
+        if (_dragRoot is { } dragRoot)
+        {
+            OpenHarmonyDragAndDrop.Update(_dragSession, FindDropTarget(dragRoot, x, y));
+        }
+        return true;
+    }
+
+    /// <summary>A promoted drag owns the pointer: the pan/scroll/selection tracking from down ends.</summary>
+    private void AbortDragCompetitors()
+    {
+        if (_panTarget is { } panTarget)
+        {
+            if (_panGestureId >= 0)
+            {
+                OpenHarmonyGestures.CompletePan(panTarget, _panGestureId);
+            }
+            _panTarget = null;
+            _panGestureId = -1;
+        }
+        _swipeTarget = null;
+        _dragSliderTarget = null;
+        _dragScrollTarget = null;
+        _textDragTarget = null;
     }
 
     public bool HandleTouch(IView root, bool down, bool up, float x, float y)
@@ -598,6 +670,18 @@ public sealed class OpenHarmonyWindowRenderer
             _swipeTarget = null;
             _textDragTarget = null;
             _panGestureId = -1;
+            // A press may become a drag when it is held long enough and then moved.
+            if (_dragSession is { } unexpectedDrag)
+            {
+                OpenHarmonyDragAndDrop.Cancel(unexpectedDrag);
+            }
+            _dragSession = null;
+            _dragCandidate = FindDragTarget(root, x, y);
+            _dragRoot = root;
+            _dragPressX = x;
+            _dragPressY = y;
+            _dragPressTicks = Environment.TickCount64;
+            _dragRejected = false;
             if (FindGestureTarget(root, x, y) is { } panCandidate)
             {
                 if (!OpenHarmonyGestures.HasPan(panCandidate) && OpenHarmonyGestures.HasSwipe(panCandidate))
@@ -625,6 +709,16 @@ public sealed class OpenHarmonyWindowRenderer
         }
         else if (up)
         {
+            if (_dragSession is { } dragSession)
+            {
+                // The release completes the drag over the view under the pointer (if any).
+                OpenHarmonyDragAndDrop.Drop(dragSession, FindDropTarget(root, x, y));
+                _dragSession = null;
+                _dragCandidate = null;
+                _dragRoot = null;
+                _dragRejected = true;
+                return true;
+            }
             _textDragTarget = null;
             if (_panTarget is { } panTarget)
             {
@@ -853,6 +947,56 @@ public sealed class OpenHarmonyWindowRenderer
             found = FindPointerTarget(child, localX, localY) ?? found;
         }
         return found ?? (OpenHarmonyPointer.HasPointer(view) ? view : null);
+    }
+
+    /// <summary>Deepest view containing the point that owns a usable drag recognizer.</summary>
+    private IView? FindDragTarget(IView view, float x, float y)
+    {
+        IView? found = null;
+        float localX = x;
+        float localY = y;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            if (!platform.Frame.Contains(x, y))
+            {
+                return null;
+            }
+            if (platform.IsScrollView)
+            {
+                localX += platform.ScrollOffsetX;
+                localY += platform.ScrollOffsetY;
+            }
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            found = FindDragTarget(child, localX, localY) ?? found;
+        }
+        return found ?? (OpenHarmonyDragAndDrop.HasDrag(view) ? view : null);
+    }
+
+    /// <summary>Deepest view containing the point that owns a usable drop recognizer.</summary>
+    private IView? FindDropTarget(IView view, float x, float y)
+    {
+        IView? found = null;
+        float localX = x;
+        float localY = y;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            if (!platform.Frame.Contains(x, y))
+            {
+                return null;
+            }
+            if (platform.IsScrollView)
+            {
+                localX += platform.ScrollOffsetX;
+                localY += platform.ScrollOffsetY;
+            }
+        }
+        foreach (IView child in ChildrenOf(view))
+        {
+            found = FindDropTarget(child, localX, localY) ?? found;
+        }
+        return found ?? (OpenHarmonyDragAndDrop.HasDrop(view) ? view : null);
     }
 
     /// <summary>Deepest view containing the point that owns gesture recognizers.</summary>

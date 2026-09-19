@@ -1,11 +1,7 @@
 // Remaining Essentials implementations for the platform slice.
 //
-// Clipboard is file-backed. Connectivity reports Unknown and the intent-based APIs
-// (launcher/browser/share) report "not supported": all of them need ArkTS module bridges
-// (connection manager, wantAgent/ability start, share service) that the platform contract does
-// not expose yet - see docs/plans for the integration plan.
-using Microsoft.Maui.ApplicationModel;
-using Microsoft.Maui.ApplicationModel.Communication;
+// Clipboard is file-backed. Connectivity reports Unknown until the ArkTS connection manager is
+// bridged. Launcher/Browser/Share live in OpenHarmonyAppLauncher.cs (startAbility bridge).
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Networking;
 using Microsoft.OpenHarmony.Hosting;
@@ -92,61 +88,3 @@ public sealed class OpenHarmonyConnectivity : IConnectivity
     }
 }
 
-public sealed class OpenHarmonyLauncher : ILauncher
-{
-    public Task<bool> CanOpenAsync(Uri uri) => Task.FromResult(false);
-
-    public Task<bool> OpenAsync(Uri uri)
-    {
-        OpenHarmonyBridge.WriteStatus($"[maui] launcher is not supported yet (uri={uri})");
-        return Task.FromResult(false);
-    }
-
-    public Task<bool> TryOpenAsync(Uri uri) => OpenAsync(uri);
-
-    public Task<bool> OpenAsync(OpenFileRequest request)
-    {
-        OpenHarmonyBridge.WriteStatus("[maui] launcher file requests are not supported yet");
-        return Task.FromResult(false);
-    }
-
-    public Task<bool> TryOpenAsync(OpenFileRequest request) => OpenAsync(request);
-}
-
-public sealed class OpenHarmonyBrowser : IBrowser
-{
-    public Task<bool> OpenAsync(string uri, BrowserLaunchMode launchMode)
-    {
-        OpenHarmonyBridge.WriteStatus($"[maui] browser is not supported yet (uri={uri})");
-        return Task.FromResult(false);
-    }
-
-    public Task<bool> OpenAsync(Uri uri, BrowserLaunchMode launchMode) => OpenAsync(uri.ToString(), launchMode);
-
-    public Task<bool> OpenAsync(string uri) => OpenAsync(uri, BrowserLaunchMode.SystemPreferred);
-
-    public Task<bool> OpenAsync(Uri uri) => OpenAsync(uri.ToString(), BrowserLaunchMode.SystemPreferred);
-
-    public Task<bool> OpenAsync(Uri uri, BrowserLaunchOptions options) => OpenAsync(uri.ToString(), BrowserLaunchMode.SystemPreferred);
-}
-
-public sealed class OpenHarmonyShare : IShare
-{
-    public Task RequestAsync(ShareTextRequest request)
-    {
-        OpenHarmonyBridge.WriteStatus($"[maui] share is not supported yet (text={request.Text})");
-        return Task.CompletedTask;
-    }
-
-    public Task RequestAsync(ShareFileRequest request)
-    {
-        OpenHarmonyBridge.WriteStatus("[maui] share file requests are not supported yet");
-        return Task.CompletedTask;
-    }
-
-    public Task RequestAsync(ShareMultipleFilesRequest request)
-    {
-        OpenHarmonyBridge.WriteStatus("[maui] share file requests are not supported yet");
-        return Task.CompletedTask;
-    }
-}

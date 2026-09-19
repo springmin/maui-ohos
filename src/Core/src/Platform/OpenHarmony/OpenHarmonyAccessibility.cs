@@ -54,6 +54,7 @@ public static class OpenHarmonyAccessibility
         };
 
     private static readonly List<OpenHarmonyAccessibilityNode> s_nodes = new();
+    private static readonly Dictionary<int, OpenHarmonyAccessibilityNode> s_index = new();
 
     /// <summary>Nodes of the last frame (root first, parents before children).</summary>
     public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => s_nodes;
@@ -179,7 +180,7 @@ public static class OpenHarmonyAccessibility
     /// <summary>Whether the last publish pass would have talked to the host (observable off-device).</summary>
     public static bool WouldPublish { get; private set; }
 
-    private static OpenHarmonyAccessibilityNode[] s_previous = Array.Empty<OpenHarmonyAccessibilityNode>();
+    private static readonly List<OpenHarmonyAccessibilityNode> s_previousList = new();
 
     /// <summary>
     /// Changes detected between the last two published frames, as ArkUI accessibility event type
@@ -195,24 +196,25 @@ public static class OpenHarmonyAccessibility
     private static int DiffFrames()
     {
         int events = 0;
-        if (s_previous.Length != s_nodes.Count)
+        if (s_previousList.Count != s_nodes.Count)
         {
             events |= EventPageContentUpdate;
         }
-        int shared = Math.Min(s_previous.Length, s_nodes.Count);
+        int shared = Math.Min(s_previousList.Count, s_nodes.Count);
         for (int i = 0; i < shared; i++)
         {
-            if (!string.Equals(s_previous[i].Text, s_nodes[i].Text, StringComparison.Ordinal)
-                || !string.Equals(s_previous[i].Description, s_nodes[i].Description, StringComparison.Ordinal))
+            if (!string.Equals(s_previousList[i].Text, s_nodes[i].Text, StringComparison.Ordinal)
+                || !string.Equals(s_previousList[i].Description, s_nodes[i].Description, StringComparison.Ordinal))
             {
                 events |= EventTextUpdate;
             }
-            if (s_previous[i].Bounds != s_nodes[i].Bounds)
+            if (s_previousList[i].Bounds != s_nodes[i].Bounds)
             {
                 events |= EventPageStateUpdate;
             }
         }
-        s_previous = s_nodes.ToArray();
+        s_previousList.Clear();
+        s_previousList.AddRange(s_nodes);
         return events;
     }
 
@@ -220,6 +222,7 @@ public static class OpenHarmonyAccessibility
     public static void Refresh(IView root)
     {
         s_nodes.Clear();
+        s_index.Clear();
         Visit(root, 0);
     }
 
@@ -275,7 +278,7 @@ public static class OpenHarmonyAccessibility
         }
     }
 
-    private static void Visit(IView view, int parentId)
+    private static int BuildNode(IView view, int parentId)
     {
         int id = s_nodes.Count + 1;
         RectF bounds = default;
@@ -295,10 +298,28 @@ public static class OpenHarmonyAccessibility
         string? hint = view is VisualElement hintElement ? SemanticProperties.GetHint(hintElement) : null;
         bool enabled = view is not VisualElement visual || visual.IsEnabled;
         bool focusable = view is VisualElement focusableElement && focusableElement.IsEnabled && role != "group";
-        s_nodes.Add(new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable));
-        foreach (IView child in ChildrenOf(view))
+        var node = new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable);
+        s_nodes.Add(node);
+        s_index[id] = node;
+        return id;
+    }
+    private static void Visit(IView root, int parentId)
+    {
+        var pending = new Stack<(IView View, int ParentId)>();
+        pending.Push((root, parentId));
+        while (pending.Count > 0)
         {
-            Visit(child, id);
+            (IView view, int parent) = pending.Pop();
+            int id = BuildNode(view, parent);
+            var children = new List<IView>();
+            foreach (IView child in ChildrenOf(view))
+            {
+                children.Add(child);
+            }
+            for (int i = children.Count - 1; i >= 0; i--)
+            {
+                pending.Push((children[i], id));
+            }
         }
     }
 

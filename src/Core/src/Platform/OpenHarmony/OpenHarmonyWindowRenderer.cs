@@ -84,22 +84,28 @@ public sealed class OpenHarmonyWindowRenderer
         DrawDiagnosticsFor(content);
     }
 
-    private void DrawDiagnosticsFor(IView view)
+    private void DrawDiagnosticsFor(IView root)
     {
-        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        var stack = new Stack<IView>();
+        stack.Push(root);
+        while (stack.Count > 0)
         {
-            RectF frame = platform.Frame;
-            if (frame.Width > 0 && frame.Height > 0)
+            IView view = stack.Pop();
+            if (view.Handler?.PlatformView is OpenHarmonyView platform)
             {
-                _canvas.DrawRectangle(frame.X, frame.Y, frame.Width, frame.Height);
-                _canvas.DrawString(view.GetType().Name, frame.X + 4, frame.Y + 2, Math.Max(40, frame.Width - 8), 20,
-                    HorizontalAlignment.Left, VerticalAlignment.Center);
-                OpenHarmonyDiagnostics.Count();
+                RectF frame = platform.Frame;
+                if (frame.Width > 0 && frame.Height > 0)
+                {
+                    _canvas.DrawRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+                    _canvas.DrawString(view.GetType().Name, frame.X + 4, frame.Y + 2, Math.Max(40, frame.Width - 8), 20,
+                        HorizontalAlignment.Left, VerticalAlignment.Center);
+                    OpenHarmonyDiagnostics.Count();
+                }
             }
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            DrawDiagnosticsFor(child);
+            foreach (IView child in ChildrenOf(view))
+            {
+                stack.Push(child);
+            }
         }
     }
 

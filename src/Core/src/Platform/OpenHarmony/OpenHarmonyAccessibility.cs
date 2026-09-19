@@ -84,6 +84,9 @@ public static class OpenHarmonyAccessibility
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event")]
     private static extern int SendEvent(int eventType);
 
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
+    private static extern int ProviderStatus();
+
     private static ActionListener? _actionThunk;
     private static Action<int, int>? _actionHandler;
 
@@ -104,6 +107,31 @@ public static class OpenHarmonyAccessibility
         {
             _available = false;
         }
+    }
+
+    private static bool _statusLogged;
+
+    private static void LogProviderStatusOnce()
+    {
+        if (_statusLogged)
+        {
+            return;
+        }
+        _statusLogged = true;
+        int status = -1;
+        if (_available)
+        {
+            try
+            {
+                status = ProviderStatus();
+            }
+            catch (Exception)
+            {
+                _available = false;
+            }
+        }
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            $"[maui] accessibility provider status={status} (1=attached, 2=frame node, 3=node content)");
     }
 
     private static void OnAction(int nodeId, int action)
@@ -219,6 +247,7 @@ public static class OpenHarmonyAccessibility
             AccessibilityCommit();
             LastPublishedCount = s_nodes.Count;
             FlushEvents();
+            LogProviderStatusOnce();
         }
         catch (DllNotFoundException)
         {

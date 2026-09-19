@@ -3,6 +3,7 @@
 // description, role, state) which the host publishes through the ArkUI NDK accessibility provider
 // (OH_ArkUI_NativeModule_GetNativeAccessibilityProvider / OH_ArkUI_AddAndGetAccessibilityElementInfo)
 // and which tests can assert as a snapshot without a device.
+using System.Runtime.InteropServices;
 using Microsoft.Maui;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
@@ -56,11 +57,70 @@ public static class OpenHarmonyAccessibility
     /// <summary>Nodes of the last frame (root first, parents before children).</summary>
     public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => s_nodes;
 
+    private const string HostLibrary = "libopenharmonyhost.so";
+    private static bool _available = true;
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
+    private static extern int AccessibilityBegin(int count);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node")]
+    private static extern int AccessibilityNode(int id, int parentId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
+        float x, float y, float width, float height, int flags, int actions);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
+    private static extern int AccessibilityCommit();
+
+    /// <summary>Nodes handed to the host by the last publish pass (0 when unavailable).</summary>
+    public static int LastPublishedCount { get; private set; }
+
     /// <summary>Rebuilds the shadow tree for a rendered frame.</summary>
     public static void Refresh(IView root)
     {
         s_nodes.Clear();
         Visit(root, 0);
+    }
+
+    /// <summary>
+    /// Hands the shadow tree to the host, which turns it into ArkUI accessibility element
+    /// information served by the registered provider callbacks. Degrades to a no-op off-device.
+    /// </summary>
+    public static void Publish()
+    {
+        if (!_available || s_nodes.Count == 0)
+        {
+            LastPublishedCount = 0;
+            return;
+        }
+        try
+        {
+            AccessibilityBegin(s_nodes.Count);
+            foreach (OpenHarmonyAccessibilityNode node in s_nodes)
+            {
+                int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
+                int actions = 0;
+                foreach (OpenHarmonyAccessibilityAction action in ActionsFor(node.Role))
+                {
+                    actions |= (int)action;
+                }
+                AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description,
+                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, actions);
+            }
+            AccessibilityCommit();
+            LastPublishedCount = s_nodes.Count;
+        }
+        catch (DllNotFoundException)
+        {
+            _available = false;
+            LastPublishedCount = 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _available = false;
+            LastPublishedCount = 0;
+        }
     }
 
     private static void Visit(IView view, int parentId)

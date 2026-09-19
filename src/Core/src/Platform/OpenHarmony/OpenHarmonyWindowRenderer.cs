@@ -58,6 +58,7 @@ public sealed class OpenHarmonyWindowRenderer
         DrawAlertOverlay();
         OpenHarmonyDiagnostics.Reset();
         OpenHarmonyAccessibility.Refresh(content);
+        OpenHarmonyAccessibility.Publish();
         if (OpenHarmonyDiagnostics.Enabled)
         {
             DrawDiagnosticsOverlay(content);

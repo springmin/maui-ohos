@@ -6,6 +6,8 @@
 //   OpenHarmonyBluetooth.GetPairedDevicesAsync()      -> list of (name, address)
 //   OpenHarmonyBluetooth.StartDiscoveryAsync()        -> classic discovery started
 //   OpenHarmonyBluetooth.StopDiscoveryAsync()         -> discovery stopped
+//   OpenHarmonyBluetooth.GetDiscoveredDevicesAsync()  -> devices found by discovery
+//   OpenHarmonyBluetooth.DeviceFound                  -> push event per discovered device
 //   OpenHarmonyPrinting.IsSupported                   -> print framework usable
 //   OpenHarmonyPrinting.PrintTextAsync(jobName, text) -> render the text to a PDF and print it
 //   OpenHarmonyPrinting.PrintFileAsync(path)          -> print an existing PDF/image file
@@ -32,10 +34,12 @@
 // ohos.permission.PRINT (system_grant: granted at install once declared). Without the
 // declaration the shell answers unavailable instead of guessing.
 //
-// Wire formats: Bluetooth paired devices: one "name\taddress" record per line, '\n'
-// separated (a missing name is an empty first field). The adapter state is the decimal
-// access.BluetoothState value as text ("2" = STATE_ON). Print results carry an optional
-// diagnostic message (a shell/print-framework error) that is logged, never thrown.
+// Wire formats: Bluetooth devices: one "name\taddress" record per line, '\n' separated (a
+// missing name is an empty first field). Paired devices and discovered devices use the same
+// shape: discovery pushes each device as its own notify and answers op 4 with the accumulated
+// table. The adapter state is the decimal access.BluetoothState value as text ("2" = STATE_ON).
+// Print results carry an optional diagnostic message (a shell/print-framework error) that is
+// logged, never thrown.
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -59,19 +63,36 @@ public static class OpenHarmonyBluetooth
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Payload)>> s_pending = new();
     private static BluetoothResultCallback? s_callback;
+    private static BluetoothDeviceCallback? s_deviceCallback;
     private static int s_nextId;
     private static bool s_registered;
+    private static bool s_deviceRegistered;
+    private static bool s_deviceUnavailable;
     private static bool s_unavailable;
 
-    // op 0 = adapter state, 1 = paired devices, 2 = start discovery, 3 = stop discovery.
+    // op 0 = adapter state, 1 = paired devices, 2 = start discovery, 3 = stop discovery,
+    // 4 = the devices found by the current/last discovery (same "name\taddress" table).
     [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_query", CharSet = CharSet.Ansi)]
     private static extern int BluetoothQuery(int requestId, int op);
 
     [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_register_result")]
     private static extern void BluetoothRegisterResult(IntPtr callback);
 
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_register_device_found")]
+    private static extern void BluetoothRegisterDeviceFound(IntPtr callback);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void BluetoothResultCallback(int requestId, int code, IntPtr payloadUtf8);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void BluetoothDeviceCallback(IntPtr payloadUtf8);
+
+    /// <summary>
+    /// Raised once for every device the platform reports while discovery runs. The device carries
+    /// the same name/address pair as <see cref="GetPairedDevicesAsync"/>; a malformed payload is
+    /// ignored. Off-device (no host library) the event never fires.
+    /// </summary>
+    public static event EventHandler<OpenHarmonyBluetoothDevice>? DeviceFound;
 
     /// <summary>
     /// True when the host library answers the permission probe for ACCESS_BLUETOOTH and no call
@@ -81,8 +102,8 @@ public static class OpenHarmonyBluetooth
     public static bool IsSupported =>
         !s_unavailable && OpenHarmonyBridge.CheckSelfPermission("ohos.permission.ACCESS_BLUETOOTH");
 
-    /// <summary>Parses the shell payload ("name\taddress" lines, '\n' separated).</summary>
-    public static IReadOnlyList<OpenHarmonyBluetoothDevice> ParsePairedDevices(string? payload)
+    /// <summary>Parses one or more "name\taddress" records (the shell's device payload).</summary>
+    public static IReadOnlyList<OpenHarmonyBluetoothDevice> ParseDevices(string? payload)
     {
         var devices = new List<OpenHarmonyBluetoothDevice>();
         if (string.IsNullOrEmpty(payload))
@@ -102,6 +123,9 @@ public static class OpenHarmonyBluetooth
         }
         return devices;
     }
+
+    /// <summary>Parses the shell payload ("name\taddress" lines, '\n' separated).</summary>
+    public static IReadOnlyList<OpenHarmonyBluetoothDevice> ParsePairedDevices(string? payload) => ParseDevices(payload);
 
     /// <summary>True when the adapter-state payload is access.BluetoothState.STATE_ON ("2").</summary>
     public static bool ParseAdapterState(string? payload) =>
@@ -132,8 +156,9 @@ public static class OpenHarmonyBluetooth
 
     /// <summary>
     /// Starts classic Bluetooth discovery. Returns false when the platform path is unavailable or
-    /// the adapter is off. The discovered devices themselves are not surfaced yet (a discovery
-    /// listener is a later increment); stop it with <see cref="StopDiscoveryAsync"/>.
+    /// the adapter is off. Discovered devices arrive through <see cref="DeviceFound"/> and are
+    /// collected by the shell for <see cref="GetDiscoveredDevicesAsync"/>; stop the scan with
+    /// <see cref="StopDiscoveryAsync"/>.
     /// </summary>
     public static async Task<bool> StartDiscoveryAsync(CancellationToken cancellationToken = default)
     {
@@ -146,6 +171,36 @@ public static class OpenHarmonyBluetooth
     {
         (int Code, string Payload)? answer = await SendAsync(3, cancellationToken).ConfigureAwait(false);
         return answer is { } result && result.Code == 0;
+    }
+
+    /// <summary>
+    /// Returns the devices reported since the current/last discovery was started (the shell
+    /// accumulates the bluetoothDeviceFind callbacks). Returns an empty list when the platform
+    /// path is unavailable or nothing was found; it never throws. Start a discovery first.
+    /// </summary>
+    public static async Task<IReadOnlyList<OpenHarmonyBluetoothDevice>> GetDiscoveredDevicesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        (int Code, string Payload)? answer = await SendAsync(4, cancellationToken).ConfigureAwait(false);
+        if (answer is not { } result || result.Code != 0)
+        {
+            return Array.Empty<OpenHarmonyBluetoothDevice>();
+        }
+        return ParseDevices(result.Payload);
+    }
+
+    /// <summary>
+    /// Native-shaped entry point for the host's discovered-device notify (harness-testable).
+    /// One "name\taddress" record per call; malformed payloads raise nothing.
+    /// </summary>
+    internal static void OnDeviceFoundPayload(string? payload)
+    {
+        IReadOnlyList<OpenHarmonyBluetoothDevice> devices = ParseDevices(payload);
+        if (devices.Count == 0)
+        {
+            return;
+        }
+        DeviceFound?.Invoke(null, devices[0]);
     }
 
     private static async Task<(int Code, string Payload)?> SendAsync(
@@ -213,11 +268,33 @@ public static class OpenHarmonyBluetooth
             s_callback = OnResultNative;
             BluetoothRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
             s_registered = true;
+            EnsureDeviceRegistered();
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
             s_unavailable = true;
             OpenHarmonyBridge.WriteStatus("[maui] bluetooth bridge unavailable (no host library)");
+        }
+    }
+
+    // The discovered-device notify is a separate export: a host without it still serves the
+    // query operations, so a missing export disables DeviceFound only (not the whole extra).
+    private static void EnsureDeviceRegistered()
+    {
+        if (s_deviceRegistered || s_deviceUnavailable)
+        {
+            return;
+        }
+        try
+        {
+            s_deviceCallback = OnDeviceFoundNative;
+            BluetoothRegisterDeviceFound(Marshal.GetFunctionPointerForDelegate(s_deviceCallback));
+            s_deviceRegistered = true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_deviceUnavailable = true;
+            OpenHarmonyBridge.WriteStatus("[maui] bluetooth discovered-device bridge unavailable (older host)");
         }
     }
 
@@ -230,6 +307,14 @@ public static class OpenHarmonyBluetooth
         {
             source.TrySetResult((code, payload));
         }
+    }
+
+    private static void OnDeviceFoundNative(IntPtr payloadUtf8)
+    {
+        string payload = payloadUtf8 == IntPtr.Zero
+            ? string.Empty
+            : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
+        OnDeviceFoundPayload(payload);
     }
 }
 

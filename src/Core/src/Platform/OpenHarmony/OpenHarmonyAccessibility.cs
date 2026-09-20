@@ -10,6 +10,12 @@ using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 
+/// <summary>
+/// One node of the shadow tree. Range values are only meaningful for slider/progress roles;
+/// every other role marks the range absent with <see cref="double.NaN"/> bounds, which can
+/// never satisfy "RangeMin &lt;= RangeMax" (the host's validity test). Checked is 0/1 for
+/// switch/checkBox and -1 when the role has no check state.
+/// </summary>
 public sealed record OpenHarmonyAccessibilityNode(
     int Id,
     int ParentId,
@@ -19,7 +25,11 @@ public sealed record OpenHarmonyAccessibilityNode(
     string? Hint,
     RectF Bounds,
     bool IsEnabled,
-    bool IsFocusable);
+    bool IsFocusable,
+    double RangeMin,
+    double RangeMax,
+    double RangeCurrent,
+    int Checked);
 
 /// <summary>Action codes from the ArkUI NDK (ArkUI_Accessibility_ActionType).</summary>
 public enum OpenHarmonyAccessibilityAction
@@ -65,13 +75,18 @@ public static class OpenHarmonyAccessibility
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
     private static extern int AccessibilityBegin(int count);
 
+    // The argument order is the publish contract shared with openharmony_host.h /
+    // openharmony_host.c; the interaction harness reflects this method and compares the
+    // parameter names/types against the C definition, so an arity or order change fails
+    // off-device instead of shifting arguments on device (see the audit doc, section 30).
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node")]
     private static extern int AccessibilityNode(int id, int parentId,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? hint,
-        float x, float y, float width, float height, int flags, int actions);
+        float x, float y, float width, float height, int flags, int actions,
+        double rangeMin, double rangeMax, double rangeCurrent, int @checked);
 
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
     private static extern int AccessibilityCommit();
@@ -204,11 +219,20 @@ public static class OpenHarmonyAccessibility
         for (int i = 0; i < shared; i++)
         {
             if (!string.Equals(s_previousList[i].Text, s_nodes[i].Text, StringComparison.Ordinal)
-                || !string.Equals(s_previousList[i].Description, s_nodes[i].Description, StringComparison.Ordinal))
+                || !string.Equals(s_previousList[i].Description, s_nodes[i].Description, StringComparison.Ordinal)
+                || !string.Equals(s_previousList[i].Hint, s_nodes[i].Hint, StringComparison.Ordinal))
             {
                 events |= EventTextUpdate;
             }
-            if (s_previousList[i].Bounds != s_nodes[i].Bounds)
+            // Range/checked changes must force a republish even when the bounds and text did
+            // not move (dragging a slider is exactly that case). double.Equals treats NaN as
+            // equal to NaN, so an absent range does not look changed on every frame.
+            bool rangeSame = s_previousList[i].RangeMin.Equals(s_nodes[i].RangeMin)
+                && s_previousList[i].RangeMax.Equals(s_nodes[i].RangeMax)
+                && s_previousList[i].RangeCurrent.Equals(s_nodes[i].RangeCurrent);
+            if (s_previousList[i].Bounds != s_nodes[i].Bounds
+                || !rangeSame
+                || s_previousList[i].Checked != s_nodes[i].Checked)
             {
                 events |= EventPageStateUpdate;
             }
@@ -259,7 +283,8 @@ public static class OpenHarmonyAccessibility
                     actions |= (int)action;
                 }
                 AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description, node.Hint,
-                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, actions);
+                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, actions,
+                    node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
             }
             AccessibilityCommit();
             LastPublishedCount = s_nodes.Count;
@@ -298,7 +323,35 @@ public static class OpenHarmonyAccessibility
         string? hint = view is VisualElement hintElement ? SemanticProperties.GetHint(hintElement) : null;
         bool enabled = view is not VisualElement visual || visual.IsEnabled;
         bool focusable = view is VisualElement focusableElement && focusableElement.IsEnabled && role != "group";
-        var node = new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable);
+        // Range is published only where the control has one; NaN bounds mark it absent (the
+        // host's "RangeMin <= RangeMax" check can never pass for NaN). Sliders use their own
+        // Minimum/Maximum/Value; MAUI's IProgress.Progress is already a 0..1 fraction, so the
+        // progress range is published as 0/1/Progress (no rescaling to 0..100).
+        double rangeMin = double.NaN;
+        double rangeMax = double.NaN;
+        double rangeCurrent = 0;
+        if (view is ISlider slider)
+        {
+            rangeMin = slider.Minimum;
+            rangeMax = slider.Maximum;
+            rangeCurrent = slider.Value;
+        }
+        else if (view is IProgress progress)
+        {
+            rangeMin = 0;
+            rangeMax = 1;
+            rangeCurrent = progress.Progress;
+        }
+        // Checked is 0/1 only for real toggle roles; -1 keeps the host from announcing a state
+        // the control does not have (SetChecked is skipped for -1 on the host side).
+        int checkedState = view switch
+        {
+            ISwitch toggle => toggle.IsOn ? 1 : 0,
+            ICheckBox checkBox => checkBox.IsChecked ? 1 : 0,
+            _ => -1,
+        };
+        var node = new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable,
+            rangeMin, rangeMax, rangeCurrent, checkedState);
         s_nodes.Add(node);
         s_index[id] = node;
         return id;
@@ -350,6 +403,7 @@ public static class OpenHarmonyAccessibility
         ICheckBox => "checkBox",
         ISwitch => "switch",
         ISlider => "slider",
+        IProgress => "progress",
         Microsoft.Maui.IImage => "image",
         ILabel => "text",
         _ => "group",

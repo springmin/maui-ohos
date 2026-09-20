@@ -52,6 +52,9 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.TemplatedView)] = typeof(OpenHarmonyContentViewHandler),
         [typeof(IWebView)] = typeof(OpenHarmonyWebViewHandler),
         [typeof(IHybridWebView)] = typeof(OpenHarmonyHybridWebViewHandler),
+#if OPENHARMONY_BLAZOR_WEBVIEW
+        [typeof(Microsoft.AspNetCore.Components.WebView.Maui.IBlazorWebView)] = typeof(OpenHarmonyBlazorWebViewHandler),
+#endif
     };
 
     /// <summary>

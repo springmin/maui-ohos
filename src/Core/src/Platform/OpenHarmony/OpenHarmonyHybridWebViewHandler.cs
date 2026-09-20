@@ -13,13 +13,17 @@
 // HybridWebView page renders and window.HybridWebView.SendRawMessage reaches
 // RawMessageReceived through the shell's __hwvSendMessage forwarding.
 //
-// Scope note: the JS -> .NET InvokeDotNet endpoint (__hwvInvokeDotNet) is not implemented -
-// ArkWeb expects an intercepted response synchronously, and invoking a managed method needs an
-// asynchronous response stream (setResponseIsReady/delayed data) that this batch does not add.
-// window.HybridWebView.InvokeDotNet therefore rejects; the .NET -> JS direction
-// (EvaluateJavaScriptAsync / InvokeJavaScriptAsync) keeps working. Off-device (no host
-// library / no app context) registration is a no-op.
+// JS -> .NET invocation: the stock hybridwebview.js POSTs { MethodName, ParamValues } to
+// <origin>/__hwvInvokeDotNet. The ArkTS shell holds the intercepted WebResourceResponse open
+// with setResponseIsReady(false), forwards the invocation through
+// host.notifyHybridInvoke(requestId, method, argsJson), and completes the response when this
+// handler calls ohos_host_hwv_invoke_result(requestId, payloadJson) with the
+// DotNetInvokeResult JSON the page's fetch expects. A missing invoker, a failed or timed-out
+// target method and a missing host/shell path all answer an error payload, so the page's
+// promise rejects instead of hanging. Off-device (no host library / no app context)
+// registration is a no-op; callers can still drive the managed half directly.
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Maui.Graphics;
@@ -42,9 +46,32 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     /// <summary>MAUI hybrid origin the shell serves the app package from.</summary>
     internal const string HybridAppOrigin = "https://0.0.0.1/";
 
+    private const string HostLibrary = "libopenharmonyhost.so";
+
     private static readonly TimeSpan s_invokeTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan s_dotNetInvokeTimeout = TimeSpan.FromSeconds(10);
     private static readonly List<OpenHarmonyHybridWebViewHandler> s_handlers = new();
     private static readonly ConcurrentDictionary<string, TaskCompletionSource<string?>> s_invokeRequests = new();
+
+    // The shell forwards __hwvInvokeDotNet invocations to ohos_host_hwv_register_invoke's
+    // callback; the handler that last registered its assets with the shell is the page a
+    // request belongs to (the shell serves one hybrid origin at a time).
+    private static HybridInvokeCallback? s_hybridInvokeCallback;
+    private static bool s_invokeRegistered;
+    private static bool s_invokeUnavailable;
+    private static OpenHarmonyHybridWebViewHandler? s_activeInvokeHandler;
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_hwv_register_invoke")]
+    private static extern void RegisterInvokeNative(IntPtr callback);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_hwv_invoke_result", CharSet = CharSet.Ansi)]
+    private static extern int InvokeResultNative(int requestId, string payloadJson);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void HybridInvokeCallback(int requestId, IntPtr methodUtf8, IntPtr argsUtf8);
+
+    /// <summary>Receives the completed invocation payload when the host library is present.</summary>
+    internal static event Action<int, string>? HybridInvokeResultSent;
 
     public static readonly IPropertyMapper<IHybridWebView, OpenHarmonyHybridWebViewHandler> Mapper =
         new PropertyMapper<IHybridWebView, OpenHarmonyHybridWebViewHandler>(ViewMapper)
@@ -67,6 +94,8 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         // The hybrid page posts its messages through the shell's JS message sink, so the sink
         // must be bound even when the app never connects the regular WebView handler.
         OpenHarmonyWebViewHandler.EnsureMessageRegistered();
+        EnsureHybridInvokeRegistered();
+        s_activeInvokeHandler = this;
         RegisterHybridAssets();
     }
 
@@ -75,6 +104,10 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         lock (s_handlers)
         {
             s_handlers.Remove(this);
+        }
+        if (ReferenceEquals(s_activeInvokeHandler, this))
+        {
+            s_activeInvokeHandler = null;
         }
         base.DisconnectHandler(platformView);
     }
@@ -103,6 +136,8 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             return;
         }
+        // The shell is serving this handler's page, so invocations belong to it.
+        s_activeInvokeHandler = this;
         string root = VirtualView?.HybridRoot is { Length: > 0 } hybridRoot ? hybridRoot : "wwwroot";
         string defaultFile = VirtualView?.DefaultFile is { Length: > 0 } file ? file : "index.html";
         string payloadDir = context.AppDir.TrimEnd('/');
@@ -138,6 +173,164 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             OpenHarmonyBridge.WriteStatus($"[maui] hybrid bootstrap script extraction failed: {ex.Message}");
         }
+    }
+
+    // --- JS -> .NET invocation (__hwvInvokeDotNet) --------------------------------------
+
+    /// <summary>True once the host library accepted the invocation callback registration.</summary>
+    internal static bool IsInvokeBridgeAvailable => s_invokeRegistered && !s_invokeUnavailable;
+
+    /// <summary>Registers the managed invocation callback with the host (idempotent, device only).</summary>
+    internal static void EnsureHybridInvokeRegistered()
+    {
+        if (s_invokeRegistered || s_invokeUnavailable)
+        {
+            return;
+        }
+        try
+        {
+            // Keep the delegate alive for the process lifetime: the host stores the raw
+            // function pointer and calls it on an arbitrary thread.
+            s_hybridInvokeCallback = OnHybridInvokeNative;
+            RegisterInvokeNative(Marshal.GetFunctionPointerForDelegate(s_hybridInvokeCallback));
+            s_invokeRegistered = true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_invokeUnavailable = true;
+            OpenHarmonyBridge.WriteStatus("[maui] hybrid invoke bridge unavailable (no host library)");
+        }
+    }
+
+    private static void OnHybridInvokeNative(int requestId, IntPtr methodUtf8, IntPtr argsUtf8)
+    {
+        string method = methodUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(methodUtf8) ?? string.Empty;
+        string args = argsUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(argsUtf8) ?? string.Empty;
+        _ = CompleteHybridInvokeAsync(requestId, method, args);
+    }
+
+    /// <summary>
+    /// Managed half of host.notifyHybridInvoke: services one JS invocation and completes it.
+    /// Exposed for tests; the native callback feeds the same path.
+    /// </summary>
+    internal static Task OnHybridInvokeAsync(int requestId, string methodName, string argsJson)
+        => CompleteHybridInvokeAsync(requestId, methodName, argsJson);
+
+    private static async Task CompleteHybridInvokeAsync(int requestId, string methodName, string argsJson)
+    {
+        string payload;
+        try
+        {
+            OpenHarmonyHybridWebViewHandler? handler = s_activeInvokeHandler;
+            payload = handler is null
+                ? ErrorPayload(new InvalidOperationException("no HybridWebView page is registered with the shell"))
+                : await handler.InvokeDotNetAsync(methodName, argsJson).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            payload = ErrorPayload(ex);
+        }
+        SendInvokeResult(requestId, payload);
+    }
+
+    /// <summary>
+    /// Dispatches one __hwvInvokeDotNet invocation to <see cref="IHybridWebView.Invoker"/> and
+    /// returns the DotNetInvokeResult JSON the stock hybridwebview.js expects. Never throws:
+    /// every failure becomes an error payload the page rejects with.
+    /// </summary>
+    internal async Task<string> InvokeDotNetAsync(string methodName, string argsJson)
+    {
+        if (string.IsNullOrEmpty(methodName))
+        {
+            return ErrorPayload(new InvalidOperationException("the invocation did not provide a method name"));
+        }
+        string[]? paramValues = null;
+        if (!string.IsNullOrEmpty(argsJson) && argsJson != "[]")
+        {
+            try
+            {
+                paramValues = JsonSerializer.Deserialize<string[]>(argsJson);
+            }
+            catch (JsonException ex)
+            {
+                return ErrorPayload(new InvalidOperationException(
+                    $"the invocation parameters were not a JSON string array: {ex.Message}"));
+            }
+        }
+        if (VirtualView is not { } webView)
+        {
+            return ErrorPayload(new InvalidOperationException("the HybridWebView is not connected"));
+        }
+        try
+        {
+            // Controls.HybridWebView.Invoker throws when no InvokeJavaScriptTarget was set;
+            // other implementations may return null. Both become an error payload.
+            Task<string?> invocation = webView.Invoker.InvokeMethodAsync(methodName, paramValues);
+            Task completed = await Task.WhenAny(invocation, Task.Delay(s_dotNetInvokeTimeout)).ConfigureAwait(false);
+            if (completed != invocation)
+            {
+                return ErrorPayload(new TimeoutException(
+                    $"the .NET method '{methodName}' did not complete within {s_dotNetInvokeTimeout.TotalSeconds:0} seconds"));
+            }
+            return SuccessPayload(await invocation.ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            return ErrorPayload(ex);
+        }
+    }
+
+    private static void SendInvokeResult(int requestId, string payload)
+    {
+        try
+        {
+            InvokeResultNative(requestId, payload);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_invokeUnavailable = true;
+            OpenHarmonyBridge.WriteStatus("[maui] hybrid invoke bridge unavailable (no host library)");
+        }
+        // Tests and diagnostics observe the payload even when the native export is absent.
+        HybridInvokeResultSent?.Invoke(requestId, payload);
+    }
+
+    /// <summary>Result shape the stock invokeDotNet code reads (see HybridWebViewHandler).</summary>
+    private static string SuccessPayload(string? jsonResult)
+        => JsonSerializer.Serialize(new DotNetInvokeResult
+        {
+            Result = jsonResult,
+            IsJson = jsonResult is not null,
+        });
+
+    private static string ErrorPayload(Exception ex)
+        => JsonSerializer.Serialize(new DotNetInvokeResult
+        {
+            IsError = true,
+            ErrorMessage = ex.Message,
+            ErrorType = ex.GetType().Name,
+            ErrorStackTrace = ex.StackTrace,
+        });
+
+    private sealed class DotNetInvokeResult
+    {
+        [JsonPropertyName("Result")]
+        public string? Result { get; init; }
+
+        [JsonPropertyName("IsJson")]
+        public bool IsJson { get; init; }
+
+        [JsonPropertyName("IsError")]
+        public bool IsError { get; init; }
+
+        [JsonPropertyName("ErrorMessage")]
+        public string? ErrorMessage { get; init; }
+
+        [JsonPropertyName("ErrorType")]
+        public string? ErrorType { get; init; }
+
+        [JsonPropertyName("ErrorStackTrace")]
+        public string? ErrorStackTrace { get; init; }
     }
 
     /// <summary>Payload descriptor the shell consumes from the "hybrid" web command.</summary>

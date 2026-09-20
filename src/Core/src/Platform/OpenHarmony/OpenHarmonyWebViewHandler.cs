@@ -211,7 +211,7 @@ public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
         }
     }
 
-    private static void EnsureMessageRegistered()
+    internal static void EnsureMessageRegistered()
     {
         if (s_messageRegistered || s_messageUnavailable)
         {

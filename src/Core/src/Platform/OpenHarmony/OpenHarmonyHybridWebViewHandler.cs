@@ -3,13 +3,25 @@
 // the same shell channel as the WebView handler: scripts run through ohos_host_web_eval and
 // page messages arrive through the shell's dotnetHost proxy.
 //
-// Scope note: this batch does not serve hybrid assets. The handler cannot yet load
-// HybridRoot/DefaultFile (that needs the WebResourceRequested/asset pipeline wired to the
-// shell), so a HybridWebView shows no page until the app supplies one through a regular
-// WebView or the asset pipeline lands. Messaging and script evaluation still work for a page
-// that provides the documented JavaScript side (window.HybridWebView + dotnetHost).
+// Asset serving: HybridRoot/DefaultFile are wired to the ArkTS shell. When the handler is
+// connected (or either property changes) it extracts the framework bootstrap script
+// (_framework/hybridwebview.js) out of the Microsoft.Maui assembly into the extracted app
+// payload directory and registers that directory + HybridRoot + DefaultFile with the shell
+// through the "hybrid" web command. The shell answers requests for the MAUI hybrid origin
+// (https://0.0.0.1/, see HybridWebViewHandler.AppOrigin) from the payload with
+// onInterceptRequest (file reads through @ohos.file.fs) and loads the origin, so a stock
+// HybridWebView page renders and window.HybridWebView.SendRawMessage reaches
+// RawMessageReceived through the shell's __hwvSendMessage forwarding.
+//
+// Scope note: the JS -> .NET InvokeDotNet endpoint (__hwvInvokeDotNet) is not implemented -
+// ArkWeb expects an intercepted response synchronously, and invoking a managed method needs an
+// asynchronous response stream (setResponseIsReady/delayed data) that this batch does not add.
+// window.HybridWebView.InvokeDotNet therefore rejects; the .NET -> JS direction
+// (EvaluateJavaScriptAsync / InvokeJavaScriptAsync) keeps working. Off-device (no host
+// library / no app context) registration is a no-op.
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -24,12 +36,22 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     internal const string InvokeCompletedPrefix = "__InvokeJavaScriptCompleted|";
     internal const string InvokeFailedPrefix = "__InvokeJavaScriptFailed|";
 
+    /// <summary>Embedded framework script path (resource name in the Microsoft.Maui assembly).</summary>
+    internal const string HybridWebViewScriptPath = "_framework/hybridwebview.js";
+
+    /// <summary>MAUI hybrid origin the shell serves the app package from.</summary>
+    internal const string HybridAppOrigin = "https://0.0.0.1/";
+
     private static readonly TimeSpan s_invokeTimeout = TimeSpan.FromSeconds(10);
     private static readonly List<OpenHarmonyHybridWebViewHandler> s_handlers = new();
     private static readonly ConcurrentDictionary<string, TaskCompletionSource<string?>> s_invokeRequests = new();
 
     public static readonly IPropertyMapper<IHybridWebView, OpenHarmonyHybridWebViewHandler> Mapper =
-        new PropertyMapper<IHybridWebView, OpenHarmonyHybridWebViewHandler>(ViewMapper);
+        new PropertyMapper<IHybridWebView, OpenHarmonyHybridWebViewHandler>(ViewMapper)
+        {
+            [nameof(IHybridWebView.HybridRoot)] = MapHybridAssets,
+            [nameof(IHybridWebView.DefaultFile)] = MapHybridAssets,
+        };
 
     public OpenHarmonyHybridWebViewHandler() : base(Mapper) { }
 
@@ -42,6 +64,10 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             s_handlers.Add(this);
         }
+        // The hybrid page posts its messages through the shell's JS message sink, so the sink
+        // must be bound even when the app never connects the regular WebView handler.
+        OpenHarmonyWebViewHandler.EnsureMessageRegistered();
+        RegisterHybridAssets();
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
@@ -61,6 +87,70 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         base.PlatformArrange(frame);
         // The ArkWeb component is a shell overlay, so it only needs to know it is visible.
         OpenHarmonyBridge.WebCommand("show");
+    }
+
+    /// <summary>
+    /// HybridRoot/DefaultFile mapper: (re)registers the asset root with the shell. Without a
+    /// host library (tests) or an extracted app directory the call is a no-op.
+    /// </summary>
+    public static void MapHybridAssets(OpenHarmonyHybridWebViewHandler handler, IHybridWebView webView)
+        => handler.RegisterHybridAssets();
+
+    private void RegisterHybridAssets()
+    {
+        OpenHarmonyAppContext? context = OpenHarmonyBridge.Context;
+        if (context is null || string.IsNullOrEmpty(context.AppDir))
+        {
+            return;
+        }
+        string root = VirtualView?.HybridRoot is { Length: > 0 } hybridRoot ? hybridRoot : "wwwroot";
+        string defaultFile = VirtualView?.DefaultFile is { Length: > 0 } file ? file : "index.html";
+        string payloadDir = context.AppDir.TrimEnd('/');
+        EnsureHybridWebViewScript(payloadDir);
+        OpenHarmonyBridge.WebCommand("hybrid", JsonSerializer.Serialize(new HybridAssetsConfig
+        {
+            Base = payloadDir,
+            Root = root,
+            DefaultFile = defaultFile,
+        }));
+    }
+
+    /// <summary>
+    /// Copies the framework bootstrap script (embedded in the Microsoft.Maui assembly) next to
+    /// the extracted payload, where the shell serves it from as _framework/hybridwebview.js.
+    /// </summary>
+    private static void EnsureHybridWebViewScript(string payloadDir)
+    {
+        try
+        {
+            using Stream? script = typeof(Microsoft.Maui.Handlers.HybridWebViewHandler).Assembly
+                .GetManifestResourceStream(HybridWebViewScriptPath);
+            if (script is null)
+            {
+                return;
+            }
+            string destination = Path.Combine(payloadDir, "_framework", "hybridwebview.js");
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            using FileStream file = File.Create(destination);
+            script.CopyTo(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            OpenHarmonyBridge.WriteStatus($"[maui] hybrid bootstrap script extraction failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Payload descriptor the shell consumes from the "hybrid" web command.</summary>
+    private sealed class HybridAssetsConfig
+    {
+        [JsonPropertyName("base")]
+        public string Base { get; init; } = string.Empty;
+
+        [JsonPropertyName("root")]
+        public string Root { get; init; } = string.Empty;
+
+        [JsonPropertyName("defaultFile")]
+        public string DefaultFile { get; init; } = string.Empty;
     }
 
     // Controls.HybridWebView raises these commands through IElementHandler.Invoke/InvokeAsync;

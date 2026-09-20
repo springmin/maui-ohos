@@ -6,8 +6,10 @@
 //   OpenHarmonyBluetooth.GetPairedDevicesAsync()      -> list of (name, address)
 //   OpenHarmonyBluetooth.StartDiscoveryAsync()        -> classic discovery started
 //   OpenHarmonyBluetooth.StopDiscoveryAsync()         -> discovery stopped
-//   OpenHarmonyBluetooth.GetDiscoveredDevicesAsync()  -> devices found by discovery
-//   OpenHarmonyBluetooth.DeviceFound                  -> push event per discovered device
+//   OpenHarmonyBluetooth.GetDiscoveredDevicesAsync()  -> devices found by discovery (deduplicated,
+//                                                        empty addresses dropped, name/address order)
+//   OpenHarmonyBluetooth.DeviceFound                  -> push event, at most once per new address
+//                                                        (a new StartDiscoveryAsync resets that)
 //   OpenHarmonyPrinting.IsSupported                   -> print framework usable
 //   OpenHarmonyPrinting.PrintTextAsync(jobName, text) -> render the text to a PDF and print it
 //   OpenHarmonyPrinting.PrintFileAsync(path)          -> print an existing PDF/image file
@@ -37,7 +39,10 @@
 // Wire formats: Bluetooth devices: one "name\taddress" record per line, '\n' separated (a
 // missing name is an empty first field). Paired devices and discovered devices use the same
 // shape: discovery pushes each device as its own notify and answers op 4 with the accumulated
-// table. The adapter state is the decimal access.BluetoothState value as text ("2" = STATE_ON).
+// table. The raw parser keeps the wire records verbatim; the discovered-device surface
+// normalizes them (one record per address, empty addresses dropped, ordered by name then
+// address) and reports each address through DeviceFound only once per discovery. The adapter
+// state is the decimal access.BluetoothState value as text ("2" = STATE_ON).
 // Print results carry an optional diagnostic message (a shell/print-framework error) that is
 // logged, never thrown.
 using System.Collections.Concurrent;
@@ -62,6 +67,10 @@ public static class OpenHarmonyBluetooth
 
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Payload)>> s_pending = new();
+
+    // Addresses already reported for the current/last discovery (the DeviceFound dedupe key).
+    // Addresses are case-insensitive; the set is cleared when a new discovery actually starts.
+    private static readonly ConcurrentDictionary<string, byte> s_foundAddresses = new(StringComparer.OrdinalIgnoreCase);
     private static BluetoothResultCallback? s_callback;
     private static BluetoothDeviceCallback? s_deviceCallback;
     private static int s_nextId;
@@ -88,9 +97,12 @@ public static class OpenHarmonyBluetooth
     private delegate void BluetoothDeviceCallback(IntPtr payloadUtf8);
 
     /// <summary>
-    /// Raised once for every device the platform reports while discovery runs. The device carries
-    /// the same name/address pair as <see cref="GetPairedDevicesAsync"/>; a malformed payload is
-    /// ignored. Off-device (no host library) the event never fires.
+    /// Raised for every device address the platform reports while discovery runs. The device
+    /// carries the same name/address pair as <see cref="GetPairedDevicesAsync"/>; a malformed
+    /// payload is ignored. An address raises the event at most once per discovery (a device that
+    /// also appears in the op 4 table does not repeat), and starting a new discovery forgets the
+    /// previous addresses, so a rescan raises the event for devices found again. Off-device (no
+    /// host library) the event never fires.
     /// </summary>
     public static event EventHandler<OpenHarmonyBluetoothDevice>? DeviceFound;
 
@@ -102,7 +114,11 @@ public static class OpenHarmonyBluetooth
     public static bool IsSupported =>
         !s_unavailable && OpenHarmonyBridge.CheckSelfPermission("ohos.permission.ACCESS_BLUETOOTH");
 
-    /// <summary>Parses one or more "name\taddress" records (the shell's device payload).</summary>
+    /// <summary>
+    /// Parses one or more "name\taddress" records (the shell's device payload) verbatim: the
+    /// records keep their wire order and duplicates. Use
+    /// <see cref="NormalizeDiscoveredDevices"/> for the discovered-device surface.
+    /// </summary>
     public static IReadOnlyList<OpenHarmonyBluetoothDevice> ParseDevices(string? payload)
     {
         var devices = new List<OpenHarmonyBluetoothDevice>();
@@ -126,6 +142,46 @@ public static class OpenHarmonyBluetooth
 
     /// <summary>Parses the shell payload ("name\taddress" lines, '\n' separated).</summary>
     public static IReadOnlyList<OpenHarmonyBluetoothDevice> ParsePairedDevices(string? payload) => ParseDevices(payload);
+
+    /// <summary>
+    /// Normalizes a discovered-device table for the public surface: records without an address
+    /// are dropped, records that share an address collapse into one (a later record may supply
+    /// the name when the first one had none) and the result is ordered by name, then address.
+    /// The comparison is ordinal (case-insensitive) and therefore stable across cultures.
+    /// </summary>
+    internal static IReadOnlyList<OpenHarmonyBluetoothDevice> NormalizeDiscoveredDevices(
+        IEnumerable<OpenHarmonyBluetoothDevice> devices)
+    {
+        var indexByAddress = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var normalized = new List<OpenHarmonyBluetoothDevice>();
+        foreach (OpenHarmonyBluetoothDevice device in devices)
+        {
+            string address = device.Address.Trim();
+            if (address.Length == 0)
+            {
+                continue;
+            }
+            string name = device.Name.Trim();
+            if (indexByAddress.TryGetValue(address, out int index))
+            {
+                if (normalized[index].Name.Length == 0 && name.Length > 0)
+                {
+                    normalized[index] = new OpenHarmonyBluetoothDevice(name, normalized[index].Address);
+                }
+                continue;
+            }
+            indexByAddress[address] = normalized.Count;
+            normalized.Add(new OpenHarmonyBluetoothDevice(name, address));
+        }
+        normalized.Sort(static (left, right) =>
+        {
+            int order = string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+            return order != 0
+                ? order
+                : string.Compare(left.Address, right.Address, StringComparison.OrdinalIgnoreCase);
+        });
+        return normalized;
+    }
 
     /// <summary>True when the adapter-state payload is access.BluetoothState.STATE_ON ("2").</summary>
     public static bool ParseAdapterState(string? payload) =>
@@ -163,7 +219,14 @@ public static class OpenHarmonyBluetooth
     public static async Task<bool> StartDiscoveryAsync(CancellationToken cancellationToken = default)
     {
         (int Code, string Payload)? answer = await SendAsync(2, cancellationToken).ConfigureAwait(false);
-        return answer is { } result && result.Code == 0;
+        if (answer is not { } result || result.Code != 0)
+        {
+            return false;
+        }
+        // The shell clears its accumulated table when a new discovery starts, so a device found
+        // again in this scan is new to the event stream: forget the previous addresses.
+        s_foundAddresses.Clear();
+        return true;
     }
 
     /// <summary>Stops classic Bluetooth discovery; false when the platform path is unavailable.</summary>
@@ -175,8 +238,11 @@ public static class OpenHarmonyBluetooth
 
     /// <summary>
     /// Returns the devices reported since the current/last discovery was started (the shell
-    /// accumulates the bluetoothDeviceFind callbacks). Returns an empty list when the platform
-    /// path is unavailable or nothing was found; it never throws. Start a discovery first.
+    /// accumulates the bluetoothDeviceFind callbacks), deduplicated by address, with empty
+    /// addresses dropped and a stable name-then-address order. The addresses also count as
+    /// reported, so <see cref="DeviceFound"/> does not repeat them. Returns an empty list when
+    /// the platform path is unavailable or nothing was found; it never throws. Start a
+    /// discovery first.
     /// </summary>
     public static async Task<IReadOnlyList<OpenHarmonyBluetoothDevice>> GetDiscoveredDevicesAsync(
         CancellationToken cancellationToken = default)
@@ -186,21 +252,31 @@ public static class OpenHarmonyBluetooth
         {
             return Array.Empty<OpenHarmonyBluetoothDevice>();
         }
-        return ParseDevices(result.Payload);
+        IReadOnlyList<OpenHarmonyBluetoothDevice> devices =
+            NormalizeDiscoveredDevices(ParseDevices(result.Payload));
+        foreach (OpenHarmonyBluetoothDevice device in devices)
+        {
+            s_foundAddresses.TryAdd(device.Address, 0);
+        }
+        return devices;
     }
 
     /// <summary>
     /// Native-shaped entry point for the host's discovered-device notify (harness-testable).
-    /// One "name\taddress" record per call; malformed payloads raise nothing.
+    /// One "name\taddress" record per call; malformed payloads raise nothing. Each address
+    /// raises <see cref="DeviceFound"/> at most once per discovery, so the shell may push a
+    /// device it also reports through the op 4 table without the app seeing it twice.
     /// </summary>
     internal static void OnDeviceFoundPayload(string? payload)
     {
-        IReadOnlyList<OpenHarmonyBluetoothDevice> devices = ParseDevices(payload);
-        if (devices.Count == 0)
+        IReadOnlyList<OpenHarmonyBluetoothDevice> devices = NormalizeDiscoveredDevices(ParseDevices(payload));
+        foreach (OpenHarmonyBluetoothDevice device in devices)
         {
-            return;
+            if (s_foundAddresses.TryAdd(device.Address, 0))
+            {
+                DeviceFound?.Invoke(null, device);
+            }
         }
-        DeviceFound?.Invoke(null, devices[0]);
     }
 
     private static async Task<(int Code, string Payload)?> SendAsync(

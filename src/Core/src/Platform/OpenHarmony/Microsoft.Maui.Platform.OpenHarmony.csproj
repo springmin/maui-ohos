@@ -10,10 +10,16 @@
          workload packs; point this at a built or installed copy when building outside the
          workload repo. -->
     <OpenHarmonyHostingAssembly Condition=" '$(OpenHarmonyHostingAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Hosting/bin/Release/net11.0/Microsoft.OpenHarmony.Hosting.dll</OpenHarmonyHostingAssembly>
+    <!-- The BlazorWebView handler skeleton takes the BlazorWebView package types. The switch
+         lets compile vehicles that build the slice sources without restoring the package (a
+         partial checkout, the ohos-workload verifier harness) skip the file instead of
+         failing; see OpenHarmonyBlazorWebViewHandler.cs. -->
+    <DefineConstants>$(DefineConstants);OPENHARMONY_BLAZOR_WEBVIEW</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Core" Version="11.0.0-rc.1.26451.6" />
     <PackageReference Include="Microsoft.Maui.Graphics" Version="11.0.0-rc.1.26451.6" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.1.26451.6" />
     <Reference Include="Microsoft.OpenHarmony.Hosting">
       <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
       <Private>false</Private>

@@ -16,7 +16,17 @@
 //     already sketched on OpenHarmonyWebViewManager);
 //   * the shell side of the "blazor" web command and the static web asset payload
 //     (_framework/blazor.webview.js, dotnet.js/wasm, app assemblies);
-//   * the window.external bootstrap that starts Blazor and the handler registration.
+//   * the window.external bootstrap that starts Blazor. Note the framing: blazor.webview.js
+//     posts JS -> .NET through window.external.sendMessage(message) and registers its
+//     .NET -> JS callback through window.external.receiveMessage(callback) (verified against
+//     the package's staticwebassets/blazor.webview.js), so the bootstrap has to install a
+//     Tizen-style window.__dispatchMessageCallback fan-out instead of reusing the shell's
+//     HybridWebView receiveMessage(message) delivery shim; SendMessage below prefers that
+//     callback and keeps the shim only as the pre-bootstrap fallback;
+//   * the handler registration: the package registers BlazorWebViewHandler through
+//     AddMauiBlazorWebView(); the port replaces it with
+//     services.AddMauiBlazorWebView().UsePlatformHandler<OpenHarmonyBlazorWebViewHandler>()
+//     (MauiBlazorWebViewBuilderExtensions.UsePlatformHandler&lt;T&gt;).
 //
 // Compilation gate: the file takes the BlazorWebView package types, so it is compiled only when
 // OPENHARMONY_BLAZOR_WEBVIEW is defined. The slice project defines it together with the package
@@ -240,9 +250,12 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         => OpenHarmonyBridge.WebCommand(ShellLoadCommand, absoluteUri.ToString());
 
     /// <summary>
-    /// .NET -> JS over the existing shell eval channel, delivering to the shell's
-    /// <c>window.external.receiveMessage</c> compatibility layer (the same layer HybridWebView
-    /// uses, installed by the shell's injectPageBridge).
+    /// .NET -> JS over the existing shell eval channel. <c>blazor.webview.js</c> registers its
+    /// incoming-message callback through <c>window.external.receiveMessage(callback)</c>, so the
+    /// Blazor bootstrap script (TODO milestone 2b) installs a Tizen-style
+    /// <c>window.__dispatchMessageCallback</c> fan-out and the delivery goes there first. The
+    /// shell's own <c>window.external.receiveMessage(message)</c> shim stays as the fallback
+    /// before the bootstrap runs (it is the HybridWebView-compatible delivery path).
     /// </summary>
     protected override void SendMessage(string message)
     {
@@ -251,10 +264,10 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             return;
         }
         _ = OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
-            "(function(m){if(window.external&&typeof window.external.receiveMessage==='function')" +
-            "{window.external.receiveMessage(m);}" +
-            "else if(typeof window.__dispatchMessageCallback==='function')" +
-            "{window.__dispatchMessageCallback(m);}})" +
+            "(function(m){if(typeof window.__dispatchMessageCallback==='function')" +
+            "{window.__dispatchMessageCallback(m);}" +
+            "else if(window.external&&typeof window.external.receiveMessage==='function')" +
+            "{window.external.receiveMessage(m);}})" +
             "(" + JsonSerializer.Serialize(message) + ")");
     }
 

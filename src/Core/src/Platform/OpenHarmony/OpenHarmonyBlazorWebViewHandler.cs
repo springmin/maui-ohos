@@ -11,18 +11,26 @@
 //     inbound messages come from OpenHarmonyWebViewHandler.JsMessage (the shell's dotnetHost
 //     proxy) and are handed to the platform WebViewManager subclass.
 //
-// What is intentionally NOT here (TODOs below, milestone 2b):
+// What is intentionally NOT here (the remainder of milestone 2b):
 //   * creating the platform WebViewManager (needs services/dispatcher; the constructor is
-//     already sketched on OpenHarmonyWebViewManager);
-//   * the shell side of the "blazor" web command and the static web asset payload
-//     (_framework/blazor.webview.js, dotnet.js/wasm, app assemblies);
-//   * the window.external bootstrap that starts Blazor. Note the framing: blazor.webview.js
-//     posts JS -> .NET through window.external.sendMessage(message) and registers its
-//     .NET -> JS callback through window.external.receiveMessage(callback) (verified against
-//     the package's staticwebassets/blazor.webview.js), so the bootstrap has to install a
-//     Tizen-style window.__dispatchMessageCallback fan-out instead of reusing the shell's
-//     HybridWebView receiveMessage(message) delivery shim; SendMessage below prefers that
-//     callback and keeps the shim only as the pre-bootstrap fallback;
+//     already sketched on OpenHarmonyWebViewManager) and navigating from the handler.
+// The other two milestone-2b gaps are closed by milestone 3:
+//   * the shell side of the "blazor" web command and the Blazor origin interception are
+//     implemented in the platform pack's ArkTS shell (Index.ets): https://0.0.0.0/ is served
+//     from <AppDir>/<content root> and the page-end bootstrap installs the callback form of
+//     window.external.receiveMessage, publishes window.__dispatchMessageCallback and calls
+//     Blazor.start();
+//   * the static web assets are staged by the pack targets (OpenHarmony.Hap.targets): the app
+//     wwwroot plus wwwroot/_framework/blazor.webview.js travel inside resources/rawfile/dotnet.zip.
+//     Native model: the managed app runs in-process on CoreCLR, so no dotnet.js/dotnet.wasm/_*.dll
+//     browser assets exist (that is the WebAssembly model of Blazor Web, not Blazor Hybrid).
+//   * window.external bootstrap framing: blazor.webview.js posts JS -> .NET through
+//     window.external.sendMessage(message) and registers its .NET -> JS callback through
+//     window.external.receiveMessage(callback) (verified against the package's
+//     staticwebassets/blazor.webview.js), so the shell's bootstrap installs the Tizen-style
+//     window.__dispatchMessageCallback fan-out instead of the HybridWebView receiveMessage(message)
+//     delivery shim; SendMessage below prefers that callback and keeps the shim only as the
+//     pre-bootstrap fallback;
 //   * the handler registration: the package registers BlazorWebViewHandler through
 //     AddMauiBlazorWebView(); the port replaces it with
 //     services.AddMauiBlazorWebView().UsePlatformHandler<OpenHarmonyBlazorWebViewHandler>()
@@ -98,8 +106,9 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         //       Path.GetRelativePath(contentRootDir, hostPage));
         //   PublishRootComponents();                                  // AddToWebViewManagerAsync
         //   _webViewManager.Navigate(VirtualView.StartPath);
-        //   then inject the bootstrap (window.external -> dotnetHost, Blazor.start()) and call
-        //   VirtualView.BlazorWebViewInitializing/Initialized like the package handler does.
+        //   then call VirtualView.BlazorWebViewInitializing/Initialized like the package
+        //   handler does. The Blazor bootstrap itself is injected by the ArkTS shell on page
+        //   end (milestone 3), so no init script is evaluated from here.
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
@@ -119,13 +128,13 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         => handler.PublishRootComponents();
 
     /// <summary>
-    /// Registers the Blazor app origin + content root with the ArkTS shell. The path mapping is
-    /// milestone 1's <see cref="OpenHarmonyBlazorWebView"/>; the shell's "blazor" command and
-    /// the file interception are not implemented yet.
-    /// TODO milestone 2b (shell): answer <c>https://0.0.0.0/</c> from the payload root with the
-    /// same <c>onInterceptRequest</c> path the hybrid origin uses, and make sure the published
-    /// static web assets (<c>_framework/blazor.webview.js</c>, the dotnet runtime/wasm files and
-    /// the app assemblies) land under <c>&lt;AppDir&gt;/wwwroot</c> in the hap payload.
+    /// Registers the Blazor app origin + content root with the ArkTS shell (the "blazor" web
+    /// command): the shell answers <c>https://0.0.0.0/</c> from the payload's
+    /// <c>&lt;content root&gt;</c> directory (default <c>wwwroot</c>) with the same
+    /// <c>&lt;base&gt;/&lt;root&gt;/&lt;path&gt;</c> convention the hybrid bridge uses, injects the
+    /// blazor.webview.js bootstrap on page end and starts the load. The pack targets stage the
+    /// content root plus <c>wwwroot/_framework/blazor.webview.js</c> into the hap payload
+    /// (native in-process model: no dotnet.js/dotnet.wasm/_*.dll browser assets).
     /// </summary>
     public void RegisterBlazorAssets()
     {
@@ -243,8 +252,8 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
 
     /// <summary>
     /// Shell navigation: the ArkWeb overlay loads the app origin path (the same shell command
-    /// the WebView handler uses). TODO milestone 2b: inject the window.external -> dotnetHost
-    /// bridge and the Blazor bootstrap (Blazor.start()) once per document before loading.
+    /// the WebView handler uses). The shell injects the window.external -> dotnetHost bridge and
+    /// the Blazor bootstrap (Blazor.start()) on page end, so this only has to trigger the load.
     /// </summary>
     protected override void NavigateCore(Uri absoluteUri)
         => OpenHarmonyBridge.WebCommand(ShellLoadCommand, absoluteUri.ToString());

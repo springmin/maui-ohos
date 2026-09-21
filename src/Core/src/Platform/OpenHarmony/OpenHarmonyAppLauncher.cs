@@ -121,7 +121,10 @@ public sealed class OpenHarmonyLauncher : ILauncher
         bool dispatched = OpenHarmonyAbilityBridge.TryOpenUri(uri.AbsoluteUri);
         if (!dispatched)
         {
-            OpenHarmonyBridge.WriteStatus($"[maui] launcher could not dispatch '{uri.AbsoluteUri}'");
+            // The URI is stripped of its query/fragment and truncated (B7) before it reaches
+            // dotnet-status.txt; the dispatched payload keeps the full URI.
+            string loggedUri = OpenHarmonyWebViewHandler.SanitizeUrlForLog(uri.AbsoluteUri);
+            OpenHarmonyBridge.WriteStatus($"[maui] launcher could not dispatch '{loggedUri}'");
         }
         return Task.FromResult(dispatched);
     }
@@ -177,7 +180,10 @@ public sealed class OpenHarmonyBrowser : IBrowser
         bool dispatched = OpenHarmonyAbilityBridge.TryOpenUri(uri.AbsoluteUri);
         if (!dispatched)
         {
-            OpenHarmonyBridge.WriteStatus($"[maui] browser could not dispatch '{uri.AbsoluteUri}'");
+            // Same B7 rule as the launcher: the log gets scheme+host+path, capped; the
+            // dispatched payload keeps the full URI.
+            string loggedUri = OpenHarmonyWebViewHandler.SanitizeUrlForLog(uri.AbsoluteUri);
+            OpenHarmonyBridge.WriteStatus($"[maui] browser could not dispatch '{loggedUri}'");
         }
         return Task.FromResult(dispatched);
     }

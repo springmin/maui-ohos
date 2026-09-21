@@ -37,7 +37,9 @@ public sealed class OpenHarmonyImageHandler : OpenHarmonyViewHandler<IImage>
                 }
                 else
                 {
-                    Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus($"[maui] image file not found: {path}");
+                    // The path is already query/fragment-free in practice; the B7 helper only
+                    // caps it and drops anything after a '?'/'#' that slipped into the name.
+                    Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus($"[maui] image file not found: {OpenHarmonyWebViewHandler.SanitizeUrlForLog(path)}");
                 }
             }
             catch (Exception ex)

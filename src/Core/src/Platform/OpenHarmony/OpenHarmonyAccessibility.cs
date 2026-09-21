@@ -63,11 +63,16 @@ public static class OpenHarmonyAccessibility
             _ => Array.Empty<OpenHarmonyAccessibilityAction>(),
         };
 
-    private static readonly List<OpenHarmonyAccessibilityNode> s_nodes = new();
-    private static readonly Dictionary<int, OpenHarmonyAccessibilityNode> s_index = new();
+    // The shadow tree is published as immutable snapshots: Refresh builds a new frame off to the
+    // side and swaps the reference in once it is complete. An accessibility callback on another
+    // thread (Nodes, TryFindNode, the action listener) can therefore enumerate a frame without ever
+    // observing a list being cleared or appended to, and a node's bounds always belong to one
+    // coherent frame. Old snapshots stay valid for any in-flight enumeration.
+    private static OpenHarmonyAccessibilityNode[] s_nodes = Array.Empty<OpenHarmonyAccessibilityNode>();
+    private static Dictionary<int, OpenHarmonyAccessibilityNode> s_index = new();
 
-    /// <summary>Nodes of the last frame (root first, parents before children).</summary>
-    public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => s_nodes;
+    /// <summary>Nodes of the last published frame (root first, parents before children).</summary>
+    public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_nodes);
 
     private const string HostLibrary = "libopenharmonyhost.so";
     private static bool _available = true;
@@ -151,7 +156,21 @@ public static class OpenHarmonyAccessibility
     }
 
     private static void OnAction(int nodeId, int action)
-        => _actionHandler?.Invoke(nodeId, action);
+    {
+        // The host calls this from the accessibility thread (host_napi.cpp A11yExecuteAction), so
+        // this is a reverse P/Invoke boundary: an exception escaping into native code would unwind
+        // through the host and abort the process. The handler routes actions back into the normal
+        // input path, which runs app event code, so catch everything and report instead.
+        try
+        {
+            _actionHandler?.Invoke(nodeId, action);
+        }
+        catch (Exception ex)
+        {
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                $"[maui] accessibility action handler failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
 
     /// <summary>Pushes the pending frame changes as accessibility events.</summary>
     public static void FlushEvents()
@@ -174,13 +193,13 @@ public static class OpenHarmonyAccessibility
     /// <summary>Finds a published node by id (used to route actions back to a hit test).</summary>
     public static bool TryFindNode(int id, out OpenHarmonyAccessibilityNode node)
     {
-        foreach (OpenHarmonyAccessibilityNode candidate in s_nodes)
+        // One immutable index snapshot: an action arriving while Refresh rebuilds the tree routes
+        // with the last complete frame (never a half-swapped one and never a partially updated
+        // rectangle), so a click cannot be misrouted onto torn bounds.
+        if (Volatile.Read(ref s_index).TryGetValue(id, out OpenHarmonyAccessibilityNode? found))
         {
-            if (candidate.Id == id)
-            {
-                node = candidate;
-                return true;
-            }
+            node = found;
+            return true;
         }
         node = null!;
         return false;
@@ -195,7 +214,7 @@ public static class OpenHarmonyAccessibility
     /// <summary>Whether the last publish pass would have talked to the host (observable off-device).</summary>
     public static bool WouldPublish { get; private set; }
 
-    private static readonly List<OpenHarmonyAccessibilityNode> s_previousList = new();
+    private static OpenHarmonyAccessibilityNode[] s_previousList = Array.Empty<OpenHarmonyAccessibilityNode>();
 
     /// <summary>
     /// Changes detected between the last two published frames, as ArkUI accessibility event type
@@ -208,46 +227,53 @@ public static class OpenHarmonyAccessibility
     public const int EventPageContentUpdate = 0x00000800;
     public const int EventTextUpdate = 0x00000010;
 
-    private static int DiffFrames()
+    private static int DiffFrames(OpenHarmonyAccessibilityNode[] current)
     {
+        // Read the baseline snapshot, compare against the frame being published, then make the
+        // frame the new baseline with a single reference swap: no Clear/AddRange on a collection
+        // another thread could be enumerating.
+        OpenHarmonyAccessibilityNode[] previous = Volatile.Read(ref s_previousList);
         int events = 0;
-        if (s_previousList.Count != s_nodes.Count)
+        if (previous.Length != current.Length)
         {
             events |= EventPageContentUpdate;
         }
-        int shared = Math.Min(s_previousList.Count, s_nodes.Count);
+        int shared = Math.Min(previous.Length, current.Length);
         for (int i = 0; i < shared; i++)
         {
-            if (!string.Equals(s_previousList[i].Text, s_nodes[i].Text, StringComparison.Ordinal)
-                || !string.Equals(s_previousList[i].Description, s_nodes[i].Description, StringComparison.Ordinal)
-                || !string.Equals(s_previousList[i].Hint, s_nodes[i].Hint, StringComparison.Ordinal))
+            if (!string.Equals(previous[i].Text, current[i].Text, StringComparison.Ordinal)
+                || !string.Equals(previous[i].Description, current[i].Description, StringComparison.Ordinal)
+                || !string.Equals(previous[i].Hint, current[i].Hint, StringComparison.Ordinal))
             {
                 events |= EventTextUpdate;
             }
             // Range/checked changes must force a republish even when the bounds and text did
             // not move (dragging a slider is exactly that case). double.Equals treats NaN as
             // equal to NaN, so an absent range does not look changed on every frame.
-            bool rangeSame = s_previousList[i].RangeMin.Equals(s_nodes[i].RangeMin)
-                && s_previousList[i].RangeMax.Equals(s_nodes[i].RangeMax)
-                && s_previousList[i].RangeCurrent.Equals(s_nodes[i].RangeCurrent);
-            if (s_previousList[i].Bounds != s_nodes[i].Bounds
+            bool rangeSame = previous[i].RangeMin.Equals(current[i].RangeMin)
+                && previous[i].RangeMax.Equals(current[i].RangeMax)
+                && previous[i].RangeCurrent.Equals(current[i].RangeCurrent);
+            if (previous[i].Bounds != current[i].Bounds
                 || !rangeSame
-                || s_previousList[i].Checked != s_nodes[i].Checked)
+                || previous[i].Checked != current[i].Checked)
             {
                 events |= EventPageStateUpdate;
             }
         }
-        s_previousList.Clear();
-        s_previousList.AddRange(s_nodes);
+        Volatile.Write(ref s_previousList, current);
         return events;
     }
 
     /// <summary>Rebuilds the shadow tree for a rendered frame.</summary>
     public static void Refresh(IView root)
     {
-        s_nodes.Clear();
-        s_index.Clear();
-        Visit(root, 0);
+        var nodes = new List<OpenHarmonyAccessibilityNode>();
+        var index = new Dictionary<int, OpenHarmonyAccessibilityNode>();
+        Visit(root, 0, nodes, index);
+        // Publish the completed frame with atomic reference swaps: a callback on the accessibility
+        // thread either sees the previous complete frame or this one, never a partial rebuild.
+        Volatile.Write(ref s_nodes, nodes.ToArray());
+        Volatile.Write(ref s_index, index);
     }
 
     /// <summary>
@@ -256,14 +282,15 @@ public static class OpenHarmonyAccessibility
     /// </summary>
     public static void Publish()
     {
+        OpenHarmonyAccessibilityNode[] nodes = Volatile.Read(ref s_nodes);
         // The event source is managed state, so the diff runs even when the host is unavailable.
-        PendingEventCount = DiffFrames();
-        if (!_available || s_nodes.Count == 0)
+        PendingEventCount = DiffFrames(nodes);
+        if (!_available || nodes.Length == 0)
         {
             LastPublishedCount = 0;
             return;
         }
-        WouldPublish = _available && s_nodes.Count > 0 && PendingEventCount != 0;
+        WouldPublish = _available && nodes.Length > 0 && PendingEventCount != 0;
         if (!WouldPublish)
         {
             // Nothing moved: skip the native traffic (three calls plus UTF-8 marshalling per node).
@@ -273,8 +300,8 @@ public static class OpenHarmonyAccessibility
         }
         try
         {
-            AccessibilityBegin(s_nodes.Count);
-            foreach (OpenHarmonyAccessibilityNode node in s_nodes)
+            AccessibilityBegin(nodes.Length);
+            foreach (OpenHarmonyAccessibilityNode node in nodes)
             {
                 int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
                 int actions = 0;
@@ -287,7 +314,7 @@ public static class OpenHarmonyAccessibility
                     node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
             }
             AccessibilityCommit();
-            LastPublishedCount = s_nodes.Count;
+            LastPublishedCount = nodes.Length;
             FlushEvents();
             LogProviderStatusOnce();
         }
@@ -303,9 +330,10 @@ public static class OpenHarmonyAccessibility
         }
     }
 
-    private static int BuildNode(IView view, int parentId)
+    private static int BuildNode(IView view, int parentId, List<OpenHarmonyAccessibilityNode> nodes,
+        Dictionary<int, OpenHarmonyAccessibilityNode> index)
     {
-        int id = s_nodes.Count + 1;
+        int id = nodes.Count + 1;
         RectF bounds = default;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
@@ -352,18 +380,19 @@ public static class OpenHarmonyAccessibility
         };
         var node = new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable,
             rangeMin, rangeMax, rangeCurrent, checkedState);
-        s_nodes.Add(node);
-        s_index[id] = node;
+        nodes.Add(node);
+        index[id] = node;
         return id;
     }
-    private static void Visit(IView root, int parentId)
+    private static void Visit(IView root, int parentId, List<OpenHarmonyAccessibilityNode> nodes,
+        Dictionary<int, OpenHarmonyAccessibilityNode> index)
     {
         var pending = new Stack<(IView View, int ParentId)>();
         pending.Push((root, parentId));
         while (pending.Count > 0)
         {
             (IView view, int parent) = pending.Pop();
-            int id = BuildNode(view, parent);
+            int id = BuildNode(view, parent, nodes, index);
             var children = new List<IView>();
             foreach (IView child in ChildrenOf(view))
             {

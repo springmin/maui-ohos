@@ -44,6 +44,18 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     /// <summary>Message prefix the stock HybridWebView JavaScript uses for raw messages.</summary>
     internal const string RawMessagePrefix = "__RawMessage|";
 
+    /// <summary>
+    /// Largest JS -&gt; .NET payload the managed boundary accepts from one page message, in UTF-16
+    /// code units (4 MiB). The host marshals the whole UTF-8 string out of the shell before managed
+    /// code runs, so this cap cannot undo that first native copy; it bounds everything managed does
+    /// with the string (the <see cref="Uri.UnescapeDataString(string)"/> copy, prefix parsing,
+    /// per-handler dispatch, JSON parsing of invocation arguments/results and any app-level work)
+    /// and rejects oversized payloads with a clear error instead of letting a hostile page grow the
+    /// managed heap without bound. 4 MiB is ~130x the largest legitimate payload the interaction
+    /// harness exercises (32 KiB) and far above any window.HybridWebView control message.
+    /// </summary>
+    internal const int MaxPagePayloadLength = 4 * 1024 * 1024;
+
     internal const string InvokeCompletedPrefix = "__InvokeJavaScriptCompleted|";
     internal const string InvokeFailedPrefix = "__InvokeJavaScriptFailed|";
 
@@ -337,6 +349,15 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
 
     private static async Task CompleteHybridInvokeAsync(int requestId, string methodName, string argsJson)
     {
+        // JS -> .NET invocation arguments are page -> .NET payloads too, so the same cap applies
+        // before anything is parsed or dispatched; the page gets a clear error result back.
+        if (methodName.Length > MaxPagePayloadLength || argsJson.Length > MaxPagePayloadLength)
+        {
+            SendInvokeResult(requestId, ErrorPayload(new InvalidOperationException(
+                $"the invocation payload exceeds the {MaxPagePayloadLength} character page payload cap " +
+                $"(method={methodName.Length}, args={argsJson.Length})")));
+            return;
+        }
         string payload;
         try
         {
@@ -524,15 +545,31 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             return;
         }
+        if (payload.Length > MaxPagePayloadLength)
+        {
+            RejectOversizedPayload(payload);
+            return;
+        }
         if (payload.StartsWith(InvokeCompletedPrefix, StringComparison.Ordinal) ||
             payload.StartsWith(InvokeFailedPrefix, StringComparison.Ordinal))
         {
             CompleteInvoke(payload);
             return;
         }
-        string message = payload.StartsWith(RawMessagePrefix, StringComparison.Ordinal)
-            ? Uri.UnescapeDataString(payload.Substring(RawMessagePrefix.Length))
-            : payload;
+        string message;
+        try
+        {
+            message = payload.StartsWith(RawMessagePrefix, StringComparison.Ordinal)
+                ? Uri.UnescapeDataString(payload.Substring(RawMessagePrefix.Length))
+                : payload;
+        }
+        catch (UriFormatException)
+        {
+            // UnescapeDataString's contract still allows UriFormatException for a malformed escape
+            // sequence; never let that cross back into the native callback, drop the message.
+            OpenHarmonyBridge.WriteStatus("[maui] hybrid raw message rejected: invalid escape sequence");
+            return;
+        }
         lock (s_handlers)
         {
             foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers.ToArray())
@@ -540,6 +577,34 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
                 handler.VirtualView?.RawMessageReceived(message);
             }
         }
+    }
+
+    /// <summary>
+    /// Rejects one page payload above <see cref="MaxPagePayloadLength"/>: a pending JS invocation
+    /// whose result is oversized is completed with a clear error (the page's promise rejects)
+    /// instead of waiting for its timeout, and every other oversized payload is dropped with a
+    /// status log. Never throws.
+    /// </summary>
+    private static void RejectOversizedPayload(string payload)
+    {
+        string prefix = payload.StartsWith(InvokeCompletedPrefix, StringComparison.Ordinal) ? InvokeCompletedPrefix
+            : payload.StartsWith(InvokeFailedPrefix, StringComparison.Ordinal) ? InvokeFailedPrefix
+            : string.Empty;
+        if (prefix.Length > 0)
+        {
+            int separator = payload.IndexOf('|', prefix.Length, StringComparison.Ordinal);
+            if (separator > prefix.Length)
+            {
+                string taskId = payload.Substring(prefix.Length, separator - prefix.Length);
+                if (s_invokeRequests.TryRemove(taskId, out TaskCompletionSource<string?>? source))
+                {
+                    source.TrySetException(new InvalidOperationException(
+                        $"the JavaScript invocation payload exceeds the {MaxPagePayloadLength} character page payload cap"));
+                }
+            }
+        }
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] hybrid page payload rejected: {payload.Length} characters exceed the {MaxPagePayloadLength} character cap");
     }
 
     private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request)

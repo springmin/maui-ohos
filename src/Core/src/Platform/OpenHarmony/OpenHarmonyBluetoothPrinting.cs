@@ -36,15 +36,18 @@
 // ohos.permission.PRINT (system_grant: granted at install once declared). Without the
 // declaration the shell answers unavailable instead of guessing.
 //
-// Wire formats: Bluetooth devices: one "name\taddress" record per line, '\n' separated (a
-// missing name is an empty first field). Paired devices and discovered devices use the same
+// Wire formats (finding B4): Bluetooth devices: one "name\taddress" record per line, '\n'
+// separated (a missing name is an empty first field; the shell escapes each field: '\' -> '\\',
+// tab -> '\t', LF -> '\n', CR -> '\r'). Paired devices and discovered devices use the same
 // shape: discovery pushes each device as its own notify and answers op 4 with the accumulated
-// table. The raw parser keeps the wire records verbatim; the discovered-device surface
-// normalizes them (one record per address, empty addresses dropped, ordered by name then
-// address) and reports each address through DeviceFound only once per discovery. The adapter
-// state is the decimal access.BluetoothState value as text ("2" = STATE_ON).
-// Print results carry an optional diagnostic message (a shell/print-framework error) that is
-// logged, never thrown.
+// table. Records are decoded by the shared OpenHarmonyKitRecords parser: a record must carry
+// exactly two fields, malformed records are skipped, a field is capped at 512 characters and a
+// payload at 2000 records, and an unescaped LF inside a name cannot forge another record. The
+// discovered-device surface normalizes the records (one record per address, empty addresses
+// dropped, ordered by name then address) and reports each address through DeviceFound only once
+// per discovery. The adapter state is the decimal access.BluetoothState value as text
+// ("2" = STATE_ON). Print results carry an optional diagnostic message (a shell/print-framework
+// error) that is logged, never thrown.
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -115,27 +118,20 @@ public static class OpenHarmonyBluetooth
         !s_unavailable && OpenHarmonyBridge.CheckSelfPermission("ohos.permission.ACCESS_BLUETOOTH");
 
     /// <summary>
-    /// Parses one or more "name\taddress" records (the shell's device payload) verbatim: the
-    /// records keep their wire order and duplicates. Use
+    /// Parses one or more "name\taddress" records (the shell's escaped device payload): each
+    /// record is decoded by the shared <see cref="OpenHarmonyKitRecords"/> parser, so records
+    /// keep their wire order and duplicates, records with anything but exactly two fields (or a
+    /// broken escape) are skipped, and at most
+    /// <see cref="OpenHarmonyKitRecords.MaxRecords"/> devices are returned. Use
     /// <see cref="NormalizeDiscoveredDevices"/> for the discovered-device surface.
     /// </summary>
     public static IReadOnlyList<OpenHarmonyBluetoothDevice> ParseDevices(string? payload)
     {
-        var devices = new List<OpenHarmonyBluetoothDevice>();
-        if (string.IsNullOrEmpty(payload))
+        List<string[]> records = OpenHarmonyKitRecords.ParseRecords(payload, 2);
+        var devices = new List<OpenHarmonyBluetoothDevice>(records.Count);
+        foreach (string[] fields in records)
         {
-            return devices;
-        }
-        foreach (string line in payload.Split('\n'))
-        {
-            if (line.Length == 0)
-            {
-                continue;
-            }
-            int separator = line.IndexOf('\t', StringComparison.Ordinal);
-            string name = separator >= 0 ? line[..separator] : string.Empty;
-            string address = separator >= 0 ? line[(separator + 1)..] : line;
-            devices.Add(new OpenHarmonyBluetoothDevice(name, address));
+            devices.Add(new OpenHarmonyBluetoothDevice(fields[0], fields[1]));
         }
         return devices;
     }

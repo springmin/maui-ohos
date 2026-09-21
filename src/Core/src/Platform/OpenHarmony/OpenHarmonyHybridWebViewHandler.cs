@@ -12,6 +12,12 @@
 // onInterceptRequest (file reads through @ohos.file.fs) and loads the origin, so a stock
 // HybridWebView page renders and window.HybridWebView.SendRawMessage reaches
 // RawMessageReceived through the shell's __hwvSendMessage forwarding.
+// The app context (and with it <c>AppDir</c>) can be published after the handler connects
+// (host startup ordering), so registration is lazy: a connect without a payload directory
+// is remembered and retried from the bridge's Initialized/SurfaceChanged signals (late
+// subscribers get the current state replayed) and from the first PlatformArrange, and every
+// pending root is registered exactly once (repeated mapper passes or event replays do not
+// re-issue the command).
 //
 // JS -> .NET invocation: the stock hybridwebview.js POSTs { MethodName, ParamValues } to
 // <origin>/__hwvInvokeDotNet. The ArkTS shell holds the intercepted WebResourceResponse open
@@ -20,8 +26,9 @@
 // handler calls ohos_host_hwv_invoke_result(requestId, payloadJson) with the
 // DotNetInvokeResult JSON the page's fetch expects. A missing invoker, a failed or timed-out
 // target method and a missing host/shell path all answer an error payload, so the page's
-// promise rejects instead of hanging. Off-device (no host library / no app context)
-// registration is a no-op; callers can still drive the managed half directly.
+// promise rejects instead of hanging. Off-device (no host library / no app context) the
+// registration is remembered as pending and retried when the bridge publishes the context;
+// callers can still drive the managed half directly.
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -52,6 +59,40 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     private static readonly TimeSpan s_dotNetInvokeTimeout = TimeSpan.FromSeconds(10);
     private static readonly List<OpenHarmonyHybridWebViewHandler> s_handlers = new();
     private static readonly ConcurrentDictionary<string, TaskCompletionSource<string?>> s_invokeRequests = new();
+
+    // Handlers that connected before the app context published an AppDir. Registration is
+    // retried from the bridge signals below (and from the first arrange) and the handler is
+    // removed as soon as its assets land, so each pending root registers exactly once.
+    private static readonly HashSet<OpenHarmonyHybridWebViewHandler> s_pendingRegistration = new();
+    private static bool s_registrationHooksAttached;
+    private string? _registeredAssets;
+
+    /// <summary>Raised after the "hybrid" shell command is issued (test/diagnostic hook).</summary>
+    internal event Action<string, string, string>? HybridAssetsRegistered;
+
+    /// <summary>True while this handler's asset registration waits for the app context.</summary>
+    internal bool IsHybridAssetsRegistrationPending
+    {
+        get
+        {
+            lock (s_handlers)
+            {
+                return s_pendingRegistration.Contains(this);
+            }
+        }
+    }
+
+    /// <summary>The payload layout last registered with the shell, or null (test/diagnostic hook).</summary>
+    internal string? RegisteredHybridAssets
+    {
+        get
+        {
+            lock (s_handlers)
+            {
+                return _registeredAssets;
+            }
+        }
+    }
 
     // The shell forwards __hwvInvokeDotNet invocations to ohos_host_hwv_register_invoke's
     // callback; the handler that last registered its assets with the shell is the page a
@@ -104,6 +145,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         lock (s_handlers)
         {
             s_handlers.Remove(this);
+            s_pendingRegistration.Remove(this);
         }
         if (ReferenceEquals(s_activeInvokeHandler, this))
         {
@@ -120,11 +162,18 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         base.PlatformArrange(frame);
         // The ArkWeb component is a shell overlay, so it only needs to know it is visible.
         OpenHarmonyBridge.WebCommand("show");
+        // First render: if ConnectHandler ran before the app context was published, this is
+        // the point where the shell (and the extracted payload) is definitely available.
+        if (IsHybridAssetsRegistrationPending)
+        {
+            RegisterHybridAssets();
+        }
     }
 
     /// <summary>
     /// HybridRoot/DefaultFile mapper: (re)registers the asset root with the shell. Without a
-    /// host library (tests) or an extracted app directory the call is a no-op.
+    /// host library (tests) or an extracted app directory the call is remembered and retried
+    /// when the app context becomes available.
     /// </summary>
     public static void MapHybridAssets(OpenHarmonyHybridWebViewHandler handler, IHybridWebView webView)
         => handler.RegisterHybridAssets();
@@ -134,13 +183,32 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         OpenHarmonyAppContext? context = OpenHarmonyBridge.Context;
         if (context is null || string.IsNullOrEmpty(context.AppDir))
         {
+            // The shell may publish the app directory after the handler connected; do not drop
+            // the registration. The bridge replays its current context/surface to late
+            // subscribers, so the hooks fire both when the state already exists and when it
+            // appears later.
+            MarkRegistrationPending(this);
             return;
         }
-        // The shell is serving this handler's page, so invocations belong to it.
-        s_activeInvokeHandler = this;
         string root = VirtualView?.HybridRoot is { Length: > 0 } hybridRoot ? hybridRoot : "wwwroot";
         string defaultFile = VirtualView?.DefaultFile is { Length: > 0 } file ? file : "index.html";
         string payloadDir = context.AppDir.TrimEnd('/');
+        string key = payloadDir + "|" + root + "|" + defaultFile;
+        bool register;
+        lock (s_handlers)
+        {
+            // The shell is serving this handler's page, so invocations belong to it.
+            s_activeInvokeHandler = this;
+            register = key != _registeredAssets;
+            _registeredAssets = key;
+            s_pendingRegistration.Remove(this);
+        }
+        if (!register)
+        {
+            // ConnectHandler and the HybridRoot/DefaultFile mapper both land here; only
+            // re-issue the shell command when the payload layout actually changed.
+            return;
+        }
         EnsureHybridWebViewScript(payloadDir);
         OpenHarmonyBridge.WebCommand("hybrid", JsonSerializer.Serialize(new HybridAssetsConfig
         {
@@ -148,6 +216,57 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             Root = root,
             DefaultFile = defaultFile,
         }));
+        HybridAssetsRegistered?.Invoke(payloadDir, root, defaultFile);
+    }
+
+    /// <summary>Remembers a handler whose assets are waiting for the app context.</summary>
+    private static void MarkRegistrationPending(OpenHarmonyHybridWebViewHandler handler)
+    {
+        lock (s_handlers)
+        {
+            s_pendingRegistration.Add(handler);
+        }
+        EnsureRegistrationHooks();
+    }
+
+    /// <summary>
+    /// Installs one process-wide retry subscription on the bridge signals that can announce a
+    /// late app context (Initialized replays the current context, SurfaceChanged the last
+    /// surface). Idempotent; the hooks stay for the process lifetime.
+    /// </summary>
+    private static void EnsureRegistrationHooks()
+    {
+        lock (s_handlers)
+        {
+            if (s_registrationHooksAttached)
+            {
+                return;
+            }
+            s_registrationHooksAttached = true;
+        }
+        OpenHarmonyBridge.Initialized += _ => RetryPendingRegistrations();
+        OpenHarmonyBridge.SurfaceChanged += _ => RetryPendingRegistrations();
+    }
+
+    /// <summary>
+    /// Re-attempts the asset registration of every connected handler that is still waiting for
+    /// the app context. Exposed for tests; the bridge signals and the first arrange call it.
+    /// </summary>
+    internal static void RetryPendingRegistrations()
+    {
+        OpenHarmonyHybridWebViewHandler[] pending;
+        lock (s_handlers)
+        {
+            if (s_pendingRegistration.Count == 0)
+            {
+                return;
+            }
+            pending = s_pendingRegistration.Where(s_handlers.Contains).ToArray();
+        }
+        foreach (OpenHarmonyHybridWebViewHandler handler in pending)
+        {
+            handler.RegisterHybridAssets();
+        }
     }
 
     /// <summary>

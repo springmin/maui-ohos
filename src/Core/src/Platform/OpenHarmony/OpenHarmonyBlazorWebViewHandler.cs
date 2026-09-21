@@ -14,9 +14,12 @@
 //     (OpenHarmonyBlazorFileProvider) that resolves every request through that mapping;
 //   * the JS channel half: outbound messages ride the existing ohos_host_web_eval channel and are
 //     delivered to window.__dispatchMessageCallback (the callback blazor.webview.js registers
-//     through window.external.receiveMessage); inbound messages come from
-//     OpenHarmonyWebViewHandler.JsMessage (the shell's dotnetHost proxy) and are handed to the
-//     platform WebViewManager's protected MessageReceived as MessageReceived(AppOrigin, payload).
+//     through window.external.receiveMessage) only when the loaded document carries the
+//     shell-stamped window.__ohBlazorId marker; inbound messages come from
+//     OpenHarmonyWebViewHandler.JsMessage (the shell's dotnetHost proxy), which prefixes them with
+//     a "__OHORIGIN|<document url>|<document id>\n" envelope, and are validated against the app
+//     origin and this handler's registration id before they are handed to the platform
+//     WebViewManager's protected MessageReceived as MessageReceived(AppOrigin, payload).
 //
 // The shell side is already in place (ohos-workload pack, milestone 3): the "blazor" web command
 // serves https://0.0.0.0/ from <AppDir>/<content root> and the page-end bootstrap installs the
@@ -78,6 +81,11 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     private OpenHarmonyWebViewManager? _webViewManager;
     private RootComponentsCollection? _rootComponents;
     private string? _registeredAssets;
+    // B1/B3 identity of this handler's page: generated once per handler, sent to the shell with
+    // the asset registration (BlazorAssetsConfig.id), stamped into served documents as
+    // window.__ohBlazorId and echoed in every message envelope.
+    private readonly string _pageId = Guid.NewGuid().ToString("N");
+    private static readonly Uri s_appOrigin = new(AppOrigin, UriKind.Absolute);
     // Set when the shell "blazor" registration (RegisterBlazorAssets) actually starts the
     // host-page load; handed to the manager created afterwards so its initial Navigate(StartPath)
     // does not send a second, equivalent load.
@@ -187,7 +195,8 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             fileProvider,
             webView.JSComponents,
             hostPageRelativePath,
-            shellStartedHostPageLoad: _shellStartedHostPageLoad);
+            shellStartedHostPageLoad: _shellStartedHostPageLoad,
+            pageDocumentId: _pageId);
         // The "blazor" command's own load is consumed by this manager's first navigation; a
         // registration issued while a manager is live only reloads the shell page itself.
         _shellStartedHostPageLoad = false;
@@ -276,6 +285,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             Base = context.AppDir.TrimEnd('/'),
             ContentRoot = contentRootDir,
             HostFile = Path.GetFileName(hostPage),
+            Id = _pageId,
         }));
         // The shell command arms origin interception and loads the host page (origin root), so
         // the manager created after this registration must not send the same load again.
@@ -311,10 +321,13 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script);
 
     /// <summary>
-    /// Inbound JS -> .NET: hands a shell dotnetHost payload to the platform manager, which parses
-    /// the blazor.webview.js framing and dispatches it to the components (<c>__bwv:</c> prefix
-    /// handling in <see cref="WebViewManager.MessageReceived"/>). Messages from other origins are
-    /// ignored by the base class, and payloads that arrive before startup are dropped.
+    /// Inbound JS -> .NET: the payload must carry the shell's document-origin envelope, report
+    /// this handler's app origin and carry the registration id the shell stamped for this
+    /// handler (B1). Only then is it handed to the platform manager, which parses the
+    /// blazor.webview.js framing and dispatches it to the components (<c>__bwv:</c> prefix
+    /// handling in <see cref="WebViewManager.MessageReceived"/>). A missing/mismatching origin
+    /// or id is rejected and logged instead of being dispatched under a fabricated AppOrigin;
+    /// payloads that arrive before startup are dropped.
     /// </summary>
     private void OnJsMessage(string payload)
     {
@@ -322,8 +335,27 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         {
             return;
         }
-        _webViewManager.MessageReceivedFromShell(new Uri(AppOrigin), payload);
+        if (!OpenHarmonyHybridWebViewHandler.TryParseOriginEnvelope(
+                payload, out Uri? origin, out string documentId, out string message))
+        {
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] blazor message rejected: missing or malformed document-origin envelope");
+            return;
+        }
+        if (origin is null || !IsAppOrigin(origin) || documentId.Length == 0 || documentId != _pageId)
+        {
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] blazor message rejected: the reported origin/document is not this handler's page");
+            return;
+        }
+        _webViewManager.MessageReceivedFromShell(new Uri(AppOrigin), message);
     }
+
+    /// <summary>True when the reported document url is on the Blazor app origin (B1).</summary>
+    private static bool IsAppOrigin(Uri origin)
+        => string.Equals(origin.Scheme, s_appOrigin.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(origin.IdnHost, s_appOrigin.IdnHost, StringComparison.OrdinalIgnoreCase)
+            && origin.Port == s_appOrigin.Port;
 
     /// <summary>The control's root-component collection, bound to the live manager.</summary>
     private RootComponentsCollection? RootComponents
@@ -409,6 +441,10 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
 
         [JsonPropertyName("defaultFile")]
         public string HostFile { get; init; } = string.Empty;
+
+        /// <summary>Per-registration document id (B1/B3), echoed in the shell message envelope.</summary>
+        [JsonPropertyName("id")]
+        public string Id { get; init; } = string.Empty;
     }
 }
 
@@ -424,6 +460,10 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
     // command's own host-page load; consumed by the first NavigateCore.
     private bool _shellStartedHostPageLoad;
 
+    // The registration id of the handler this manager serves; SendMessage only delivers into a
+    // document that still carries it (window.__ohBlazorId, B3).
+    private readonly string _pageDocumentId;
+
     public OpenHarmonyWebViewManager(
         OpenHarmonyBlazorWebViewHandler handler,
         IServiceProvider provider,
@@ -431,11 +471,13 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         IFileProvider fileProvider,
         JSComponentConfigurationStore jsComponents,
         string hostPageRelativePath,
-        bool shellStartedHostPageLoad)
+        bool shellStartedHostPageLoad,
+        string pageDocumentId)
         : base(provider, dispatcher, new Uri(OpenHarmonyBlazorWebViewHandler.AppOrigin), fileProvider, jsComponents, hostPageRelativePath)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _shellStartedHostPageLoad = shellStartedHostPageLoad;
+        _pageDocumentId = pageDocumentId;
     }
 
     /// <summary>
@@ -458,12 +500,16 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
     }
 
     /// <summary>
-    /// .NET -> JS over the existing shell eval channel. <c>blazor.webview.js</c> registers its
-    /// incoming-message callback through <c>window.external.receiveMessage(callback)</c>, so the
-    /// Blazor bootstrap installs a Tizen-style <c>window.__dispatchMessageCallback</c> fan-out and
-    /// the delivery goes there first. The shell's own <c>window.external.receiveMessage(message)</c>
-    /// shim stays as the fallback before the bootstrap runs (it is the HybridWebView-compatible
-    /// delivery path). The payload is escaped with <c>JsonSerializer.Serialize</c>.
+    /// .NET -> JS over the existing shell eval channel, guarded by the per-document marker
+    /// (B3): the eval only delivers when the loaded document still carries the id the shell
+    /// stamped for this handler's registration (window.__ohBlazorId). A skipped delivery is
+    /// logged; the off-device no-host path evaluates to null and stays silent.
+    /// <c>blazor.webview.js</c> registers its incoming-message callback through
+    /// <c>window.external.receiveMessage(callback)</c>, so the Blazor bootstrap installs a
+    /// Tizen-style <c>window.__dispatchMessageCallback</c> fan-out and the delivery goes there
+    /// first. The shell's own <c>window.external.receiveMessage(message)</c> shim stays as the
+    /// fallback before the bootstrap runs (it is the HybridWebView-compatible delivery path).
+    /// The payload is escaped with <c>JsonSerializer.Serialize</c>.
     /// </summary>
     protected override void SendMessage(string message)
     {
@@ -471,12 +517,25 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         {
             return;
         }
-        _ = OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
-            "(function(m){if(typeof window.__dispatchMessageCallback==='function')" +
+        _ = SendMessageCoreAsync(message);
+    }
+
+    private async Task SendMessageCoreAsync(string message)
+    {
+        string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
+            "(function(id,m){" +
+            "if(window.__ohBlazorId!==id){return 'skip';}" +
+            "if(typeof window.__dispatchMessageCallback==='function')" +
             "{window.__dispatchMessageCallback(m);}" +
             "else if(window.external&&typeof window.external.receiveMessage==='function')" +
-            "{window.external.receiveMessage(m);}})" +
-            "(" + JsonSerializer.Serialize(message) + ")");
+            "{window.external.receiveMessage(m);}" +
+            "return 'ok';})(" +
+            JsonSerializer.Serialize(_pageDocumentId) + "," + JsonSerializer.Serialize(message) + ")").ConfigureAwait(false);
+        if (result is not null && result.Trim().Trim('"') == "skip")
+        {
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] blazor message skipped: the loaded document is not this handler's page");
+        }
     }
 
     /// <summary>

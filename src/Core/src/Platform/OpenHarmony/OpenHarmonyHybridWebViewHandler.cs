@@ -1,7 +1,12 @@
 // Minimal HybridWebView handler for OpenHarmony: the MAUI HybridWebView contracts
 // (EvaluateJavaScriptAsync, SendRawMessage, RawMessageReceived and InvokeJavaScriptAsync) ride
 // the same shell channel as the WebView handler: scripts run through ohos_host_web_eval and
-// page messages arrive through the shell's dotnetHost proxy.
+// page messages arrive through the shell's dotnetHost proxy, which prefixes every payload with a
+// "__OHORIGIN|<document url>|<document id>\n" envelope (B1/B2/B3). Messages are only accepted
+// for this handler's own HybridWebView origin and registration id, raw-message dispatch is
+// scoped to the matching handler and __InvokeJavaScript completions must match the handler and
+// document that started the invocation; host -> page evals check the shell-stamped
+// window.__ohHybridId marker first.
 //
 // Asset serving: HybridRoot/DefaultFile are wired to the ArkTS shell. When the handler is
 // connected (or either property changes) it extracts the framework bootstrap script
@@ -45,6 +50,16 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     internal const string RawMessagePrefix = "__RawMessage|";
 
     /// <summary>
+    /// Document-origin envelope the ArkTS shell prepends to every dotnetHost payload:
+    /// <c>__OHORIGIN|&lt;document url&gt;|&lt;document id&gt;\n</c>. The shell writes both header
+    /// fields (page scripts cannot), so they are trusted protocol data: the url binds a message
+    /// to a page origin and the id binds it to the registration that stamped
+    /// <c>window.__ohHybridId</c> into the document (see <see cref="PageDocumentId"/>). A message
+    /// without a valid envelope is rejected (B1/B2).
+    /// </summary>
+    internal const string OriginEnvelopePrefix = "__OHORIGIN|";
+
+    /// <summary>
     /// Largest JS -&gt; .NET payload the managed boundary accepts from one page message, in UTF-16
     /// code units (4 MiB). The host marshals the whole UTF-8 string out of the shell before managed
     /// code runs, so this cap cannot undo that first native copy; it bounds everything managed does
@@ -69,8 +84,27 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
 
     private static readonly TimeSpan s_invokeTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan s_dotNetInvokeTimeout = TimeSpan.FromSeconds(10);
+    private static readonly Uri s_appOriginUri = new(HybridAppOrigin, UriKind.Absolute);
     private static readonly List<OpenHarmonyHybridWebViewHandler> s_handlers = new();
-    private static readonly ConcurrentDictionary<string, TaskCompletionSource<string?>> s_invokeRequests = new();
+    private static readonly ConcurrentDictionary<string, PendingInvoke> s_invokeRequests = new();
+
+    /// <summary>
+    /// One in-flight window.HybridWebView.__InvokeJavaScript call. The completion is only
+    /// accepted from the handler that started it and with the document id the shell stamped for
+    /// that handler's page, so a harvested task id cannot be completed by another page (B2).
+    /// </summary>
+    private sealed class PendingInvoke
+    {
+        public PendingInvoke(TaskCompletionSource<string?> source, OpenHarmonyHybridWebViewHandler handler)
+        {
+            Source = source;
+            Handler = handler;
+        }
+
+        public TaskCompletionSource<string?> Source { get; }
+
+        public OpenHarmonyHybridWebViewHandler Handler { get; }
+    }
 
     // Handlers that connected before the app context published an AppDir. Registration is
     // retried from the bridge signals below (and from the first arrange) and the handler is
@@ -78,6 +112,10 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     private static readonly HashSet<OpenHarmonyHybridWebViewHandler> s_pendingRegistration = new();
     private static bool s_registrationHooksAttached;
     private string? _registeredAssets;
+    // B2/B3 identity of this handler's page: generated once per handler, handed to the shell
+    // with the asset registration (HybridAssetsConfig.id), stamped into the served documents as
+    // window.__ohHybridId and echoed in every message envelope.
+    private readonly string _pageId = Guid.NewGuid().ToString("N");
 
     /// <summary>Raised after the "hybrid" shell command is issued (test/diagnostic hook).</summary>
     internal event Action<string, string, string>? HybridAssetsRegistered;
@@ -105,6 +143,13 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             }
         }
     }
+
+    /// <summary>
+    /// The per-registration document id this handler sends to the shell (B2/B3). The shell
+    /// stamps it into the pages it serves for this registration and echoes it in the message
+    /// envelope, so messages can be matched to this exact handler. Test/diagnostic hook.
+    /// </summary>
+    internal string PageDocumentId => _pageId;
 
     // The shell forwards __hwvInvokeDotNet invocations to ohos_host_hwv_register_invoke's
     // callback; the handler that last registered its assets with the shell is the page a
@@ -204,6 +249,21 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         }
         string root = VirtualView?.HybridRoot is { Length: > 0 } hybridRoot ? hybridRoot : "wwwroot";
         string defaultFile = VirtualView?.DefaultFile is { Length: > 0 } file ? file : "index.html";
+        // B5: mirror the shell's registration-time guard. The shell answers app-origin requests
+        // by joining <base>/<root>/<path>, so a control value that is not an ordinary relative
+        // path could escape the payload directory. Fall back to the defaults with a status log
+        // instead of registering a hostile layout.
+        if (!IsSafeAssetLayoutPart(root))
+        {
+            OpenHarmonyBridge.WriteStatus($"[maui] hybrid root '{root}' is not a safe relative path; using 'wwwroot'");
+            root = "wwwroot";
+        }
+        if (!IsSafeAssetLayoutPart(defaultFile))
+        {
+            OpenHarmonyBridge.WriteStatus(
+                $"[maui] hybrid default file '{defaultFile}' is not a safe relative path; using 'index.html'");
+            defaultFile = "index.html";
+        }
         string payloadDir = context.AppDir.TrimEnd('/');
         string key = payloadDir + "|" + root + "|" + defaultFile;
         bool register;
@@ -227,8 +287,31 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             Base = payloadDir,
             Root = root,
             DefaultFile = defaultFile,
+            Id = _pageId,
         }));
         HybridAssetsRegistered?.Invoke(payloadDir, root, defaultFile);
+    }
+
+    /// <summary>
+    /// Registration-time layout guard (B5, the mirror of the shell's <c>isSafeLayoutPart</c>): a
+    /// HybridRoot or DefaultFile may only be an ordinary relative path - no empty, "." or ".."
+    /// segment, no '\' and no leading '/' - so the shell's <c>&lt;base&gt;/&lt;root&gt;/&lt;path&gt;</c>
+    /// join cannot escape the extracted payload directory.
+    /// </summary>
+    private static bool IsSafeAssetLayoutPart(string path)
+    {
+        if (path.Length == 0 || path.IndexOf('\\', StringComparison.Ordinal) >= 0 || path.StartsWith('/', StringComparison.Ordinal))
+        {
+            return false;
+        }
+        foreach (string segment in path.Split('/'))
+        {
+            if (segment.Length == 0 || segment == "." || segment == "..")
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>Remembers a handler whose assets are waiting for the app context.</summary>
@@ -484,6 +567,10 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
 
         [JsonPropertyName("defaultFile")]
         public string DefaultFile { get; init; } = string.Empty;
+
+        /// <summary>Per-registration document id (B2/B3), echoed in the shell message envelope.</summary>
+        [JsonPropertyName("id")]
+        public string Id { get; init; } = string.Empty;
     }
 
     // Controls.HybridWebView raises these commands through IElementHandler.Invoke/InvokeAsync;
@@ -518,7 +605,9 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     /// <summary>
     /// Delivers a raw message to the hybrid page. The stock HybridWebView JavaScript receives
     /// host messages through window.external.receiveMessage; the fallback dispatches the same
-    /// HybridWebViewMessageReceived event that the stock script raises.
+    /// HybridWebViewMessageReceived event that the stock script raises. The eval only lands in
+    /// this handler's own document (B3): it checks the shell-stamped marker window.__ohHybridId
+    /// first and reports "skip" when the loaded document is not this handler's page.
     /// </summary>
     public void SendRawMessage(string rawMessage)
     {
@@ -526,18 +615,41 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             return;
         }
-        string json = JsonSerializer.Serialize(rawMessage);
-        _ = OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
-            "(function(m){if(window.external&&typeof window.external.receiveMessage==='function')" +
-            "{window.external.receiveMessage(m);}" +
-            "else{window.dispatchEvent(new CustomEvent('HybridWebViewMessageReceived',{detail:{message:m}}));}})" +
-            "(" + json + ")");
+        _ = SendRawMessageCoreAsync(JsonSerializer.Serialize(rawMessage));
     }
 
     /// <summary>
-    /// Routes a shell dotnetHost.postMessage payload to the HybridWebView protocol:
-    /// __InvokeJavaScriptCompleted/__InvokeJavaScriptFailed complete JS invocations and every
-    /// other payload (with or without the stock __RawMessage prefix) is a raw message.
+    /// Sends one raw message through a marker-checked eval. A skipped delivery (the document no
+    /// longer carries this handler's id: a reload before the next stamp, another handler's page
+    /// or a foreign navigation) is logged; the off-device no-host path evaluates to null and
+    /// stays silent.
+    /// </summary>
+    private async Task SendRawMessageCoreAsync(string json)
+    {
+        string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
+            "(function(id,m){" +
+            "if(window.__ohHybridId!==id){return 'skip';}" +
+            "if(window.external&&typeof window.external.receiveMessage==='function')" +
+            "{window.external.receiveMessage(m);}" +
+            "else{window.dispatchEvent(new CustomEvent('HybridWebViewMessageReceived',{detail:{message:m}}));}" +
+            "return 'ok';})(" +
+            JsonSerializer.Serialize(_pageId) + "," + json + ")").ConfigureAwait(false);
+        if (result is not null && result.Trim().Trim('"') == "skip")
+        {
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] hybrid raw message skipped: the loaded document is not this handler's page");
+        }
+    }
+
+    /// <summary>
+    /// Routes a shell dotnetHost payload to the HybridWebView protocol. The payload must carry
+    /// the shell's document-origin envelope (B1/B2): the reported origin has to be the
+    /// HybridWebView page origin and the reported document id has to be the registration id of
+    /// a connected handler (the id the shell stamped into that handler's page). Messages that
+    /// do not match are rejected and logged. Matching messages are scoped to that one handler:
+    /// __InvokeJavaScriptCompleted/__InvokeJavaScriptFailed complete JS invocations started by
+    /// it, and every other payload (with or without the stock __RawMessage prefix) is a raw
+    /// message for it alone.
     /// </summary>
     internal static void OnJsMessage(string payload)
     {
@@ -545,23 +657,36 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             return;
         }
-        if (payload.Length > MaxPagePayloadLength)
+        if (!TryParseOriginEnvelope(payload, out Uri? origin, out string documentId, out string message))
         {
-            RejectOversizedPayload(payload);
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] hybrid message rejected: missing or malformed document-origin envelope");
             return;
         }
-        if (payload.StartsWith(InvokeCompletedPrefix, StringComparison.Ordinal) ||
-            payload.StartsWith(InvokeFailedPrefix, StringComparison.Ordinal))
+        OpenHarmonyHybridWebViewHandler? handler = ResolveMessageHandler(origin, documentId);
+        if (handler is null)
         {
-            CompleteInvoke(payload);
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] hybrid message rejected: the reported origin/document does not match a HybridWebView page");
             return;
         }
-        string message;
+        if (message.Length > MaxPagePayloadLength)
+        {
+            RejectOversizedPayload(handler, documentId, message);
+            return;
+        }
+        if (message.StartsWith(InvokeCompletedPrefix, StringComparison.Ordinal) ||
+            message.StartsWith(InvokeFailedPrefix, StringComparison.Ordinal))
+        {
+            CompleteInvoke(handler, documentId, message);
+            return;
+        }
+        string raw;
         try
         {
-            message = payload.StartsWith(RawMessagePrefix, StringComparison.Ordinal)
-                ? Uri.UnescapeDataString(payload.Substring(RawMessagePrefix.Length))
-                : payload;
+            raw = message.StartsWith(RawMessagePrefix, StringComparison.Ordinal)
+                ? Uri.UnescapeDataString(message.Substring(RawMessagePrefix.Length))
+                : message;
         }
         catch (UriFormatException)
         {
@@ -570,22 +695,78 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             OpenHarmonyBridge.WriteStatus("[maui] hybrid raw message rejected: invalid escape sequence");
             return;
         }
-        lock (s_handlers)
-        {
-            foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers.ToArray())
-            {
-                handler.VirtualView?.RawMessageReceived(message);
-            }
-        }
+        handler.VirtualView?.RawMessageReceived(raw);
     }
 
     /// <summary>
-    /// Rejects one page payload above <see cref="MaxPagePayloadLength"/>: a pending JS invocation
-    /// whose result is oversized is completed with a clear error (the page's promise rejects)
-    /// instead of waiting for its timeout, and every other oversized payload is dropped with a
-    /// status log. Never throws.
+    /// Parses the document-origin envelope the shell prepends:
+    /// <c>__OHORIGIN|&lt;document url&gt;|&lt;document id&gt;\n&lt;payload&gt;</c>. False for a
+    /// missing prefix, a missing newline, an empty payload or a url that is not an absolute URI.
+    /// Shared with the Blazor handler (B1), which validates the Blazor origin and its own id.
     /// </summary>
-    private static void RejectOversizedPayload(string payload)
+    internal static bool TryParseOriginEnvelope(string payload, out Uri? origin, out string documentId, out string message)
+    {
+        origin = null;
+        documentId = string.Empty;
+        message = string.Empty;
+        if (!payload.StartsWith(OriginEnvelopePrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        int newline = payload.IndexOf('\n', StringComparison.Ordinal);
+        if (newline < 0)
+        {
+            return false;
+        }
+        string header = payload.Substring(OriginEnvelopePrefix.Length, newline - OriginEnvelopePrefix.Length);
+        int separator = header.LastIndexOf('|', StringComparison.Ordinal);
+        string url = separator >= 0 ? header.Substring(0, separator) : header;
+        documentId = separator >= 0 ? header.Substring(separator + 1) : string.Empty;
+        message = payload.Substring(newline + 1);
+        return message.Length > 0
+            && Uri.TryCreate(url, UriKind.Absolute, out origin);
+    }
+
+    /// <summary>
+    /// Finds the one connected handler a message belongs to: its origin has to be the
+    /// HybridWebView page origin and its per-registration id has to be the document id the
+    /// shell reported. Null (reject) for a foreign origin, an unstamped document (empty id) or
+    /// an unknown id - the message is then not delivered to any handler.
+    /// </summary>
+    private static OpenHarmonyHybridWebViewHandler? ResolveMessageHandler(Uri? origin, string documentId)
+    {
+        if (origin is null || documentId.Length == 0 || !IsHybridPageOrigin(origin))
+        {
+            return null;
+        }
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers)
+            {
+                if (handler._pageId == documentId)
+                {
+                    return handler;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>True when the reported document url is on the HybridWebView page origin (B2).</summary>
+    private static bool IsHybridPageOrigin(Uri origin)
+        => string.Equals(origin.Scheme, s_appOriginUri.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(origin.IdnHost, s_appOriginUri.IdnHost, StringComparison.OrdinalIgnoreCase)
+            && origin.Port == s_appOriginUri.Port;
+
+    /// <summary>
+    /// Rejects one page payload above <see cref="MaxPagePayloadLength"/> that was already matched
+    /// to <paramref name="handler"/> and its document id: a pending JS invocation whose result is
+    /// oversized is completed with a clear error (the page's promise rejects) instead of waiting
+    /// for its timeout, and every other oversized payload is dropped with a status log. A
+    /// completion that does not belong to this handler/document never touches a pending task.
+    /// Never throws.
+    /// </summary>
+    private static void RejectOversizedPayload(OpenHarmonyHybridWebViewHandler handler, string documentId, string payload)
     {
         string prefix = payload.StartsWith(InvokeCompletedPrefix, StringComparison.Ordinal) ? InvokeCompletedPrefix
             : payload.StartsWith(InvokeFailedPrefix, StringComparison.Ordinal) ? InvokeFailedPrefix
@@ -596,9 +777,12 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             if (separator > prefix.Length)
             {
                 string taskId = payload.Substring(prefix.Length, separator - prefix.Length);
-                if (s_invokeRequests.TryRemove(taskId, out TaskCompletionSource<string?>? source))
+                if (s_invokeRequests.TryGetValue(taskId, out PendingInvoke? pending) &&
+                    ReferenceEquals(pending.Handler, handler) &&
+                    documentId == pending.Handler.PageDocumentId &&
+                    s_invokeRequests.TryRemove(taskId, out pending))
                 {
-                    source.TrySetException(new InvalidOperationException(
+                    pending.Source.TrySetException(new InvalidOperationException(
                         $"the JavaScript invocation payload exceeds the {MaxPagePayloadLength} character page payload cap"));
                 }
             }
@@ -615,7 +799,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         request.TrySetResult(result ?? string.Empty);
     }
 
-    private static async Task CompleteInvokeAsync(HybridWebViewInvokeJavaScriptRequest request)
+    private async Task CompleteInvokeAsync(HybridWebViewInvokeJavaScriptRequest request)
     {
         try
         {
@@ -629,10 +813,11 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
 
     /// <summary>
     /// Starts window.HybridWebView.__InvokeJavaScript and waits for the page to post the result
-    /// back through dotnetHost (__InvokeJavaScriptCompleted|taskId|json). The stock MAUI
-    /// JavaScript already speaks this protocol.
+    /// back through dotnetHost (__InvokeJavaScriptCompleted|taskId|json). The pending entry
+    /// records this handler and its document id, so only this handler's own page can complete it
+    /// (B2). The stock MAUI JavaScript already speaks this protocol.
     /// </summary>
-    private static async Task<object?> InvokeJavaScriptAsyncCore(HybridWebViewInvokeJavaScriptRequest request)
+    private async Task<object?> InvokeJavaScriptAsyncCore(HybridWebViewInvokeJavaScriptRequest request)
     {
         string argList = string.Empty;
         if (request.ParamValues is { } values)
@@ -642,7 +827,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         }
         string taskId = Guid.NewGuid().ToString("N");
         var source = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        s_invokeRequests[taskId] = source;
+        s_invokeRequests[taskId] = new PendingInvoke(source, this);
         _ = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
             $"window.HybridWebView.__InvokeJavaScript({JsonSerializer.Serialize(taskId)}, " +
             $"{JsonSerializer.Serialize(request.MethodName)}, [{argList}])").ConfigureAwait(false);
@@ -671,7 +856,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         return JsonSerializer.Deserialize(result, request.ReturnTypeJsonTypeInfo);
     }
 
-    private static void CompleteInvoke(string payload)
+    private static void CompleteInvoke(OpenHarmonyHybridWebViewHandler handler, string documentId, string payload)
     {
         bool failed = payload.StartsWith(InvokeFailedPrefix, StringComparison.Ordinal);
         string content = payload.Substring(failed ? InvokeFailedPrefix.Length : InvokeCompletedPrefix.Length);
@@ -682,15 +867,27 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         }
         string taskId = content.Substring(0, separator);
         string result = content.Substring(separator + 1);
-        if (s_invokeRequests.TryRemove(taskId, out TaskCompletionSource<string?>? source))
+        if (!s_invokeRequests.TryGetValue(taskId, out PendingInvoke? pending))
+        {
+            return;
+        }
+        // B2: the completion is only accepted from the handler that started the invocation and
+        // with the document id the shell stamped for that handler's page. A page (or another
+        // handler's page) that harvested the task id cannot complete it.
+        if (!ReferenceEquals(pending.Handler, handler) || documentId != pending.Handler.PageDocumentId)
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] hybrid invoke completion rejected: document/handler mismatch");
+            return;
+        }
+        if (s_invokeRequests.TryRemove(taskId, out pending))
         {
             if (failed)
             {
-                source.TrySetException(new InvalidOperationException($"JavaScript invocation failed: {result}"));
+                pending.Source.TrySetException(new InvalidOperationException($"JavaScript invocation failed: {result}"));
             }
             else
             {
-                source.TrySetResult(result);
+                pending.Source.TrySetResult(result);
             }
         }
     }

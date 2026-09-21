@@ -45,6 +45,7 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.RefreshView)] = typeof(OpenHarmonyRefreshViewHandler),
         [typeof(Microsoft.Maui.Controls.CarouselView)] = typeof(OpenHarmonyCarouselViewHandler),
         [typeof(Microsoft.Maui.Controls.BoxView)] = typeof(OpenHarmonyBoxViewHandler),
+        [typeof(Microsoft.Maui.Controls.ImageButton)] = typeof(OpenHarmonyImageButtonHandler),
         [typeof(IIndicatorView)] = typeof(OpenHarmonyIndicatorViewHandler),
         [typeof(Microsoft.Maui.Controls.Frame)] = typeof(OpenHarmonyFrameHandler),
         [typeof(Microsoft.Maui.Controls.Editor)] = typeof(OpenHarmonyEditorHandler),
@@ -113,6 +114,19 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeolocation>(geolocation);
         builder.Services.AddSingleton<Microsoft.Maui.Storage.IFilePicker>(filePicker);
         builder.Services.AddSingleton<Microsoft.Maui.Media.IMediaPicker>(mediaPicker);
+        // Communication / capture / geocoding: the statics (Email.Default, Sms.Default,
+        // PhoneDialer.Default, Screenshot.Default, Geocoding.Default) resolve from these
+        // registrations when the app is built, exactly like Clipboard/Connectivity above.
+        var email = OpenHarmonyEmail.Instance;
+        var sms = OpenHarmonySms.Instance;
+        var phoneDialer = OpenHarmonyPhoneDialer.Instance;
+        var screenshot = OpenHarmonyScreenshot.Instance;
+        var geocoding = new OpenHarmonyGeocoding();
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.Communication.IEmail>(email);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.Communication.ISms>(sms);
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.Communication.IPhoneDialer>(phoneDialer);
+        builder.Services.AddSingleton<Microsoft.Maui.Media.IScreenshot>(screenshot);
+        builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeocoding>(geocoding);
         InstallEssentials();
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();

@@ -34,6 +34,16 @@
 // promise rejects instead of hanging. Off-device (no host library / no app context) the
 // registration is remembered as pending and retried when the bridge publishes the context;
 // callers can still drive the managed half directly.
+//
+// Accepted corner cases (documented, deliberately not fixed here):
+//  - The shell stamps one hybridDocId per served document, so with two HybridWebViews registered
+//    on the same page the ids are not unique per registration: a message from an older, still
+//    loaded page can be attributed to the newest handler. A proper fix needs a per-registration
+//    document id and matching shell changes, which is out of scope for this slice.
+//  - If the shell's dotnetHost proxy were injected into subframes, a hostile iframe's raw
+//    messages would carry the main document's envelope and be attributed to the main document;
+//    completing a __InvokeJavaScript call still additionally requires the unguessable per-call
+//    taskId, so an iframe cannot finish (or hijack) another page's invocation.
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -295,12 +305,18 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     /// <summary>
     /// Registration-time layout guard (B5, the mirror of the shell's <c>isSafeLayoutPart</c>): a
     /// HybridRoot or DefaultFile may only be an ordinary relative path - no empty, "." or ".."
-    /// segment, no '\' and no leading '/' - so the shell's <c>&lt;base&gt;/&lt;root&gt;/&lt;path&gt;</c>
-    /// join cannot escape the extracted payload directory.
+    /// segment, no '\', no embedded NUL and no leading '/' - so the shell's
+    /// <c>&lt;base&gt;/&lt;root&gt;/&lt;path&gt;</c> join cannot escape the extracted payload
+    /// directory. A drive-style ':' before the first '/' ("C:/x", "c:foo") is rejected as well:
+    /// those forms are absolute under a Windows-style join, while a ':' from the second segment
+    /// on is an ordinary POSIX file-name character that cannot change the join target.
     /// </summary>
     private static bool IsSafeAssetLayoutPart(string path)
     {
-        if (path.Length == 0 || path.IndexOf('\\', StringComparison.Ordinal) >= 0 || path.StartsWith('/', StringComparison.Ordinal))
+        if (path.Length == 0 ||
+            path.IndexOf('\0', StringComparison.Ordinal) >= 0 ||
+            path.IndexOf('\\', StringComparison.Ordinal) >= 0 ||
+            path.StartsWith('/', StringComparison.Ordinal))
         {
             return false;
         }
@@ -311,7 +327,10 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
                 return false;
             }
         }
-        return true;
+        // A ':' only passes from the second path component on (see the summary above).
+        int firstSeparator = path.IndexOf('/', StringComparison.Ordinal);
+        int colon = path.IndexOf(':', StringComparison.Ordinal);
+        return colon < 0 || (firstSeparator >= 0 && colon > firstSeparator);
     }
 
     /// <summary>Remembers a handler whose assets are waiting for the app context.</summary>

@@ -7,7 +7,8 @@
 //     (StartWebViewCoreIfPossible, mirroring the package's platform partials). It raises the
 //     BlazorWebViewInitializing/Initialized events, publishes the control's root components to the
 //     manager (AddToWebViewManagerAsync on add, RemoveFromWebViewManagerAsync on remove) and
-//     navigates the manager to VirtualView.StartPath;
+//     navigates the manager to VirtualView.StartPath, skipping that load when the shell "blazor"
+//     registration already started the host-page load (no equivalent reload);
 //   * the asset-path half: HostPage/content root registration with the ArkTS shell over
 //     milestone 1's OpenHarmonyBlazorWebView mapping, plus the IFileProvider implementation
 //     (OpenHarmonyBlazorFileProvider) that resolves every request through that mapping;
@@ -77,6 +78,10 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     private OpenHarmonyWebViewManager? _webViewManager;
     private RootComponentsCollection? _rootComponents;
     private string? _registeredAssets;
+    // Set when the shell "blazor" registration (RegisterBlazorAssets) actually starts the
+    // host-page load; handed to the manager created afterwards so its initial Navigate(StartPath)
+    // does not send a second, equivalent load.
+    private bool _shellStartedHostPageLoad;
 
     public static readonly IPropertyMapper<IBlazorWebView, OpenHarmonyBlazorWebViewHandler> Mapper =
         new PropertyMapper<IBlazorWebView, OpenHarmonyBlazorWebViewHandler>(ViewMapper)
@@ -124,6 +129,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         }
         // A reconnected handler re-registers with the shell (it may have been reloaded since).
         _registeredAssets = null;
+        _shellStartedHostPageLoad = false;
         // Blazor's DisposeAsync tears down the component renderer, its service scope and the
         // static content hot-reload notifier. Mirror the built-in handlers' default: do not block
         // the teardown path, but observe the task so a failure is logged instead of lost.
@@ -145,8 +151,9 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     /// <item><description><see cref="MauiDispatcher"/> over the app's <see cref="IDispatcher"/>;</description></item>
     /// <item><description><c>BlazorWebViewInitializing</c>/<c>BlazorWebViewInitialized</c> raised on the control;</description></item>
     /// <item><description>the root components published through <see cref="RootComponent.AddToWebViewManagerAsync"/>;</description></item>
-    /// <item><description><c>Navigate(VirtualView.StartPath)</c> (the shell has the origin armed by the
-    /// <c>blazor</c> command), then the manager lives until <see cref="DisconnectHandler"/>.</description></item>
+    /// <item><description><c>Navigate(VirtualView.StartPath)</c>, suppressed on the first manager when
+    /// the <c>blazor</c> command already started the host-page load; later explicit navigations
+    /// still reach the shell. The manager lives until <see cref="DisconnectHandler"/>.</description></item>
     /// </list>
     /// Idempotent: a second call (HostPage/RootComponents mapper, reconnect) is a no-op while the
     /// manager exists.
@@ -179,7 +186,11 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             new MauiDispatcher(Services!.GetRequiredService<IDispatcher>()),
             fileProvider,
             webView.JSComponents,
-            hostPageRelativePath);
+            hostPageRelativePath,
+            shellStartedHostPageLoad: _shellStartedHostPageLoad);
+        // The "blazor" command's own load is consumed by this manager's first navigation; a
+        // registration issued while a manager is live only reloads the shell page itself.
+        _shellStartedHostPageLoad = false;
 
         // Development-time static content hot reload; inert when the runtime does not support it.
         _ = BlazorWebViewStaticContentHotReload.TryAttachToWebViewManager(_webViewManager);
@@ -266,6 +277,9 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             ContentRoot = contentRootDir,
             HostFile = Path.GetFileName(hostPage),
         }));
+        // The shell command arms origin interception and loads the host page (origin root), so
+        // the manager created after this registration must not send the same load again.
+        _shellStartedHostPageLoad = true;
     }
 
     /// <summary>
@@ -406,26 +420,42 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
 {
     private const string ShellLoadCommand = "load";
 
+    // True while the manager's initial navigation is still covered by the shell "blazor"
+    // command's own host-page load; consumed by the first NavigateCore.
+    private bool _shellStartedHostPageLoad;
+
     public OpenHarmonyWebViewManager(
         OpenHarmonyBlazorWebViewHandler handler,
         IServiceProvider provider,
         Microsoft.AspNetCore.Components.Dispatcher dispatcher,
         IFileProvider fileProvider,
         JSComponentConfigurationStore jsComponents,
-        string hostPageRelativePath)
+        string hostPageRelativePath,
+        bool shellStartedHostPageLoad)
         : base(provider, dispatcher, new Uri(OpenHarmonyBlazorWebViewHandler.AppOrigin), fileProvider, jsComponents, hostPageRelativePath)
     {
         ArgumentNullException.ThrowIfNull(handler);
+        _shellStartedHostPageLoad = shellStartedHostPageLoad;
     }
 
     /// <summary>
     /// Shell navigation: the ArkWeb overlay loads the app origin path (the shell "load" op the
-    /// WebView handler uses). The "blazor" registration already armed origin interception and
-    /// served the payload, so this is the managed side of the same load; the shell injects the
-    /// window.external -> dotnetHost bridge and the Blazor bootstrap (Blazor.start()) on page end.
+    /// WebView handler uses). When the "blazor" registration already armed origin interception
+    /// and started the host-page load (<c>StartPath</c> defaults to "/", the exact URL the shell
+    /// loads), the first navigation - the handler's <c>Navigate(StartPath)</c> - is that same
+    /// document and is skipped instead of reloading it; every later explicit navigation still
+    /// sends "load". The shell injects the window.external -> dotnetHost bridge and the Blazor
+    /// bootstrap (Blazor.start()) on page end either way.
     /// </summary>
     protected override void NavigateCore(Uri absoluteUri)
-        => OpenHarmonyBridge.WebCommand(ShellLoadCommand, absoluteUri.ToString());
+    {
+        if (_shellStartedHostPageLoad)
+        {
+            _shellStartedHostPageLoad = false;
+            return;
+        }
+        OpenHarmonyBridge.WebCommand(ShellLoadCommand, absoluteUri.ToString());
+    }
 
     /// <summary>
     /// .NET -> JS over the existing shell eval channel. <c>blazor.webview.js</c> registers its

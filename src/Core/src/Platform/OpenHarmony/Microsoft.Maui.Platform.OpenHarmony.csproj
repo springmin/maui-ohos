@@ -10,18 +10,44 @@
          workload packs; point this at a built or installed copy when building outside the
          workload repo. -->
     <OpenHarmonyHostingAssembly Condition=" '$(OpenHarmonyHostingAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Hosting/bin/Release/net11.0/Microsoft.OpenHarmony.Hosting.dll</OpenHarmonyHostingAssembly>
+    <!-- The slice's graphics backend (Microsoft.OpenHarmony.Maui.Graphics) is built from the
+         workload repo alongside the hosting assembly; same override story as above. -->
+    <OpenHarmonyGraphicsAssembly Condition=" '$(OpenHarmonyGraphicsAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Maui.Graphics/bin/Release/net11.0/Microsoft.OpenHarmony.Maui.Graphics.dll</OpenHarmonyGraphicsAssembly>
     <!-- The BlazorWebView handler skeleton takes the BlazorWebView package types. The switch
          lets compile vehicles that build the slice sources without restoring the package (a
          partial checkout, the ohos-workload verifier harness) skip the file instead of
          failing; see OpenHarmonyBlazorWebViewHandler.cs. -->
     <DefineConstants>$(DefineConstants);OPENHARMONY_BLAZOR_WEBVIEW</DefineConstants>
+    <!-- This project is the slice's standalone compile vehicle: in a partial checkout (this one)
+         the fork's root Directory.Build.targets cannot be evaluated because it unconditionally
+         imports eng/AndroidX.targets and eng/NuGetVersions.targets, which the partial checkout
+         does not carry. Skip the root targets import when those files are missing instead of
+         failing; when they are present the import runs exactly as before (no shadowing, the
+         fork's full solve is unchanged). -->
+    <_MauiDirectoryBuildTargetsPath>$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), 'Directory.Build.targets'))</_MauiDirectoryBuildTargetsPath>
+    <ImportDirectoryBuildTargets Condition=" '$(_MauiDirectoryBuildTargetsPath)' != '' and !Exists('$(_MauiDirectoryBuildTargetsPath)/eng/AndroidX.targets') ">false</ImportDirectoryBuildTargets>
+    <!-- Directory.Build.props turns warnings into errors for the shipping MAUI build. The slice
+         deliberately uses APIs MAUI marks obsolete (ListView, Frame) and a couple of interfaces
+         with looser nullability, all of which the harness compiles with warnings enabled but not
+         fatal; keep the same policy here so the standalone build reports them without failing. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Microsoft.Maui.Controls also carries the MAUI implicit global usings
+         (Microsoft.Maui.Controls/Graphics/Devices/... via buildTransitive Globs.props); the
+         slice sources rely on them, exactly like the harness and a real MAUI app do. -->
+    <PackageReference Include="Microsoft.Maui.Controls" Version="11.0.0-rc.1.26451.6" />
     <PackageReference Include="Microsoft.Maui.Core" Version="11.0.0-rc.1.26451.6" />
     <PackageReference Include="Microsoft.Maui.Graphics" Version="11.0.0-rc.1.26451.6" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.1.26451.6" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="Microsoft.OpenHarmony.Hosting">
       <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.OpenHarmony.Maui.Graphics">
+      <HintPath>$(OpenHarmonyGraphicsAssembly)</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

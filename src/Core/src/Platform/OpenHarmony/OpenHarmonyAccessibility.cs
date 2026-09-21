@@ -190,6 +190,79 @@ public static class OpenHarmonyAccessibility
         }
     }
 
+    /// <summary>
+    /// Announces text through the platform screen reader (the platform half of
+    /// <c>Microsoft.Maui.Accessibility.ISemanticScreenReader.Announce</c>).
+    ///
+    /// The existing host entry <c>ohos_host_accessibility_send_event(int event_type)</c> carries
+    /// only an event kind: it maps to OH_ArkUI_AccessibilityEventSetEventType +
+    /// OH_ArkUI_SendAccessibilityAsyncEvent (host_napi.cpp), so the text itself cannot ride it.
+    /// The announcement therefore goes out as EventAnnouncement (the closest existing mechanism)
+    /// and the text is kept in <see cref="LastAnnouncement"/> for the text-carrying export a device
+    /// build needs: <c>int ohos_host_accessibility_announce(const char* text)</c>, implemented with
+    /// OH_ArkUI_AccessibilityEventSetEventType(event,
+    /// ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY) +
+    /// OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility(event, text) before the same
+    /// OH_ArkUI_SendAccessibilityAsyncEvent call. Degrades silently without the host library.
+    /// </summary>
+    /// <returns>True when the announcement reached the host provider.</returns>
+    public static bool Announce(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+        Volatile.Write(ref s_lastAnnouncement, text);
+        WouldAnnounce = _available;
+        if (!_available)
+        {
+            return false;
+        }
+        try
+        {
+            // The host answers 1 when the event was created and sent, 0 when no provider is
+            // attached (nothing to announce to) - that is not a failure of availability.
+            if (SendEvent(EventAnnouncement) != 0)
+            {
+                AnnouncementsSent++;
+                LogAnnounceFallbackOnce();
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            // Same visibility rule as Publish: availability flips off, but WouldAnnounce stays
+            // true because the call attempted the host boundary ("would have talked to it").
+            _available = false;
+        }
+        return false;
+    }
+
+    private static string? s_lastAnnouncement;
+    private static bool _announceFallbackLogged;
+
+    /// <summary>Text of the last <see cref="Announce"/> call (null before the first one).</summary>
+    public static string? LastAnnouncement => Volatile.Read(ref s_lastAnnouncement);
+
+    /// <summary>Announcements the host provider accepted.</summary>
+    public static int AnnouncementsSent { get; private set; }
+
+    /// <summary>True when the last <see cref="Announce"/> call would have talked to the host.</summary>
+    public static bool WouldAnnounce { get; private set; }
+
+    private static void LogAnnounceFallbackOnce()
+    {
+        if (_announceFallbackLogged)
+        {
+            return;
+        }
+        _announceFallbackLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] screen reader announce uses the event-kind-only path (ohos_host_accessibility_send_event); " +
+            "the text needs a host export ohos_host_accessibility_announce(const char* text) with " +
+            "OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility");
+    }
+
     /// <summary>Finds a published node by id (used to route actions back to a hit test).</summary>
     public static bool TryFindNode(int id, out OpenHarmonyAccessibilityNode node)
     {
@@ -226,6 +299,13 @@ public static class OpenHarmonyAccessibility
     public const int EventPageStateUpdate = 0x00000020;
     public const int EventPageContentUpdate = 0x00000800;
     public const int EventTextUpdate = 0x00000010;
+
+    /// <summary>
+    /// Proactive announcement event (ArkUI NDK
+    /// ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY, 0x10000000), the event
+    /// kind that asks the screen reader to read text out of turn.
+    /// </summary>
+    public const int EventAnnouncement = 0x10000000;
 
     private static int DiffFrames(OpenHarmonyAccessibilityNode[] current)
     {

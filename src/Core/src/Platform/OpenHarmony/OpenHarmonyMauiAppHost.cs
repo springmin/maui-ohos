@@ -16,6 +16,7 @@ public sealed class OpenHarmonyMauiAppHost
     private int _width;
     private int _height;
     private bool _dirty = true;
+    private bool _created;
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
@@ -85,6 +86,10 @@ public sealed class OpenHarmonyMauiAppHost
                 switch (e)
                 {
                     case OpenHarmonyLifecycleEvent.Create:
+                        // MAUI's window lifecycle starts with Created (the platform window now
+                        // exists); the platform event carries the activation, so raise Created
+                        // first and only once.
+                        EnsureWindowCreated();
                         _window?.Activated();
                         break;
                     case OpenHarmonyLifecycleEvent.Foreground:
@@ -139,8 +144,26 @@ public sealed class OpenHarmonyMauiAppHost
         OpenHarmonyHandlerConnector.ConnectTree(_window);
         OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
         OpenHarmonyBridge.WriteStatus($"[maui] window created ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
-        // The platform's Create lifecycle event activates the window.
+        // The platform's Create lifecycle event activates the window (and may arrive before Run
+        // when the shell is fast); Created must precede it either way.
+        EnsureWindowCreated();
         _dirty = true;
+    }
+
+    /// <summary>
+    /// Raises <see cref="IWindow.Created"/> exactly once, as soon as the window exists. MAUI's
+    /// window throws on a second Created, and the platform lifecycle event carries only the
+    /// activation, so this is the single entry point that starts the MAUI window lifecycle
+    /// (called from <see cref="Run"/> and from the platform Create event, whichever is first).
+    /// </summary>
+    private void EnsureWindowCreated()
+    {
+        if (_created || _window is null)
+        {
+            return;
+        }
+        _created = true;
+        _window.Created();
     }
 
     /// <summary>Measures/arranges the current window content for the given surface size.</summary>
@@ -156,23 +179,17 @@ public sealed class OpenHarmonyMauiAppHost
         // in this slice, so arrange the first descendant that has one.
         OpenHarmonyHandlerConnector.ConnectTree(content);
         var bounds = new Rect(0, 0, width, height);
-        if (OpenHarmonyBridge.TryGetAvoidArea(out int avoidTop, out int avoidBottom, out int avoidLeft, out int avoidRight))
-        {
-            var inset = new Rect(avoidLeft, avoidTop,
-                Math.Max(1, width - avoidLeft - avoidRight), Math.Max(1, height - avoidTop - avoidBottom));
-            if (inset.Width > 1 && inset.Height > 1)
-            {
-                bounds = inset;
-            }
-        }
-        // Pages have no platform layout of their own, so the content chain is arranged directly
-        // (navigation bars are subtracted on the way down).
-        OpenHarmonyContentArrange.Arrange(content, bounds);
+        // The shell reports the surface size; mirror it onto the virtual window so Window.Width/
+        // Height (and SizeChanged) are real values, like the other platforms' window handlers.
+        _window.FrameChanged(bounds);
+        // The window's avoid area is applied per page/content view through SafeAreaEdges (see
+        // OpenHarmonySafeAreaArrange); the surface itself is arranged edge to edge.
+        Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
+        OpenHarmonySafeAreaArrange.Arrange(content, bounds, bounds, insets);
         IView? root = FindArrangableRoot(content);
         if (root is not null && !ReferenceEquals(root, content))
         {
-            root.Measure(width, height);
-            root.Arrange(bounds);
+            OpenHarmonySafeAreaArrange.Arrange(root, bounds, bounds, insets);
         }
     }
 

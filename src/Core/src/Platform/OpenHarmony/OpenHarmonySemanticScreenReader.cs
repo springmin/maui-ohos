@@ -13,12 +13,12 @@
 // `defaultImplementation ??= new SemanticScreenReaderImplementation()`, so the module initializer
 // replaces it before any app code can resolve Default.
 //
-// The announcement itself is OpenHarmonyAccessibility.Announce: it goes out as the ArkUI
-// ANNOUNCE_FOR_ACCESSIBILITY event through the existing host entry
-// ohos_host_accessibility_send_event. That entry carries the event kind only - the text needs the
-// host export int ohos_host_accessibility_announce(const char* text) documented on
-// OpenHarmonyAccessibility.Announce (the managed side already keeps LastAnnouncement for it).
-// Without libopenharmonyhost.so the call degrades silently, so Announce never throws.
+// The announcement itself is OpenHarmonyAccessibility.Announce: the dedicated host export
+// int ohos_host_accessibility_announce(const char* text) carries the text inside an ArkUI
+// ANNOUNCE_FOR_ACCESSIBILITY event; when the host library predates that export, Announce falls
+// back to the event-kind-only ohos_host_accessibility_send_event path (the text still lands in
+// LastAnnouncement). Without libopenharmonyhost.so the call degrades silently, so Announce never
+// throws.
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Microsoft.Maui.Accessibility;

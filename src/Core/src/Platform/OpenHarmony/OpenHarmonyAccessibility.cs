@@ -108,6 +108,41 @@ public static class OpenHarmonyAccessibility
     [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
     private static extern int ProviderStatus();
 
+    // The dedicated text-carrying announcement export (host_napi.cpp): it builds an
+    // ANNOUNCE_FOR_ACCESSIBILITY event, sets the announced text on it and sends it through the
+    // attached provider. A host library built before this export only has
+    // ohos_host_accessibility_send_event, which carries the event kind alone; Announce keeps
+    // that as its fallback path.
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_announce", CharSet = CharSet.Ansi)]
+    private static extern int AccessibilityAnnounce([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
+
+    private static int s_announceExport;   // 0 unknown, 1 exported, -1 missing (cached probe)
+
+    /// <summary>True when the host library exports <c>ohos_host_accessibility_announce</c>.</summary>
+    private static bool AnnounceExportAvailable
+    {
+        get
+        {
+            int known = Volatile.Read(ref s_announceExport);
+            if (known != 0)
+            {
+                return known > 0;
+            }
+            bool available;
+            try
+            {
+                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
+                    NativeLibrary.TryGetExport(handle, "ohos_host_accessibility_announce", out _);
+            }
+            catch (Exception)
+            {
+                available = false;
+            }
+            Volatile.Write(ref s_announceExport, available ? 1 : -1);
+            return available;
+        }
+    }
+
     private static ActionListener? _actionThunk;
     private static Action<int, int>? _actionHandler;
 
@@ -194,16 +229,17 @@ public static class OpenHarmonyAccessibility
     /// Announces text through the platform screen reader (the platform half of
     /// <c>Microsoft.Maui.Accessibility.ISemanticScreenReader.Announce</c>).
     ///
-    /// The existing host entry <c>ohos_host_accessibility_send_event(int event_type)</c> carries
-    /// only an event kind: it maps to OH_ArkUI_AccessibilityEventSetEventType +
-    /// OH_ArkUI_SendAccessibilityAsyncEvent (host_napi.cpp), so the text itself cannot ride it.
-    /// The announcement therefore goes out as EventAnnouncement (the closest existing mechanism)
-    /// and the text is kept in <see cref="LastAnnouncement"/> for the text-carrying export a device
-    /// build needs: <c>int ohos_host_accessibility_announce(const char* text)</c>, implemented with
-    /// OH_ArkUI_AccessibilityEventSetEventType(event,
-    /// ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY) +
-    /// OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility(event, text) before the same
-    /// OH_ArkUI_SendAccessibilityAsyncEvent call. Degrades silently without the host library.
+    /// Preferred path: the dedicated host export
+    /// <c>int ohos_host_accessibility_announce(const char* text)</c>, which builds an
+    /// ANNOUNCE_FOR_ACCESSIBILITY event
+    /// (ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY), sets the announced
+    /// text (OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility) and sends it through the
+    /// attached provider (host_napi.cpp). The export is probed once (NativeLibrary); a host
+    /// library built before it falls back to the older event-kind-only path
+    /// <c>ohos_host_accessibility_send_event(EventAnnouncement)</c>, which maps to
+    /// OH_ArkUI_AccessibilityEventSetEventType + OH_ArkUI_SendAccessibilityAsyncEvent and cannot
+    /// carry the text itself (the text still lands in <see cref="LastAnnouncement"/>). Both paths
+    /// degrade silently without the host library.
     /// </summary>
     /// <returns>True when the announcement reached the host provider.</returns>
     public static bool Announce(string? text)
@@ -218,15 +254,38 @@ public static class OpenHarmonyAccessibility
         {
             return false;
         }
+        bool textPath = AnnounceExportAvailable;
         try
         {
             // The host answers 1 when the event was created and sent, 0 when no provider is
             // attached (nothing to announce to) - that is not a failure of availability.
-            if (SendEvent(EventAnnouncement) != 0)
+            if ((textPath ? AccessibilityAnnounce(text) : SendEvent(EventAnnouncement)) != 0)
             {
                 AnnouncementsSent++;
-                LogAnnounceFallbackOnce();
+                if (!textPath)
+                {
+                    LogAnnounceFallbackOnce();
+                }
                 return true;
+            }
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // The probe saw the export but this call could not resolve it (a different library
+            // won the load): mark the export missing and retry once through the event-kind path.
+            Volatile.Write(ref s_announceExport, -1);
+            try
+            {
+                if (SendEvent(EventAnnouncement) != 0)
+                {
+                    AnnouncementsSent++;
+                    LogAnnounceFallbackOnce();
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                _available = false;
             }
         }
         catch (Exception)
@@ -258,9 +317,8 @@ public static class OpenHarmonyAccessibility
         }
         _announceFallbackLogged = true;
         Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
-            "[maui] screen reader announce uses the event-kind-only path (ohos_host_accessibility_send_event); " +
-            "the text needs a host export ohos_host_accessibility_announce(const char* text) with " +
-            "OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility");
+            "[maui] screen reader announce fell back to ohos_host_accessibility_send_event " +
+            "(event kind only): this host library predates ohos_host_accessibility_announce(const char* text)");
     }
 
     /// <summary>Finds a published node by id (used to route actions back to a hit test).</summary>

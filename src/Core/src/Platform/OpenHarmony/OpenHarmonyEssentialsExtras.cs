@@ -1,90 +1,160 @@
 // Remaining Essentials implementations for the platform slice.
 //
-// Clipboard is file-backed. Connectivity reports Unknown until the ArkTS connection manager is
-// bridged. Launcher/Browser/Share live in OpenHarmonyAppLauncher.cs (startAbility bridge).
+// Clipboard is the system pasteboard (@ohos.pasteboard, request/result over the host bridge) and
+// connectivity reads the host NDK path plus the shell's NetworkKit observer; both are defined in
+// OpenHarmonyEssentialsBridges.cs. Launcher/Browser/Share live in OpenHarmonyAppLauncher.cs
+// (startAbility bridge).
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Networking;
-using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
+/// <summary>
+/// Clipboard backed by the OpenHarmony system pasteboard through the host/ArkTS bridge (the
+/// shell's registerClipboardSink handler, reading with ohos.permission.READ_PASTEBOARD on
+/// demand). MAUI's <see cref="HasText"/> is synchronous and the pasteboard read is a user-grant
+/// prompt, so it answers from the last known snapshot instead of prompting: every get/set
+/// updates it and the pasteboard 'update' push refreshes it in the background before
+/// <see cref="ClipboardContentChanged"/> is raised (false until the first get/set/push).
+/// Off-device (no host library) the cache stays empty and every call degrades to false/null/""
+/// without throwing.
+/// </summary>
 public sealed class OpenHarmonyClipboard : IClipboard
 {
-    private readonly string _path;
+    private readonly object _sync = new();
+    private bool _hasText;
+    private int _refreshing;
 
-    public OpenHarmonyClipboard(string? path = null)
+    public OpenHarmonyClipboard()
     {
-        _path = path ?? Path.Combine(OpenHarmonyPaths.DataDirectory, "clipboard.txt");
+        OpenHarmonyClipboardBridge.Changed += OnPlatformClipboardChanged;
     }
 
-    public bool HasText => File.Exists(_path) && new FileInfo(_path).Length > 0;
-
-    public event EventHandler<EventArgs>? ClipboardContentChanged
+    /// <summary>Last known "the pasteboard holds text" (refreshed after get/set and on push).</summary>
+    public bool HasText
     {
-        add { }
-        remove { }
-    }
-
-    public Task<string?> GetTextAsync()
-    {
-        try
+        get
         {
-            return Task.FromResult<string?>(File.Exists(_path) ? File.ReadAllText(_path) : null);
-        }
-        catch
-        {
-            return Task.FromResult<string?>(null);
-        }
-    }
-
-    public Task SetTextAsync(string? text)
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(text))
+            lock (_sync)
             {
-                if (File.Exists(_path))
-                {
-                    File.Delete(_path);
-                }
-            }
-            else
-            {
-                Directory.CreateDirectory(OpenHarmonyPaths.DataDirectory);
-                File.WriteAllText(_path, text);
+                return _hasText;
             }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>Raised for every pasteboard 'update' the shell reports.</summary>
+    public event EventHandler<EventArgs>? ClipboardContentChanged;
+
+    public async Task<string?> GetTextAsync()
+    {
+        (int rc, string text) = await OpenHarmonyClipboardBridge
+            .RequestAsync(OpenHarmonyClipboardBridge.GetOp, null, OpenHarmonyClipboardBridge.RequestTimeout)
+            .ConfigureAwait(false);
+        if (rc != 0)
         {
-            OpenHarmonyBridge.WriteStatus($"[maui] clipboard write failed: {ex.GetType().Name}");
+            return null;
         }
-        return Task.CompletedTask;
+        Store(text);
+        return string.IsNullOrEmpty(text) ? null : text;
+    }
+
+    public async Task SetTextAsync(string? text)
+    {
+        (int rc, _) = await OpenHarmonyClipboardBridge
+            .RequestAsync(OpenHarmonyClipboardBridge.SetOp, text ?? string.Empty, OpenHarmonyClipboardBridge.RequestTimeout)
+            .ConfigureAwait(false);
+        if (rc == 0)
+        {
+            Store(text ?? string.Empty);
+        }
     }
 
     public Task SetDataPackageAsync(DataPackage package)
+        => package.Text is not null ? SetTextAsync(package.Text) : Task.CompletedTask;
+
+    public async Task<DataPackage?> GetDataPackageAsync()
     {
-        if (package.Text is not null)
-        {
-            return SetTextAsync(package.Text);
-        }
-        return Task.CompletedTask;
+        string? text = await GetTextAsync().ConfigureAwait(false);
+        return text is null ? null : new DataPackage { Text = text };
     }
 
-    public Task<DataPackage?> GetDataPackageAsync()
-        => Task.FromResult<DataPackage?>(null);
+    private void Store(string text)
+    {
+        lock (_sync)
+        {
+            _hasText = !string.IsNullOrEmpty(text);
+        }
+    }
+
+    /// <summary>
+    /// Pasteboard changed (any app): refresh the cached HasText through a has request and raise
+    /// the MAUI event. The refresh is one at a time; a push that races is covered by the next.
+    /// </summary>
+    private void OnPlatformClipboardChanged()
+    {
+        _ = RefreshHasTextAsync();
+        ClipboardContentChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task RefreshHasTextAsync()
+    {
+        if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0)
+        {
+            return;
+        }
+        try
+        {
+            (int rc, string text) = await OpenHarmonyClipboardBridge
+                .RequestAsync(OpenHarmonyClipboardBridge.HasOp, null, OpenHarmonyClipboardBridge.RequestTimeout)
+                .ConfigureAwait(false);
+            if (rc == 0)
+            {
+                lock (_sync)
+                {
+                    _hasText = text == "1";
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _refreshing, 0);
+        }
+    }
 }
 
+/// <summary>
+/// Connectivity for OpenHarmony: <see cref="NetworkAccess"/> maps the host's NDK level
+/// (0 unknown, 1 none, 2 local, 3 internet) and the shell's NetworkKit observer (netAvailable /
+/// netLost / netCapabilitiesChange / netUnavailable) pushes <see cref="ConnectivityChanged"/>
+/// with the level the host re-read. Off-device the read fails and stays
+/// <see cref="NetworkAccess.Unknown"/>; the pinned ConnectionProfiles stay empty (the host level
+/// does not name the transport).
+/// </summary>
 public sealed class OpenHarmonyConnectivity : IConnectivity
 {
-    /// <summary>Real network state needs the ArkTS connection manager; report Unknown.</summary>
-    public NetworkAccess NetworkAccess => NetworkAccess.Unknown;
+    public OpenHarmonyConnectivity()
+    {
+        OpenHarmonyConnectivityBridge.Changed += OnPlatformNetworkAccessChanged;
+    }
 
+    /// <summary>Live network state read through ohos_host_network_access.</summary>
+    public NetworkAccess NetworkAccess => MapNetworkAccess(OpenHarmonyConnectivityBridge.ReadNetworkAccess());
+
+    /// <summary>No transport details over this bridge; kept empty (unchanged from the default).</summary>
     public IEnumerable<ConnectionProfile> ConnectionProfiles => Array.Empty<ConnectionProfile>();
 
-    public event EventHandler<ConnectivityChangedEventArgs>? ConnectivityChanged
-    {
-        add { }
-        remove { }
-    }
-}
+    /// <summary>Raised for every network change the shell reports.</summary>
+    public event EventHandler<ConnectivityChangedEventArgs>? ConnectivityChanged;
 
+    /// <summary>Maps the host's 0/1/2/3 level to MAUI's enum (anything else is Unknown).</summary>
+    internal static NetworkAccess MapNetworkAccess(int level) => level switch
+    {
+        1 => NetworkAccess.None,
+        2 => NetworkAccess.Local,
+        3 => NetworkAccess.Internet,
+        _ => NetworkAccess.Unknown,
+    };
+
+    private void OnPlatformNetworkAccessChanged(int level)
+        => ConnectivityChanged?.Invoke(this, new ConnectivityChangedEventArgs(MapNetworkAccess(level), ConnectionProfiles));
+}

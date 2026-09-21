@@ -1,6 +1,9 @@
 // Deterministic behaviour for the Essentials APIs whose ArkTS kits are not wired yet: instead
 // of an unresolved-service exception, apps get documented results (no-op, denied, or a clear
-// FeatureNotSupportedException). Each one is replaced by a real bridge as the kits land.
+// FeatureNotSupportedException). Each one is replaced by a real bridge as the kits land:
+// IPermissions.RequestAsync now runs through OpenHarmonyPermissionBridge
+// (abilityAccessCtrl.requestPermissionsFromUser in the shell) and keeps the documented Denied
+// answer when the shell or the host library is unavailable.
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Devices;
 using Microsoft.Maui.Media;
@@ -62,8 +65,31 @@ public sealed class OpenHarmonyPermissions : IPermissions
 
     public Task<PermissionStatus> RequestAsync<TPermission>() where TPermission : Permissions.BasePermission, new()
     {
-        OpenHarmonyBridge.WriteStatus("[maui] permission requests need the abilityAccessCtrl kit in the ArkTS shell");
-        return Task.FromResult(PermissionStatus.Denied);
+        if (!PermissionNames.TryGetValue(typeof(TPermission), out string? name))
+        {
+            // Unmapped MAUI permission: keep the documented Denied answer (CheckStatusAsync
+            // reports Unknown for the same input).
+            return Task.FromResult(PermissionStatus.Denied);
+        }
+        return RequestMappedAsync(name);
+    }
+
+    /// <summary>
+    /// Prompts for one mapped OpenHarmony permission through the shell (abilityAccessCtrl) and
+    /// maps the answer to MAUI's status. A timeout, a missing shell sink or a missing host
+    /// library answers Denied, exactly like the pre-bridge no-op did.
+    /// </summary>
+    private static async Task<PermissionStatus> RequestMappedAsync(string name)
+    {
+        bool? granted = await OpenHarmonyPermissionBridge
+            .RequestAsync(name, OpenHarmonyPermissionBridge.RequestTimeout)
+            .ConfigureAwait(false);
+        if (granted is null)
+        {
+            OpenHarmonyBridge.WriteStatus($"[maui] permission request for {name} was not answered; denying");
+            return PermissionStatus.Denied;
+        }
+        return granted.Value ? PermissionStatus.Granted : PermissionStatus.Denied;
     }
 
     public bool ShouldShowRationale<TPermission>() where TPermission : Permissions.BasePermission, new()

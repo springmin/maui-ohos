@@ -18,8 +18,22 @@ public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
     /// <summary>Scripts that a shell sink never answers must not leave callers waiting forever.</summary>
     private static readonly TimeSpan s_evalTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>Shell envelope asking for a Navigating decision on a cancelled load (B6).</summary>
+    private const string NavRequestPrefix = "__OHNAV|";
+
+    /// <summary>Longest URL the shell may hand over for a decision (bounds the copy).</summary>
+    private const int MaxNavUrlLength = 8 * 1024;
+
+    /// <summary>Longest URL a status line may carry (B7).</summary>
+    internal const int MaxLoggedUrlLength = 2048;
+
+    /// <summary>How long an approval stays valid for its one matching reload.</summary>
+    private static readonly TimeSpan s_navApprovalWindow = TimeSpan.FromSeconds(10);
+
     private static readonly List<OpenHarmonyWebViewHandler> s_handlers = new();
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<string?>> s_evalRequests = new();
+    private static readonly object s_navSync = new();
+    private static readonly Dictionary<string, long> s_approvedNavigations = new();
     private static WebEvalResultCallback? s_evalResultCallback;
     private static WebJsMessageCallback? s_jsMessageCallback;
     private static bool s_evalRegistered;
@@ -170,14 +184,154 @@ public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
     }
 
     /// <summary>
-    /// A page script posted a message through the dotnetHost proxy (host.notifyJsMessage).
-    /// The payload is raised on <see cref="JsMessage"/> and offered to HybridWebView
+    /// A shell dotnetHost payload: page scripts post through the proxy (host.notifyJsMessage)
+    /// and the shell itself uses the same channel for the navigation approval protocol
+    /// (B6, "__OHNAV|&lt;url&gt;|&lt;id&gt;"), which is handled here and never fanned out.
+    /// The page payload is raised on <see cref="JsMessage"/> and offered to HybridWebView
     /// handlers (see <see cref="OpenHarmonyHybridWebViewHandler.OnJsMessage"/>).
     /// </summary>
     internal static void HandleJsMessage(string payload)
     {
+        if (payload.StartsWith(NavRequestPrefix, StringComparison.Ordinal))
+        {
+            HandleNavigationRequest(payload);
+            return;
+        }
         JsMessage?.Invoke(payload);
         OpenHarmonyHybridWebViewHandler.OnJsMessage(payload);
+    }
+
+    /// <summary>
+    /// The shell cancelled a main-frame load it did not originate and asks for a decision (B6).
+    /// Parses "__OHNAV|&lt;url&gt;|&lt;id&gt;", raises Navigating on the connected WebViews and,
+    /// when none cancelled, approves exactly that URL back to the shell ("nav" command). The
+    /// shell reloads only the URL it cancelled for the id it issued, so a forged approval is
+    /// inert.
+    /// </summary>
+    internal static void HandleNavigationRequest(string payload)
+    {
+        int separator = payload.LastIndexOf('|', StringComparison.Ordinal);
+        if (separator <= NavRequestPrefix.Length)
+        {
+            return;
+        }
+        string url = payload.Substring(NavRequestPrefix.Length, separator - NavRequestPrefix.Length);
+        string requestId = payload.Substring(separator + 1);
+        if (requestId.Length == 0 || requestId.Length > 128 || url.Length == 0 || url.Length > MaxNavUrlLength)
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] web navigation rejected: malformed request");
+            return;
+        }
+        if (!Uri.TryCreate(url, UriKind.Absolute, out _) || ContainsControlCharacter(url) || ContainsControlCharacter(requestId))
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] web navigation rejected: unsafe url");
+            return;
+        }
+        if (!RaiseNavigating(url))
+        {
+            // The app cancelled: leave the load blocked (no approval is sent).
+            return;
+        }
+        lock (s_navSync)
+        {
+            s_approvedNavigations[url] = Environment.TickCount64 + (long)s_navApprovalWindow.TotalMilliseconds;
+        }
+        NavigationApprovalSent?.Invoke(requestId, url);
+        OpenHarmonyBridge.WebCommand("nav", requestId + "\n" + url);
+    }
+
+    /// <summary>
+    /// Raises Navigating (NewPage) on every connected WebView; false when any handler set
+    /// Cancel (IWebView.Navigating returns the cancel flag).
+    /// </summary>
+    private static bool RaiseNavigating(string url)
+    {
+        bool allowed = true;
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
+            {
+                if (handler.VirtualView is { } webView && webView.Navigating(WebNavigationEvent.NewPage, url))
+                {
+                    allowed = false;
+                }
+            }
+        }
+        return allowed;
+    }
+
+    /// <summary>
+    /// True when the app already decided this started URL through the shell's approval channel
+    /// (B6), so the page-begin event must not raise Navigating a second time for one load.
+    /// One-shot: the entry is removed here, and it expires on its own if the load never starts.
+    /// </summary>
+    private static bool ConsumeApprovedNavigation(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return false;
+        }
+        lock (s_navSync)
+        {
+            if (!s_approvedNavigations.TryGetValue(url, out long expires))
+            {
+                return false;
+            }
+            s_approvedNavigations.Remove(url);
+            return expires >= Environment.TickCount64;
+        }
+    }
+
+    private static bool ContainsControlCharacter(string value)
+    {
+        foreach (char c in value)
+        {
+            if (char.IsControl(c))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Makes a URL safe for the one-line status log (B7): drops the query and the fragment so
+    /// tokens a page put there do not land in dotnet-status.txt, flattens control characters so
+    /// one event cannot forge extra lines, and truncates to
+    /// <see cref="MaxLoggedUrlLength"/> characters.
+    /// </summary>
+    internal static string SanitizeUrlForLog(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return string.Empty;
+        }
+        int cut = url.Length;
+        int query = url.IndexOf('?', StringComparison.Ordinal);
+        int fragment = url.IndexOf('#', StringComparison.Ordinal);
+        if (query >= 0 && query < cut)
+        {
+            cut = query;
+        }
+        if (fragment >= 0 && fragment < cut)
+        {
+            cut = fragment;
+        }
+        string trimmed = cut == url.Length ? url : url.Substring(0, cut);
+        if (trimmed.Length > MaxLoggedUrlLength)
+        {
+            trimmed = trimmed.Substring(0, MaxLoggedUrlLength - 3) + "...";
+        }
+        char[]? flattened = null;
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            if (char.IsControl(trimmed[i]))
+            {
+                flattened ??= trimmed.ToCharArray();
+                flattened[i] = ' ';
+            }
+        }
+        return flattened is null ? trimmed : new string(flattened);
     }
 
     private static void OnEvalResultNative(int requestId, IntPtr resultUtf8, int error)
@@ -233,6 +387,9 @@ public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
     /// <summary>Raised for every message a page posts through the shell's dotnetHost proxy.</summary>
     public static event Action<string>? JsMessage;
 
+    /// <summary>Raised when a navigation approval is handed back to the shell (B6 diagnostics).</summary>
+    internal static event Action<string, string>? NavigationApprovalSent;
+
     public static void MapSource(OpenHarmonyWebViewHandler handler, IWebView webView)
     {
         switch (webView.Source)
@@ -252,23 +409,28 @@ public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
     /// <summary>Mirrors a shell page event into the MAUI WebView events.</summary>
     public static void OnPageEvent(string state, string url)
     {
+        if (state == "started")
+        {
+            // A load the shell already asked about (B6) raised Navigating before it started;
+            // do not raise it a second time. App-origin loads never take that path.
+            if (ConsumeApprovedNavigation(url))
+            {
+                return;
+            }
+            RaiseNavigating(url);
+            return;
+        }
+        // IWebView only exposes Navigating; the Controls Navigated event is raised by the
+        // platform handler internals, so completion is logged for now. The URL is stripped of
+        // its query/fragment and truncated (B7) before it reaches the status file.
+        string loggedUrl = SanitizeUrlForLog(url);
         lock (s_handlers)
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
-                if (handler.VirtualView is not { } webView)
+                if (handler.VirtualView is not null)
                 {
-                    continue;
-                }
-                if (state == "started")
-                {
-                    webView.Navigating(WebNavigationEvent.NewPage, url);
-                }
-                else
-                {
-                    // IWebView only exposes Navigating; the Controls Navigated event is raised by
-                    // the platform handler internals, so completion is logged for now.
-                    OpenHarmonyBridge.WriteStatus($"[maui] web {state}: {url}");
+                    OpenHarmonyBridge.WriteStatus($"[maui] web {state}: {loggedUrl}");
                 }
             }
         }

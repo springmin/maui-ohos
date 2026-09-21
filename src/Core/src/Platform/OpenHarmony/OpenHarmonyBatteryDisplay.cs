@@ -9,6 +9,11 @@
 //     "width\theight\tdensityDPI\trotation\trefreshRate\torientation") ->
 //     ohos_host_display_set_listener callback -> DeviceDisplay.MainDisplayInfo.
 //
+//   DeviceDisplay.KeepScreenOn -> P/Invoke ohos_host_keep_screen_on(on) -> the shell's
+//     registerKeepScreenOnSink handler -> window.getLastWindow(context) ->
+//     setWindowKeepScreenOn(on === 1); the managed getter caches the last value the host
+//     accepted (the shell call is asynchronous and does not answer back).
+//
 // The properties are synchronous, so the shell pushes a snapshot (the host replays the last
 // one when the managed listener registers) and later changes through the same notify. The
 // shell subscribes to the "usual.event.BATTERY_CHANGED" / CHARGING / DISCHARGING /
@@ -221,7 +226,8 @@ public sealed class OpenHarmonyBattery : IBattery
 /// <summary>
 /// MAUI Essentials device display backed by @ohos.display, pushed by the ArkTS shell
 /// (display.getDefaultDisplaySync() at startup and display.on('change') afterwards).
-/// Off-device (no host library) <see cref="MainDisplayInfo"/> stays empty and nothing throws.
+/// KeepScreenOn asks the shell for window.setWindowKeepScreenOn; off-device (no host library)
+/// <see cref="MainDisplayInfo"/> stays empty, KeepScreenOn stays false and nothing throws.
 /// </summary>
 public sealed class OpenHarmonyDeviceDisplay : IDeviceDisplay
 {
@@ -235,9 +241,16 @@ public sealed class OpenHarmonyDeviceDisplay : IDeviceDisplay
     private static DisplayListener? s_displayCallback;
     private static bool s_registered;
     private static bool s_unavailable;
+    // KeepScreenOn: the last value the host accepted (queued through the shell sink). Off-device
+    // there is no host library and the value stays false.
+    private static bool s_keepScreenOn;
+    private static bool s_keepScreenOnUnavailable;
 
     [DllImport(HostLibrary, EntryPoint = "ohos_host_display_set_listener")]
     private static extern void DisplaySetListener(IntPtr callback);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_keep_screen_on")]
+    private static extern int KeepScreenOnSet(int on);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void DisplayListener(IntPtr payloadUtf8);
@@ -254,13 +267,33 @@ public sealed class OpenHarmonyDeviceDisplay : IDeviceDisplay
     public DisplayInfo MainDisplayInfo => s_info;
 
     /// <summary>
-    /// No platform keep-screen-on path is wired in this increment: the getter always reports
-    /// false and the setter is ignored (the display snapshot itself is unaffected).
+    /// Whether the screen should stay on. The setter asks the ArkTS shell through
+    /// ohos_host_keep_screen_on (the shell applies window.setWindowKeepScreenOn to the last
+    /// window) and the getter reflects the last value the host accepted. Off-device (no host
+    /// library) the setter is a silent no-op, so the value stays false.
     /// </summary>
     public bool KeepScreenOn
     {
-        get => false;
-        set { }
+        get => s_keepScreenOn;
+        set
+        {
+            if (s_keepScreenOnUnavailable)
+            {
+                return;
+            }
+            try
+            {
+                if (KeepScreenOnSet(value ? 1 : 0) == 0)
+                {
+                    s_keepScreenOn = value;
+                }
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                s_keepScreenOnUnavailable = true;
+                OpenHarmonyBridge.WriteStatus("[maui] keep-screen-on bridge unavailable (no host library)");
+            }
+        }
     }
 
     public event EventHandler<DisplayInfoChangedEventArgs>? MainDisplayInfoChanged;

@@ -14,16 +14,18 @@ namespace Microsoft.Maui.Platform;
 /// shell's registerClipboardSink handler, reading with ohos.permission.READ_PASTEBOARD on
 /// demand). MAUI's <see cref="HasText"/> is synchronous and the pasteboard read is a user-grant
 /// prompt, so it answers from the last known snapshot instead of prompting: every get/set
-/// updates it and the pasteboard 'update' push refreshes it in the background before
-/// <see cref="ClipboardContentChanged"/> is raised (false until the first get/set/push).
-/// Off-device (no host library) the cache stays empty and every call degrades to false/null/""
-/// without throwing.
+/// updates it, and the pasteboard 'update' push refreshes it without prompting. The shell
+/// answers the has op without a prompt and a denial is cached here, so only an explicit
+/// <see cref="GetTextAsync"/> can raise the system prompt. <see cref="ClipboardContentChanged"/>
+/// is raised for every push (false until the first successful get/set/refresh). Off-device (no
+/// host library) the cache stays empty and every call degrades to false/null/"" without throwing.
 /// </summary>
 public sealed class OpenHarmonyClipboard : IClipboard
 {
     private readonly object _sync = new();
     private bool _hasText;
     private int _refreshing;
+    private bool _readDenied;
 
     public OpenHarmonyClipboard()
     {
@@ -52,6 +54,9 @@ public sealed class OpenHarmonyClipboard : IClipboard
             .ConfigureAwait(false);
         if (rc != 0)
         {
+            // The explicit read was denied/unavailable: cache the denial so the pasteboard
+            // observer never asks again (only a later explicit GetTextAsync can prompt).
+            StoreDenied();
             return null;
         }
         Store(text);
@@ -83,12 +88,25 @@ public sealed class OpenHarmonyClipboard : IClipboard
         lock (_sync)
         {
             _hasText = !string.IsNullOrEmpty(text);
+            _readDenied = false;
+        }
+    }
+
+    /// <summary>Caches a denied/unavailable read; HasText stays false until an explicit get succeeds.</summary>
+    private void StoreDenied()
+    {
+        lock (_sync)
+        {
+            _hasText = false;
+            _readDenied = true;
         }
     }
 
     /// <summary>
-    /// Pasteboard changed (any app): refresh the cached HasText through a has request and raise
-    /// the MAUI event. The refresh is one at a time; a push that races is covered by the next.
+    /// Pasteboard changed (any app): raise the MAUI event and refresh the cached HasText. The
+    /// refresh never prompts: once a denial is cached no has request is sent at all, and the
+    /// shell answers the has op without a prompt (only GetTextAsync may prompt). The refresh is
+    /// one at a time; a push that races is covered by the next.
     /// </summary>
     private void OnPlatformClipboardChanged()
     {
@@ -98,6 +116,13 @@ public sealed class OpenHarmonyClipboard : IClipboard
 
     private async Task RefreshHasTextAsync()
     {
+        lock (_sync)
+        {
+            if (_readDenied)
+            {
+                return;
+            }
+        }
         if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0)
         {
             return;
@@ -112,7 +137,12 @@ public sealed class OpenHarmonyClipboard : IClipboard
                 lock (_sync)
                 {
                     _hasText = text == "1";
+                    _readDenied = false;
                 }
+            }
+            else
+            {
+                StoreDenied();
             }
         }
         finally

@@ -1,5 +1,24 @@
 // Entry handler for OpenHarmony: displays text/placeholder and focuses on tap. Text input
-// itself needs a soft keyboard, which the ArkTS shell must provide (next step).
+// itself needs a soft keyboard, which the ArkTS shell provides through the text-input sink.
+//
+// Focus/keyboard contract of this slice:
+// - Text views (Entry/Editor/SearchBar/alert prompts) own the focus bridge: a tap or a MAUI
+//   Focus()/Unfocus() sets the platform IsFocused and asks OpenHarmonyBridge.RequestTextInput,
+//   which on device drives the input-method NDK and otherwise reaches the shell's
+//   registerTextInputSink handler (focusControl.requestFocus('ohos_dotnet_input') /
+//   ('ohos_dotnet_surface') plus caretPosition(0)).
+// - Non-text views have no equivalent: the shell's focusControl path is reachable only through
+//   that text-input sink and there is no managed -> shell focus request, so a Button/Label
+//   Focus() cannot hand ArkUI focus to an id. The missing bridge is small: a host export
+//   ohos_host_request_focus(const char* id) (0 when the shell sink handled it), a NAPI wrapper
+//   exposed as host.requestFocus and a shell sink host.registerFocusSink((id: string) =>
+//   focusControl.requestFocus(id)); a non-text VisualElement.Focus() would then route through
+//   it (with the matching Unfocus path).
+// - Hardware key events are not forwarded either: the shell page has no onKeyEvent handler and
+//   the host has no key-event export. The missing bridge: onKeyEvent (page or XComponent) ->
+//   host.notifyKeyEvent(keyCode, eventType) -> ohos_host_register_key_event(void* callback),
+//   the same registration shape as ohos_host_register_text_submitted, plus a managed key event
+//   surface on OpenHarmonyBridge; until then no slice handler can receive a key.
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.Maui;

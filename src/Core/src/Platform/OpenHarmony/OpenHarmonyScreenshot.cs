@@ -17,8 +17,10 @@
 //
 // ScreenshotFormat/quality: the capture is always PNG. Png is returned as-is; Jpeg cannot be
 // produced here because the slice has no rasterizer/codec backend to transcode with, so the
-// same PNG bytes are returned for either format with this comment as the documented deviation
-// (quality is a lossy-encoder knob and is likewise ignored - PNG is lossless).
+// same PNG bytes are returned for either format and the first Jpeg request is noted once
+// through the status channel (OpenHarmonyScreenshotResult.LogJpegFallbackOnce) instead of
+// silently claiming a conversion; quality is a lossy-encoder knob and is not applied either
+// (PNG is lossless).
 //
 // The shell writes the PNG asynchronously after the host queued the request (the host only
 // reports that the request reached the shell sink), so CaptureAsync polls the target path until
@@ -224,11 +226,14 @@ public sealed class OpenHarmonyScreenshot : IScreenshot
 
 /// <summary>
 /// The captured PNG, held in memory (the temp file is deleted as soon as it is read).
-/// OpenReadAsync/CopyToAsync always hand out the PNG bytes; Jpeg would need a transcoder this
-/// slice does not ship (see the file header), and quality is ignored for the same reason.
+/// OpenReadAsync/CopyToAsync always hand out the PNG bytes; a Jpeg request is noted once and
+/// still answered with the PNG (the slice has no transcoder, see the file header), and quality
+/// is ignored for the same reason.
 /// </summary>
 public sealed class OpenHarmonyScreenshotResult : IScreenshotResult
 {
+    private static bool s_jpegFallbackLogged;
+
     private readonly byte[] _png;
 
     internal OpenHarmonyScreenshotResult(byte[] png, int width, int height)
@@ -243,8 +248,29 @@ public sealed class OpenHarmonyScreenshotResult : IScreenshotResult
     public int Height { get; }
 
     public Task<Stream> OpenReadAsync(ScreenshotFormat format = ScreenshotFormat.Png, int quality = 100)
-        => Task.FromResult<Stream>(new MemoryStream(_png, writable: false));
+    {
+        LogJpegFallbackOnce(format);
+        return Task.FromResult<Stream>(new MemoryStream(_png, writable: false));
+    }
 
     public Task CopyToAsync(Stream destination, ScreenshotFormat format = ScreenshotFormat.Png, int quality = 100)
-        => destination.WriteAsync(_png, 0, _png.Length);
+    {
+        LogJpegFallbackOnce(format);
+        return destination.WriteAsync(_png, 0, _png.Length);
+    }
+
+    /// <summary>
+    /// One status note per process when a caller asks for Jpeg: the bytes stay PNG and the
+    /// quality knob stays unapplied, so the fallback is reported instead of implied.
+    /// </summary>
+    private static void LogJpegFallbackOnce(ScreenshotFormat format)
+    {
+        if (format != ScreenshotFormat.Jpeg || s_jpegFallbackLogged)
+        {
+            return;
+        }
+        s_jpegFallbackLogged = true;
+        OpenHarmonyBridge.WriteStatus(
+            "[maui] screenshot: Jpeg was requested but the host capture is PNG and the slice has no JPEG encoder; the PNG bytes are returned and the quality request is not applied");
+    }
 }

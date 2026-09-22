@@ -14,13 +14,27 @@
 // completed task when libopenharmonyhost.so or the shell sink is unavailable (desktop builds,
 // minimal shells), and nothing here ever throws for an unavailable platform.
 //
-// Known API limits, mirrored from the shell template:
-// - BrowserLaunchOptions cannot be honoured: startAbility always opens the system browser, the
-//   system in-app browser does not exist in this slice.
+// Known API limits, mirrored from the shell template. The parts that cannot be expressed are
+// reported once per process through the status channel (OpenHarmonyAbilityLog) instead of being
+// dropped silently:
+// - BrowserLaunchOptions: BrowserLaunchMode.External is exactly what startAbility does, so it
+//   is honoured as-is. SystemPreferred (the MAUI default) asks for the system's in-app browser,
+//   which does not exist in this slice, and the in-app-only knobs (TitleMode, the toolbar and
+//   control colors, the launch flags) have no Want representation; such a request is still
+//   dispatched to the external handler and noted once.
+// - ShareTextRequest forwards Text (falling back to Uri); Subject and Title are not transmitted
+//   because the sink carries only the content slot. The shell's sendData Want would need
+//   wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle') fed from a
+//   fourth sink argument (ohos_host_ability_start carries three today); a title/subject is
+//   noted once until that bridge exists. ShareFileRequest/ShareMultipleFilesRequest.Title is
+//   dropped for the same reason.
+// - Launching a file (OpenAsync(OpenFileRequest)) dispatches a file:// URI as a viewData Want
+//   (kind 0), which carries no flags, so the ability manager grants the receiver no read access
+//   to the app-sandbox file. The shell change is small and does not touch the protocol: set
+//   wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION on the kind 0 Want when the uri starts with
+//   file:// (kind 3 already sets it); the missing grant is noted once.
 // - CanOpenAsync reports whether the ability bridge is available, not whether an installed
 //   ability matches the URI (OpenHarmony has no synchronous URI-handler query here).
-// - ShareTextRequest forwards Text (falling back to Uri); Subject/Title are not transmitted by
-//   the Want bridge.
 // - File sharing (kind 3) goes through an implicit sendData Want because this SDK has no Share
 //   Kit (systemShare). The shell sets wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
 //   (declared as 0x1 in @ohos.app.ability.wantConstant, verified by typecheck) so the ability
@@ -28,7 +42,7 @@
 //   honours the grant and can read the sandbox file is device- and app-dependent.
 // - The bridge carries one URI per Want, so ShareMultipleFilesRequest dispatches only when it
 //   holds exactly one file; with more files it stays a documented no-op (the missing Share Kit
-//   is the multi-file carrier on this platform).
+//   is the multi-file carrier on this platform) reported once instead of per request.
 // - Plain-text sharing through ohos.want.action.sendData has no wantConstant key in this SDK;
 //   the shell sends the text under 'ohos.extra.param.key.content', the key used by the
 //   OpenHarmony ecosystem samples that predate Share Kit.
@@ -101,6 +115,70 @@ internal static class OpenHarmonyAbilityBridge
     }
 }
 
+/// <summary>
+/// One-time status notes for the ability bridge's unexpressible parts. dotnet-status.txt is
+/// bounded (256 KiB, oldest lines dropped), so a note per request would flood it; the same
+/// once-per-process pattern the clipboard's non-text package note uses. The flags are plain
+/// statics: a race can write the note twice, which is harmless for diagnostics.
+/// </summary>
+internal static class OpenHarmonyAbilityLog
+{
+    private static bool s_titleDropped;
+    private static bool s_fileReadGrantMissing;
+    private static bool s_browserOptionsIgnored;
+    private static bool s_multipleFilesDropped;
+
+    /// <summary>Share/launch titles have no slot in the three-argument ability sink.</summary>
+    public static void TitleDroppedOnce()
+    {
+        if (s_titleDropped)
+        {
+            return;
+        }
+        s_titleDropped = true;
+        OpenHarmonyBridge.WriteStatus(
+            "[maui] ability bridge: Title/Subject was not transmitted (the startAbility sink carries one content slot); " +
+            "the shell would need wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle') fed from a fourth sink argument");
+    }
+
+    /// <summary>A file:// launched with viewData carries no read grant for the receiver.</summary>
+    public static void FileReadGrantMissingOnce()
+    {
+        if (s_fileReadGrantMissing)
+        {
+            return;
+        }
+        s_fileReadGrantMissing = true;
+        OpenHarmonyBridge.WriteStatus(
+            "[maui] launcher: a file:// uri was opened as a viewData Want without FLAG_AUTH_READ_URI_PERMISSION; " +
+            "the receiving ability may not read the app-sandbox file - the shell must set the flag for file:// uris in the kind 0 branch (kind 3 already does)");
+    }
+
+    /// <summary>The in-app browser and its options have no startAbility representation.</summary>
+    public static void BrowserOptionsIgnoredOnce()
+    {
+        if (s_browserOptionsIgnored)
+        {
+            return;
+        }
+        s_browserOptionsIgnored = true;
+        OpenHarmonyBridge.WriteStatus(
+            "[maui] browser: the requested BrowserLaunchOptions were not applied (SystemPreferred in-app mode, title mode, colors and launch flags have no Want representation); the external system handler opens instead");
+    }
+
+    /// <summary>More than one shared file cannot ride the single-uri sendData Want.</summary>
+    public static void MultipleFilesDroppedOnce()
+    {
+        if (s_multipleFilesDropped)
+        {
+            return;
+        }
+        s_multipleFilesDropped = true;
+        OpenHarmonyBridge.WriteStatus(
+            "[maui] share multiple files request needs Share Kit (systemShare) to carry more than one uri; the request stays a no-op");
+    }
+}
+
 /// <summary>MAUI Essentials launcher on OpenHarmony (implicit viewData Want).</summary>
 public sealed class OpenHarmonyLauncher : ILauncher
 {
@@ -136,8 +214,9 @@ public sealed class OpenHarmonyLauncher : ILauncher
         {
             return Task.FromResult(false);
         }
-        // file:// URIs are what viewData handlers expect; read permission flags are not part of
-        // this bridge (the target ability fails to open the file when it is not world-readable).
+        // file:// URIs are what viewData handlers expect; the bridge cannot carry the read grant
+        // (see the header), so the missing FLAG_AUTH_READ_URI_PERMISSION is noted once for a
+        // dispatched file:// launch. OpenFileRequest.Title has no slot in the Want either.
         string location = Uri.TryCreate(path, UriKind.Absolute, out Uri? fileUri) && fileUri.IsFile
             ? fileUri.AbsoluteUri
             : path;
@@ -145,6 +224,17 @@ public sealed class OpenHarmonyLauncher : ILauncher
         if (!dispatched)
         {
             OpenHarmonyBridge.WriteStatus("[maui] launcher could not dispatch the file request");
+        }
+        else
+        {
+            if (location.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenHarmonyAbilityLog.FileReadGrantMissingOnce();
+            }
+            if (!string.IsNullOrEmpty(request!.Title))
+            {
+                OpenHarmonyAbilityLog.TitleDroppedOnce();
+            }
         }
         return Task.FromResult(dispatched);
     }
@@ -167,15 +257,19 @@ public sealed class OpenHarmonyBrowser : IBrowser
     public static readonly OpenHarmonyBrowser Instance = new();
 
     /// <summary>
-    /// Opens <paramref name="uri"/> with the system handler. <paramref name="options"/> is
-    /// accepted but not transmitted: the shell can only start an external ability, so
-    /// BrowserLaunchMode/colors/title mode cannot be applied.
+    /// Opens <paramref name="uri"/> with the external system handler. LaunchMode.External is
+    /// honoured exactly; SystemPreferred and the in-app-only options cannot be expressed by
+    /// startAbility, so such a request is dispatched externally anyway and noted once.
     /// </summary>
     public Task<bool> OpenAsync(Uri uri, BrowserLaunchOptions options)
     {
         if (uri is null)
         {
             return Task.FromResult(false);
+        }
+        if (!IsExternalLaunch(options))
+        {
+            OpenHarmonyAbilityLog.BrowserOptionsIgnoredOnce();
         }
         bool dispatched = OpenHarmonyAbilityBridge.TryOpenUri(uri.AbsoluteUri);
         if (!dispatched)
@@ -187,6 +281,19 @@ public sealed class OpenHarmonyBrowser : IBrowser
         }
         return Task.FromResult(dispatched);
     }
+
+    /// <summary>
+    /// True when the options describe exactly the external launch this bridge performs: the
+    /// External mode with no in-app-only knobs set. The in-app knobs (title mode, colors, launch
+    /// flags) only apply to SystemPreferred browsers, per the Essentials contract.
+    /// </summary>
+    private static bool IsExternalLaunch(BrowserLaunchOptions? options) =>
+        options is null ||
+        (options.LaunchMode == BrowserLaunchMode.External &&
+         options.TitleMode == BrowserTitleMode.Default &&
+         options.PreferredToolbarColor is null &&
+         options.PreferredControlColor is null &&
+         options.Flags == BrowserLaunchFlags.None);
 }
 
 /// <summary>MAUI Essentials share on OpenHarmony (implicit sendData Want: text or one file).</summary>
@@ -200,6 +307,13 @@ public sealed class OpenHarmonyShare : IShare
         if (string.IsNullOrEmpty(text))
         {
             text = request?.Uri;
+        }
+        if (!string.IsNullOrEmpty(text) &&
+            (!string.IsNullOrEmpty(request!.Subject) || !string.IsNullOrEmpty(request.Title)))
+        {
+            // The sink sends the content slot only (see the header); the title/subject note is
+            // once per process instead of per request.
+            OpenHarmonyAbilityLog.TitleDroppedOnce();
         }
         if (string.IsNullOrEmpty(text) || !OpenHarmonyAbilityBridge.TryShareText(text))
         {
@@ -215,6 +329,10 @@ public sealed class OpenHarmonyShare : IShare
         {
             OpenHarmonyBridge.WriteStatus("[maui] share file request had no file path");
             return Task.CompletedTask;
+        }
+        if (!string.IsNullOrEmpty(request!.Title))
+        {
+            OpenHarmonyAbilityLog.TitleDroppedOnce();
         }
         if (!OpenHarmonyAbilityBridge.TryShareFile(FileUriForPath(path), MimeTypeForPath(path)))
         {
@@ -235,8 +353,8 @@ public sealed class OpenHarmonyShare : IShare
         {
             // One Want carries one uri and this SDK has no Share Kit (systemShare) to carry a
             // set, so the multi-file request stays a documented no-op instead of silently
-            // sharing only the first file.
-            OpenHarmonyBridge.WriteStatus($"[maui] share multiple files request ({files.Count} files) needs Share Kit (not in this SDK)");
+            // sharing only the first file; the note is once per process, not per request.
+            OpenHarmonyAbilityLog.MultipleFilesDroppedOnce();
             return Task.CompletedTask;
         }
         string? path = files[0]?.FullPath;
@@ -244,6 +362,10 @@ public sealed class OpenHarmonyShare : IShare
         {
             OpenHarmonyBridge.WriteStatus("[maui] share multiple files request had no file path");
             return Task.CompletedTask;
+        }
+        if (!string.IsNullOrEmpty(request!.Title))
+        {
+            OpenHarmonyAbilityLog.TitleDroppedOnce();
         }
         if (!OpenHarmonyAbilityBridge.TryShareFile(FileUriForPath(path), MimeTypeForPath(path)))
         {

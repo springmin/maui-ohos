@@ -7,6 +7,18 @@
 // DropGestureRecognizer.SendDragOver/SendDragLeave/SendDrop) are public in the Controls contract,
 // so they are called directly; every call is still guarded because a failing recognizer handler
 // must never take the touch pipeline or the frame loop down.
+//
+// Payloads: the session carries the DataPackage the source's DragStarting handler produced and
+// Drop hands the target the same package through DropEventArgs.Data (a DataPackageView), so
+// text, image (DataPackage.Image, read back with GetImageAsync) and custom Properties payloads
+// survive the simulated session. MAUI 11's DataPackage (Microsoft.Maui.Controls) exposes Text,
+// Image and Properties only - there is no typed file/URI member and DataPackageView has no
+// GetFileAsync - so a file or URI cannot be expressed by the Controls contract at all; this
+// slice also has no OS drag session (the gesture is simulated from touches), so nothing could
+// carry one. Nothing is dropped silently on this side: an image/property payload reaches the
+// drop target as-is, and a package without text only gains the source-text fallback below.
+// A URI/file can still ride as Text or as a custom Properties value, which the drop side reads
+// through DataPackageView.GetTextAsync/TryGetValue.
 using Microsoft.Maui;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;

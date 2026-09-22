@@ -6,6 +6,7 @@
 // (startAbility bridge).
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Networking;
+using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
@@ -195,8 +196,17 @@ public sealed class OpenHarmonyClipboard : IClipboard
 /// (0 unknown, 1 none, 2 local, 3 internet) and the shell's NetworkKit observer (netAvailable /
 /// netLost / netCapabilitiesChange / netUnavailable) pushes <see cref="ConnectivityChanged"/>
 /// with the level the host re-read. Off-device the read fails and stays
-/// <see cref="NetworkAccess.Unknown"/>; the pinned ConnectionProfiles stay empty (the host level
-/// does not name the transport).
+/// <see cref="NetworkAccess.Unknown"/>.
+///
+/// <see cref="ConnectionProfiles"/> stays empty because the transport is not on this bridge: the
+/// shell's observer receives a NetCapabilityInfo but discards it and pushes a bare
+/// host.notifyNetworkAccess(), and the host callback (ohos_host_network_access_register)
+/// forwards only the 0/1/2/3 level. The change that would populate the profiles: the shell
+/// forwards the capability bits (for example a CSV/JSON of the NetCapabilityInfo.networkCap
+/// transports: ethernet/wifi/cellular/bluetooth) with the push, the host's network-access
+/// callback grows a capabilities argument (or a companion getter) and this class maps the bits
+/// onto ConnectionProfile values (Ethernet/WiFi/Cellular/Bluetooth). The first network change
+/// reports the gap once instead of silently answering an empty set forever.
 /// </summary>
 public sealed class OpenHarmonyConnectivity : IConnectivity
 {
@@ -205,10 +215,15 @@ public sealed class OpenHarmonyConnectivity : IConnectivity
         OpenHarmonyConnectivityBridge.Changed += OnPlatformNetworkAccessChanged;
     }
 
+    private static bool s_profilesGapLogged;
+
     /// <summary>Live network state read through ohos_host_network_access.</summary>
     public NetworkAccess NetworkAccess => MapNetworkAccess(OpenHarmonyConnectivityBridge.ReadNetworkAccess());
 
-    /// <summary>No transport details over this bridge; kept empty (unchanged from the default).</summary>
+    /// <summary>
+    /// No transport details over this bridge yet (see the type remark): empty is the honest
+    /// answer until the shell forwards the capability bits.
+    /// </summary>
     public IEnumerable<ConnectionProfile> ConnectionProfiles => Array.Empty<ConnectionProfile>();
 
     /// <summary>Raised for every network change the shell reports.</summary>
@@ -224,5 +239,13 @@ public sealed class OpenHarmonyConnectivity : IConnectivity
     };
 
     private void OnPlatformNetworkAccessChanged(int level)
-        => ConnectivityChanged?.Invoke(this, new ConnectivityChangedEventArgs(MapNetworkAccess(level), ConnectionProfiles));
+    {
+        if (!s_profilesGapLogged)
+        {
+            s_profilesGapLogged = true;
+            OpenHarmonyBridge.WriteStatus(
+                "[maui] connectivity: ConnectionProfiles stay empty; the shell's NetworkKit observer discards NetCapabilityInfo and pushes only a level (host.notifyNetworkAccess()), so the transport never reaches this bridge");
+        }
+        ConnectivityChanged?.Invoke(this, new ConnectivityChangedEventArgs(MapNetworkAccess(level), ConnectionProfiles));
+    }
 }

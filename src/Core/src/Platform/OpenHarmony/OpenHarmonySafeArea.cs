@@ -6,13 +6,24 @@
 // surface at its full bounds and each page/content view decides per edge, through MAUI's
 // cross-platform SafeAreaEdges model, whether its content stays out of the avoid area
 // (SafeAreaRegions.None means edge to edge, Container/All/Default keep out of the bars and the
-// cutout, SoftInput only pads for the keyboard - which this slice does not track yet, so it
-// applies nothing). ISafeAreaView is documented as iOS/Mac Catalyst-only, so a view that does
-// not implement ISafeAreaElement falls back to the platform default (Container); that keeps
-// the historical look for container pages such as NavigationPage/Shell/FlyoutPage, whose
-// chrome (the navigation bar) must stay out of the status bar. When the shell reports no avoid
-// area, or the host library is absent (the off-device verification harness), every inset is
-// zero and the arrangement is exactly the historical one.
+// cutout, SoftInput only pads for the keyboard). ISafeAreaView is documented as iOS/Mac
+// Catalyst-only, so a view that does not implement ISafeAreaElement falls back to the platform
+// default (Container); that keeps the historical look for container pages such as
+// NavigationPage/Shell/FlyoutPage, whose chrome (the navigation bar) must stay out of the
+// status bar. When the shell reports no avoid area, or the host library is absent (the
+// off-device verification harness), every inset is zero and the arrangement is exactly the
+// historical one.
+//
+// Soft keyboard (SoftInput edges): the shell reads window.getWindowAvoidArea(TYPE_SYSTEM) once
+// at page start, so the reported insets are the status/navigation bars and the cutout only; the
+// keyboard height never reaches this slice and a SoftInput edge therefore applies nothing (see
+// EdgeAmount). The shell change that would make it expressible: subscribe to
+// window.on('avoidAreaChange') for window.AvoidAreaType.TYPE_SOFT_INPUT (or the
+// keyboardHeightChange event, API 12+) and push the height through a new host notification
+// (host.notifySoftInputArea), which the host stores (ohos_host_set_soft_input_area /
+// ohos_host_get_soft_input_area, mirroring the avoid-area pair); GetWindowInsets would then
+// expose that keyboard inset separately and EdgeAmount would consume it for SoftInput on the
+// bottom edge (the software keyboard overlaps from the bottom only).
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
 
@@ -83,8 +94,8 @@ internal static class OpenHarmonySafeArea
         {
             return 0;
         }
-        // SoftInput pads for the keyboard only; this slice has no keyboard insets, so the
-        // avoid area is not applied on that edge.
+        // SoftInput pads for the keyboard only; the shell reports no keyboard inset (see the
+        // file header), so a SoftInput bottom edge stays at zero instead of guessing a height.
         if (isBottom && region == SafeAreaRegions.SoftInput)
         {
             return 0;

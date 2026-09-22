@@ -52,6 +52,15 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
 
     private SearchHandler? _searchHandler;
     private Microsoft.Maui.Controls.Page? _observedPage;
+    private OpenHarmonyShellChrome? _chrome;
+
+    /// <summary>
+    /// The chrome pieces the compositor can express beyond the title string (a text-producing
+    /// TitleView and the current page's toolbar items); created on first use because it needs
+    /// the platform view.
+    /// </summary>
+    private OpenHarmonyShellChrome Chrome =>
+        _chrome ??= new OpenHarmonyShellChrome(PlatformView, () => OpenHarmonyBridge.RequestRedraw());
 
     /// <summary>Header text rows in FlyoutItems; the flyout selection subtracts them.</summary>
     private int _flyoutLeadingRows;
@@ -125,6 +134,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             shell.Navigated -= OnShellNavigated;
         }
         DetachSearchHandler();
+        _chrome?.Detach();
         base.DisconnectHandler(platformView);
     }
 
@@ -158,8 +168,9 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             case nameof(Shell.FlyoutFooterTemplate):
             case "TabBarIsVisible":
             case "SearchHandler":
+            case "TitleView":
                 // Chrome-only changes: the title/back state did not move, but MapShell rebuilds
-                // the flyout rows and re-asserts Disabled/Locked.
+                // the flyout rows, re-asserts Disabled/Locked and re-reads the title view.
                 MapShell(this, shell);
                 UpdateSearchHandler(shell);
                 if (args.PropertyName is "TabBarIsVisible")
@@ -190,6 +201,11 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             case "TabBarIsVisible":
                 MapShell(this, shell);
                 ArrangeContent();
+                OpenHarmonyBridge.RequestRedraw();
+                break;
+            case "TitleView":
+                // The attached property is usually set on the page; MapShell re-reads it.
+                MapShell(this, shell);
                 OpenHarmonyBridge.RequestRedraw();
                 break;
         }
@@ -269,10 +285,10 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         }
         int index = shell.CurrentItem is { } current ? shell.Items.IndexOf(current) : -1;
         view.SelectedTab = Math.Max(0, index);
-        // Chrome: title bar with the current page's title and a back button when the shell can
-        // navigate back.
+        // Chrome: title bar with the current page's title (or its Label TitleView) and a back
+        // button when the shell can navigate back.
         view.ShowsTitleBar = shell.GetValue(Microsoft.Maui.Controls.Shell.NavBarIsVisibleProperty) is not bool navBar || navBar;
-        view.TitleText = shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
+        handler.Chrome.Apply(shell);
         view.ShowsBack = CurrentStackDepth(shell) > 1;
         if (view.ShowsBack)
         {

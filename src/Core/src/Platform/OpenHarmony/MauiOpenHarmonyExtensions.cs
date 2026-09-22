@@ -14,6 +14,11 @@ public static class MauiOpenHarmonyExtensions
     /// </summary>
     internal static readonly Dictionary<Type, Type> SliceHandlers = new()
     {
+        // The application handler is registered here as well as attached directly by
+        // OpenHarmonyMauiAppHost.Run (which must set Application.Handler before the first window
+        // exists); the registration keeps it resolvable through the standard MAUI handler
+        // collection and through OpenHarmonyHandlerConnector's interface walk.
+        [typeof(IApplication)] = typeof(OpenHarmonyApplicationHandler),
         [typeof(ILabel)] = typeof(OpenHarmonyLabelHandler),
         [typeof(IButton)] = typeof(OpenHarmonyButtonHandler),
         [typeof(ILayout)] = typeof(OpenHarmonyLayoutHandler),

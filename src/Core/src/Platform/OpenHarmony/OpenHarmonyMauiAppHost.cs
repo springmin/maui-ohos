@@ -17,6 +17,7 @@ public sealed class OpenHarmonyMauiAppHost
     private int _height;
     private bool _dirty = true;
     private bool _created;
+    private bool _activated;
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
@@ -90,7 +91,7 @@ public sealed class OpenHarmonyMauiAppHost
                         // exists); the platform event carries the activation, so raise Created
                         // first and only once.
                         EnsureWindowCreated();
-                        _window?.Activated();
+                        EnsureWindowActivated();
                         break;
                     case OpenHarmonyLifecycleEvent.Foreground:
                         _window?.Resumed();
@@ -134,6 +135,9 @@ public sealed class OpenHarmonyMauiAppHost
         ArgumentNullException.ThrowIfNull(application);
         // The ArkTS shell may report the device theme before the application exists; apply it now.
         OpenHarmonyTheme.Attach(application as Microsoft.Maui.Controls.Application);
+        // Application.Handler comes first so Application.Windows and the application-level
+        // commands (OpenWindow/CloseWindow/ActivateWindow/Quit) are live before any window.
+        AttachApplicationHandler(application);
         _window = application.CreateWindow(null) ?? application.Windows.FirstOrDefault();
         if (_window is null)
         {
@@ -164,6 +168,95 @@ public sealed class OpenHarmonyMauiAppHost
         }
         _created = true;
         _window.Created();
+    }
+
+    /// <summary>
+    /// Raises <see cref="IWindow.Activated"/> exactly once per window: the platform Create event
+    /// carries the activation, and a window adopted later (through
+    /// <see cref="OpenHarmonyApplicationHandler"/>'s OpenWindow) is activated directly, so the
+    /// guard keeps a repeated platform event from raising Activated twice.
+    /// </summary>
+    private void EnsureWindowActivated()
+    {
+        if (_activated || _window is null)
+        {
+            return;
+        }
+        _activated = true;
+        _window.Activated();
+    }
+
+    /// <summary>
+    /// Attaches the OpenHarmony <see cref="IApplication"/> handler before any window is created,
+    /// so <c>Application.Handler</c> is non-null and the application-level commands are live from
+    /// the start. An application that already has a handler (a custom bootstrap) keeps it.
+    /// </summary>
+    private void AttachApplicationHandler(IApplication application)
+    {
+        if (application.Handler is OpenHarmonyApplicationHandler attached)
+        {
+            attached.Host = this;
+            return;
+        }
+        if (application.Handler is not null)
+        {
+            return;
+        }
+        var handler = new OpenHarmonyApplicationHandler();
+        handler.SetMauiContext(_context);
+        application.Handler = handler;
+        handler.Host = this;
+        OpenHarmonyBridge.WriteStatus("[maui] application handler attached");
+    }
+
+    /// <summary>
+    /// Makes <paramref name="window"/> the host's single live window: connects the slice handlers,
+    /// arranges it for the last reported surface size, raises Created and (the platform is already
+    /// foregrounded when a window is adopted after startup) Activated, and starts rendering.
+    /// Returns false when another window is already live.
+    /// </summary>
+    internal bool TryAdoptWindow(IWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        if (_window is not null)
+        {
+            // One live window: the same window is already adopted, a different one cannot be shown.
+            return ReferenceEquals(_window, window);
+        }
+        _window = window;
+        _created = false;
+        _activated = false;
+        OpenHarmonyHandlerConnector.Context = _context;
+        OpenHarmonyHandlerConnector.ConnectTree(_window);
+        OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] window adopted ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
+        EnsureWindowCreated();
+        EnsureWindowActivated();
+        if (_width > 0)
+        {
+            Arrange(_width, _height);
+        }
+        _dirty = true;
+        return true;
+    }
+
+    /// <summary>
+    /// Drops the host's reference to a window the application handler closed. Destroying already
+    /// removed it from Application.Windows and disconnected its handler; the shell's window stays
+    /// open, so the next OpenWindow can adopt a window on the same surface.
+    /// </summary>
+    internal void NotifyWindowClosed(IWindow window)
+    {
+        if (!ReferenceEquals(_window, window))
+        {
+            return;
+        }
+        _window = null;
+        _created = false;
+        _activated = false;
+        _dirty = true;
+        OpenHarmonyBridge.WriteStatus("[maui] window closed; the host has no live window");
     }
 
     /// <summary>Measures/arranges the current window content for the given surface size.</summary>

@@ -14,8 +14,10 @@
 //     the selection so item taps still land on the right shell item). A rich View/DataTemplate
 //     section cannot be drawn by the compositor and is only tracked (OpenHarmonyShellExtras).
 //   * SearchHandler: attach/detach, query, placeholder and visibility are tracked per current
-//     page (and per shell) in OpenHarmonyShellExtras; a search field needs the ArkUI bridge
-//     documented there (no host export exists in this slice).
+//     page (and per shell) in OpenHarmonyShellExtras and published through
+//     ohos_host_shell_search_set; the shell's notifyShellSearch edits return through the
+//     listener (op 0 query / 1 submit / 2 cancel, registered with
+//     ohos_host_shell_search_set_listener).
 using System.ComponentModel;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;

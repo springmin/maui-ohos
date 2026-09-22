@@ -1,4 +1,5 @@
 // IAppInfo / IDeviceInfo / IVersionTracking for OpenHarmony.
+using System.Runtime.InteropServices;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Devices;
 using Microsoft.Maui.Storage;
@@ -6,29 +7,128 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
+/// <summary>
+/// The HAP bundle metadata the ArkTS shell publishes once at page load
+/// (bundleManager.getBundleInfoForSelfSync -> host.setBundleInfo) and the native host stores.
+/// Each read is guarded: a desktop build without libopenharmonyhost.so (or an older host
+/// library without the export) reports null and the callers keep their documented fallbacks.
+/// </summary>
+internal static class OpenHarmonyBundleInfoBridge
+{
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_version")]
+    private static extern IntPtr GetVersionNative();
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_build")]
+    private static extern IntPtr GetBuildNative();
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_name")]
+    private static extern IntPtr GetNameNative();
+
+    private static bool s_unavailable;
+
+    internal static string? Version => Read(GetVersionNative);
+    internal static string? Build => Read(GetBuildNative);
+    internal static string? Name => Read(GetNameNative);
+
+    private static string? Read(Func<IntPtr> getter)
+    {
+        if (s_unavailable)
+        {
+            return null;
+        }
+        try
+        {
+            IntPtr value = getter();
+            string text = value == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(value) ?? string.Empty;
+            return text.Length == 0 ? null : text;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_unavailable = true;
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// Opens the system settings app (IAppInfo.ShowSettingsUI) through the shared ability-start host
+/// entry point with kind 4 (uri = bundle name, text = ability name). The ArkTS shell tries the
+/// explicit Want (com.ohos.settings / com.ohos.settings.MainAbility) first and falls back to the
+/// implicit 'ohos.settings' action; false means neither the host library nor the shell sink
+/// answered, and the caller logs the documented no-op.
+/// </summary>
+internal static class OpenHarmonySettingsBridge
+{
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    /// <summary>Ability kind: explicit Want carried as (uri = bundle name, text = ability name).</summary>
+    private const int KindSettings = 4;
+
+    private const string SettingsBundle = "com.ohos.settings";
+    private const string SettingsAbility = "com.ohos.settings.MainAbility";
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_ability_start", CharSet = CharSet.Ansi)]
+    private static extern int AbilityStart(int kind, string uri, string text);
+
+    private static bool s_unavailable;
+
+    internal static bool ShowSettings()
+    {
+        if (s_unavailable)
+        {
+            return false;
+        }
+        try
+        {
+            return AbilityStart(KindSettings, SettingsBundle, SettingsAbility) == 0;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_unavailable = true;
+            return false;
+        }
+    }
+}
+
 public sealed class OpenHarmonyAppInfo : IAppInfo
 {
+    /// <summary>The documented package-name fallback when the host has none (desktop builds).</summary>
+    internal const string FallbackPackageName = "com.example.app";
+
+    /// <summary>The documented version fallback (the pre-bridge constant).</summary>
+    internal const string FallbackVersion = "1.0.0";
+
     /// <summary>
-    /// The HAP's bundleName, reported by the host (OpenHarmonyBridge.Context.BundleName). The
-    /// fallback only appears when the host library is absent (desktop builds).
+    /// The HAP's bundleName: the live bundle info published by the shell (host.setBundleInfo)
+    /// first, then the context bridge (OpenHarmonyBridge.Context.BundleName), then the
+    /// documented fallback.
     /// </summary>
-    public string PackageName => OpenHarmonyBridge.Context?.BundleName ?? "com.example.app";
+    public string PackageName => OpenHarmonyBundleInfoBridge.Name ?? OpenHarmonyBridge.Context?.BundleName ?? FallbackPackageName;
 
     /// <summary>
     /// OpenHarmony's app label lives in the HAP resources; the bundle name is the only app
-    /// identity the host bridge exposes, so it is used here too.
+    /// identity the bridge exposes, so it is used here too (context first, bundle info second).
     /// </summary>
-    public string Name => OpenHarmonyBridge.Context?.BundleName ?? "OpenHarmony app";
+    public string Name => OpenHarmonyBridge.Context?.BundleName ?? OpenHarmonyBundleInfoBridge.Name ?? "OpenHarmony app";
 
-    // VersionString/Version/BuildString: the version is declared in the HAP's module.json5 and
-    // the SDK reads it with bundleManager.getBundleInfoForSelf (an ArkTS API). The host bridge
-    // has no bundle-info export yet, so these stay the documented constants until one is added
-    // (the same shape as the shell's bundle manager would need: ohos_host_bundle_version).
-    public string VersionString => "1.0.0";
+    /// <summary>
+    /// The HAP's versionName (module.json5 versionName), read from the bundle manager by the
+    /// shell and stored by the native host; the documented constant is kept as the fallback when
+    /// the host library or the shell publish is unavailable (desktop builds, older shells).
+    /// </summary>
+    public string VersionString => OpenHarmonyBundleInfoBridge.Version ?? FallbackVersion;
 
-    public Version Version => new(1, 0, 0);
+    /// <summary>Parsed from <see cref="VersionString"/>; the fallback is the documented 1.0.0.</summary>
+    public Version Version =>
+        System.Version.TryParse(VersionString, out System.Version? parsed) ? parsed : new Version(1, 0, 0);
 
-    public string BuildString => VersionString;
+    /// <summary>
+    /// The HAP's versionCode as text, published by the shell; falls back to
+    /// <see cref="VersionString"/> when the host has no build value.
+    /// </summary>
+    public string BuildString => OpenHarmonyBundleInfoBridge.Build ?? VersionString;
 
     /// <summary>
     /// The OS colour mode last reported by the ArkTS shell through the theme bridge
@@ -47,19 +147,27 @@ public sealed class OpenHarmonyAppInfo : IAppInfo
     public LayoutDirection RequestedLayoutDirection => LayoutDirection.LeftToRight;
 
     /// <summary>
-    /// Documented no-op: OpenHarmony opens app settings through an explicit startAbility Want
-    /// with bundleName com.ohos.settings + its MainAbility (there is no settings: URI handler),
-    /// and this slice's ability bridge only carries URI/action Wants. Needs a new host/shell
-    /// ability kind that starts an explicit bundleName/abilityName Want (reported, no shell
-    /// change in this increment).
+    /// Opens the system settings app through the shell: kind 4 carries the explicit
+    /// com.ohos.settings Want and the shell falls back to the implicit 'ohos.settings' action
+    /// when it does not resolve. A failed dispatch (no host library, no shell sink) is logged
+    /// and otherwise a no-op, like every unavailable platform path in this slice.
     /// </summary>
     public void ShowSettingsUI()
     {
+        if (!OpenHarmonySettingsBridge.ShowSettings())
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] settings UI could not be dispatched");
+        }
     }
 
-    /// <inheritdoc cref="ShowSettingsUI()"/>
+    /// <summary>
+    /// Same as <see cref="ShowSettingsUI()"/> with the page name ignored: this slice's ability
+    /// bridge carries one bundle/ability pair per launch and OpenHarmony settings sub-pages are
+    /// addressed with app-specific URIs the slice cannot map, so the settings home is opened.
+    /// </summary>
     public void ShowSettingsUI(string page)
     {
+        ShowSettingsUI();
     }
 }
 

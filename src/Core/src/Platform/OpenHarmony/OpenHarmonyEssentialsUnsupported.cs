@@ -6,8 +6,12 @@
 // answer when the shell or the host library is unavailable. IPermissions covers the full MAUI
 // permission set (every nested type of Permissions in Microsoft.Maui.Essentials rc.1) against
 // the permission names declared by the installed OpenHarmony SDK (ets/api/permissions.d.ts and
-// toolchains/lib/PermissionDefinitions.json); the one type the permission model cannot answer
-// (PostNotifications) is documented in the map below.
+// toolchains/lib/PermissionDefinitions.json); the one type the abilityAccessCtrl model cannot
+// answer (PostNotifications) rides its own enablement bridge
+// (notificationManager.isNotificationEnabledSync / requestEnableNotification in the shell)
+// documented in the map below.
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Devices;
 using Microsoft.Maui.Media;
@@ -98,33 +102,53 @@ public sealed class OpenHarmonyPermissions : IPermissions
         [typeof(Permissions.StorageRead)] = new[] { "ohos.permission.READ_IMAGEVIDEO" },
         [typeof(Permissions.StorageWrite)] = new[] { "ohos.permission.WRITE_IMAGEVIDEO" },
         [typeof(Permissions.Vibrate)] = new[] { "ohos.permission.VIBRATE" },
-        // UNMAPPABLE, kept out of the map on purpose: Permissions.PostNotifications has no
-        // abilityAccessCtrl counterpart - OpenHarmony does not gate notification publishing
-        // behind a permission (the per-app notification switch is
-        // notificationManager.requestEnableNotification, a system dialog, and
-        // NOTIFICATION_CONTROLLER is system_core). CheckStatusAsync answers Unknown and
-        // RequestAsync answers Denied for it, documented instead of pretending a permission.
+        // NOT in this map on purpose: Permissions.PostNotifications has no abilityAccessCtrl
+        // counterpart - OpenHarmony does not gate notification publishing behind a permission
+        // (the per-app notification switch is notificationManager.requestEnableNotification, a
+        // system dialog, and NOTIFICATION_CONTROLLER is system_core). CheckStatusAsync and
+        // RequestAsync special-case it below through OpenHarmonyNotificationPermissionBridge
+        // (op 0 reads isNotificationEnabledSync, op 1 shows requestEnableNotification); when the
+        // bridge does not answer they keep the documented fallbacks - Unknown for a status
+        // check, Denied for a request.
     };
 
-    public Task<PermissionStatus> CheckStatusAsync<TPermission>() where TPermission : Permissions.BasePermission, new()
+    public async Task<PermissionStatus> CheckStatusAsync<TPermission>() where TPermission : Permissions.BasePermission, new()
     {
+        if (typeof(TPermission) == typeof(Permissions.PostNotifications))
+        {
+            // PostNotifications is not an abilityAccessCtrl permission: the shell reads the
+            // system enable state (no dialog). A missing bridge keeps the documented Unknown.
+            bool? enabled = await OpenHarmonyNotificationPermissionBridge
+                .RequestAsync(OpenHarmonyNotificationPermissionBridge.QueryOp, OpenHarmonyNotificationPermissionBridge.RequestTimeout)
+                .ConfigureAwait(false);
+            return enabled is null ? PermissionStatus.Unknown : (enabled.Value ? PermissionStatus.Granted : PermissionStatus.Denied);
+        }
         if (!PermissionNames.TryGetValue(typeof(TPermission), out string[]? names))
         {
-            // Unmappable MAUI permission (see PostNotifications above).
-            return Task.FromResult(PermissionStatus.Unknown);
+            // Unmappable MAUI permission (see the map comment above).
+            return PermissionStatus.Unknown;
         }
         foreach (string name in names)
         {
             if (!OpenHarmonyBridge.CheckSelfPermission(name))
             {
-                return Task.FromResult(PermissionStatus.Denied);
+                return PermissionStatus.Denied;
             }
         }
-        return Task.FromResult(PermissionStatus.Granted);
+        return PermissionStatus.Granted;
     }
 
     public async Task<PermissionStatus> RequestAsync<TPermission>() where TPermission : Permissions.BasePermission, new()
     {
+        if (typeof(TPermission) == typeof(Permissions.PostNotifications))
+        {
+            // The shell shows the system enable dialog (or only re-reads the state when the
+            // dialog cannot be shown); a missing bridge keeps the documented Denied.
+            bool? enabled = await OpenHarmonyNotificationPermissionBridge
+                .RequestAsync(OpenHarmonyNotificationPermissionBridge.RequestOp, OpenHarmonyNotificationPermissionBridge.RequestTimeout)
+                .ConfigureAwait(false);
+            return enabled is true ? PermissionStatus.Granted : PermissionStatus.Denied;
+        }
         if (!PermissionNames.TryGetValue(typeof(TPermission), out string[]? names))
         {
             // Unmappable MAUI permission: keep the documented Denied answer (CheckStatusAsync
@@ -185,6 +209,129 @@ public sealed class OpenHarmonyPermissions : IPermissions
     /// </summary>
     public void EnsureDeclared<TPermission>() where TPermission : Permissions.BasePermission, new()
     {
+    }
+}
+
+/// <summary>
+/// Notification enablement for Permissions.PostNotifications over the same host/ArkTS
+/// request/response shape as OpenHarmonyPermissionBridge: op 0 reads the system enable state
+/// (notificationManager.isNotificationEnabledSync, no dialog) and op 1 asks the system to show
+/// its enable dialog (requestEnableNotification). The answer is the enable state after the call;
+/// null means the host library/sink is unavailable or did not answer inside the timeout, and
+/// the caller keeps its documented fallback (Unknown for a check, Denied for a request).
+/// </summary>
+internal static class OpenHarmonyNotificationPermissionBridge
+{
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    /// <summary>Read the current enable state; never shows a dialog.</summary>
+    internal const int QueryOp = 0;
+
+    /// <summary>Ask the system to show its enable dialog, then answer the resulting state.</summary>
+    internal const int RequestOp = 1;
+
+    /// <summary>The enable dialog is user-driven, so the timeout only bounds a lost answer.</summary>
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_notification_permission_request")]
+    private static extern void RequestNative(int op, int requestId);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_notification_permission_register_result")]
+    private static extern void RegisterResultNative(IntPtr callback);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void NotificationPermissionResultCallback(int requestId, int granted);
+
+    private static readonly object s_sync = new();
+    private static readonly Dictionary<int, TaskCompletionSource<bool>> s_pending = new();
+    private static NotificationPermissionResultCallback? s_callback;
+    private static bool s_registered;
+    private static bool s_unavailable;
+    private static int s_nextRequestId;
+
+    [ModuleInitializer]
+    internal static void Initialize() => Register();
+
+    /// <summary>Registers the native result callback; a guarded no-op off-device.</summary>
+    internal static void Register()
+    {
+        if (s_registered || s_unavailable)
+        {
+            return;
+        }
+        try
+        {
+            s_callback = OnNativeNotificationPermissionResult;
+            RegisterResultNative(Marshal.GetFunctionPointerForDelegate(s_callback));
+            s_registered = true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_unavailable = true;
+        }
+    }
+
+    /// <summary>
+    /// Runs one enablement op. Returns the granted/enabled flag, or null when the host
+    /// library/sink is unavailable, the request could not be dispatched or the shell did not
+    /// answer inside <paramref name="timeout"/>.
+    /// </summary>
+    internal static async Task<bool?> RequestAsync(int op, TimeSpan timeout)
+    {
+        if (!s_registered)
+        {
+            Register();
+            if (s_unavailable)
+            {
+                return null;
+            }
+        }
+        int requestId = Interlocked.Increment(ref s_nextRequestId);
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (s_sync)
+        {
+            s_pending[requestId] = completion;
+        }
+        bool dispatched = true;
+        try
+        {
+            RequestNative(op, requestId);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            dispatched = false;
+        }
+        if (!dispatched)
+        {
+            lock (s_sync)
+            {
+                s_pending.Remove(requestId);
+            }
+            return null;
+        }
+        Task finished = await Task.WhenAny(completion.Task, Task.Delay(timeout)).ConfigureAwait(false);
+        if (finished != completion.Task)
+        {
+            lock (s_sync)
+            {
+                s_pending.Remove(requestId);
+            }
+            return null;
+        }
+        return await completion.Task.ConfigureAwait(false);
+    }
+
+    private static void OnNativeNotificationPermissionResult(int requestId, int granted)
+    {
+        TaskCompletionSource<bool>? completion;
+        lock (s_sync)
+        {
+            if (!s_pending.Remove(requestId, out completion))
+            {
+                return;
+            }
+        }
+        completion?.TrySetResult(granted != 0);
     }
 }
 

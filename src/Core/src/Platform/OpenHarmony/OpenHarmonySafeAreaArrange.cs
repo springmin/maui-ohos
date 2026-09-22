@@ -2,8 +2,10 @@
 // chain the same way OpenHarmonyContentArrange does, but pad each page/content view by the part
 // of the window's avoid area it asks to obey instead of insetting the whole surface. Only the
 // first content view of a page consumes the insets; the views below are arranged inside the
-// padded frame, so they are not padded again. With no reported avoid area the arrangement is
-// delegated to OpenHarmonyContentArrange unchanged.
+// padded frame, so they are not padded again. The keyboard inset is consumed the same way (a
+// page with SafeAreaEdges.SoftInput/All pads above the keyboard through Pad). With no reported
+// avoid area and no keyboard the arrangement is delegated to OpenHarmonyContentArrange
+// unchanged.
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 
@@ -20,7 +22,10 @@ internal static class OpenHarmonySafeAreaArrange
     /// </summary>
     internal static void Arrange(IView view, Rect frame, Rect windowBounds, Thickness insets, int depth = 0)
     {
-        if (OpenHarmonySafeArea.IsEmpty(insets))
+        // No system insets and no keyboard: exactly the historical arrangement. A keyboard-only
+        // state (soft input > 0) still goes through the safe-area walk, because Pad consumes
+        // the keyboard inset for SoftInput/All edges.
+        if (OpenHarmonySafeArea.IsEmpty(insets) && !OpenHarmonySafeArea.HasSoftInput())
         {
             OpenHarmonyContentArrange.Arrange(view, frame, depth);
             return;

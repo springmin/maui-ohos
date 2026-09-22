@@ -1,13 +1,25 @@
 // Launcher / Browser / Share for OpenHarmony through the ArkTS shell's startAbility bridge.
 //
 // The managed side forwards a request to the ArkTS shell through the native host
-// (ohos_host_ability_start): kind 0 opens a URI (Launcher/Browser) with an implicit
-// ohos.want.action.viewData Want, kind 1 shares plain text with ohos.want.action.sendData,
-// kind 2 is a no-launch availability probe used by Launcher.CanOpenAsync, and kind 3 shares a
-// file with an implicit ohos.want.action.sendData Want (uri = file:// URI, type = MIME type,
-// flags = wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION). The shell sink
+// (ohos_host_ability_start / ohos_host_ability_start_ex): kind 0 opens a URI (Launcher/Browser)
+// with an implicit ohos.want.action.viewData Want, kind 1 shares plain text with
+// ohos.want.action.sendData, kind 2 is a no-launch availability probe used by
+// Launcher.CanOpenAsync, and kind 3 shares a file with an implicit ohos.want.action.sendData
+// Want (uri = file:// URI, type = MIME type, flags =
+// wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION). The shell sink
 // (host.registerAbilitySink) imports @ohos.app.ability.common plus @ohos.app.ability.Want and
 // calls UIAbilityContext.startAbility.
+//
+// The five-argument host export (ohos_host_ability_start_ex, reached through the same DllImport
+// pair as the three-argument form) carries the optional content title and the Want flags:
+// - Title: ShareTextRequest.Title/Subject and ShareFileRequest.Title (and OpenFileRequest.Title)
+//   travel under wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle'),
+//   which the shell sets on the Want when non-empty. An older host library without the
+//   five-argument export only gets the three-argument call, and the dropped title is noted once.
+// - Read grant: a file:// URI opened with kind 0 also sets
+//   wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION (passed through the flags argument and,
+//   independently, applied by the shell for a file:// kind 0 uri), so the ability manager can
+//   grant the receiver read access to the app-sandbox file. Kind 3 always carried it.
 //
 // The host and the shell can only report whether the request was dispatched (the Want may still
 // fail to match in the ability manager afterwards); every native call degrades to false / a
@@ -22,30 +34,17 @@
 //   which does not exist in this slice, and the in-app-only knobs (TitleMode, the toolbar and
 //   control colors, the launch flags) have no Want representation; such a request is still
 //   dispatched to the external handler and noted once.
-// - ShareTextRequest forwards Text (falling back to Uri); Subject and Title are not transmitted
-//   because the sink carries only the content slot. The shell's sendData Want would need
-//   wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle') fed from a
-//   fourth sink argument (ohos_host_ability_start carries three today); a title/subject is
-//   noted once until that bridge exists. ShareFileRequest/ShareMultipleFilesRequest.Title is
-//   dropped for the same reason.
-// - Launching a file (OpenAsync(OpenFileRequest)) dispatches a file:// URI as a viewData Want
-//   (kind 0), which carries no flags, so the ability manager grants the receiver no read access
-//   to the app-sandbox file. The shell change is small and does not touch the protocol: set
-//   wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION on the kind 0 Want when the uri starts with
-//   file:// (kind 3 already sets it); the missing grant is noted once.
+// - Sharing more than one file has no carrier (the bridge sends one uri per Want and this SDK
+//   has no Share Kit systemShare), so ShareMultipleFilesRequest stays a documented no-op
+//   reported once instead of per request.
 // - CanOpenAsync reports whether the ability bridge is available, not whether an installed
 //   ability matches the URI (OpenHarmony has no synchronous URI-handler query here).
 // - File sharing (kind 3) goes through an implicit sendData Want because this SDK has no Share
-//   Kit (systemShare). The shell sets wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
-//   (declared as 0x1 in @ohos.app.ability.wantConstant, verified by typecheck) so the ability
-//   manager can grant the chosen receiver read access to the file:// URI; whether the receiver
-//   honours the grant and can read the sandbox file is device- and app-dependent.
-// - The bridge carries one URI per Want, so ShareMultipleFilesRequest dispatches only when it
-//   holds exactly one file; with more files it stays a documented no-op (the missing Share Kit
-//   is the multi-file carrier on this platform) reported once instead of per request.
-// - Plain-text sharing through ohos.want.action.sendData has no wantConstant key in this SDK;
-//   the shell sends the text under 'ohos.extra.param.key.content', the key used by the
-//   OpenHarmony ecosystem samples that predate Share Kit.
+//   Kit (systemShare); whether the receiver honours the read grant and can read the sandbox
+//   file is device- and app-dependent.
+// - Plain-text sharing through ohos.want.action.sendData has no wantConstant key for the body
+//   in this SDK; the shell sends the text under 'ohos.extra.param.key.content', the key used by
+//   the OpenHarmony ecosystem samples that predate Share Kit.
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -72,31 +71,64 @@ internal static class OpenHarmonyAbilityBridge
     /// <summary>Share: send a file URI plus its MIME type with an implicit sendData Want.</summary>
     private const int KindShareFile = 3;
 
+    /// <summary>ohos_host_ability_start_ex flags: bit 0 = FLAG_AUTH_READ_URI_PERMISSION.</summary>
+    private const int FlagReadUriPermission = 0x1;
+
     [DllImport(HostLibrary, EntryPoint = "ohos_host_ability_start")]
     private static extern int AbilityStart(int kind, string uri, string text);
 
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_ability_start_ex")]
+    private static extern int AbilityStartEx(int kind, string uri, string text, string title, int flags);
+
     private static bool s_available = true;
+    private static bool s_exAvailable = true;
 
     /// <summary>True when the host library exports the entry point and the shell sink is registered.</summary>
-    public static bool IsAvailable => Dispatch(KindProbe, string.Empty, string.Empty);
+    public static bool IsAvailable => Dispatch(KindProbe, string.Empty, string.Empty, string.Empty, 0);
 
     /// <summary>Asks the shell to open a URI; false when the bridge or the shell sink is unavailable.</summary>
-    public static bool TryOpenUri(string uri) => Dispatch(KindOpenUri, uri, string.Empty);
+    public static bool TryOpenUri(string uri, string? title = null)
+        => Dispatch(KindOpenUri, uri, string.Empty, title ?? string.Empty,
+            IsFileUri(uri) ? FlagReadUriPermission : 0);
 
     /// <summary>Asks the shell to share plain text; false when the bridge or the shell sink is unavailable.</summary>
-    public static bool TryShareText(string text) => Dispatch(KindShareText, string.Empty, text);
+    public static bool TryShareText(string text, string? title = null)
+        => Dispatch(KindShareText, string.Empty, text, title ?? string.Empty, 0);
 
     /// <summary>
     /// Asks the shell to share one file: <paramref name="fileUri"/> is the file:// URI and
     /// <paramref name="mimeType"/> the Want type; false when the bridge or sink is unavailable.
     /// </summary>
-    public static bool TryShareFile(string fileUri, string mimeType) => Dispatch(KindShareFile, fileUri, mimeType);
+    public static bool TryShareFile(string fileUri, string mimeType, string? title = null)
+        => Dispatch(KindShareFile, fileUri, mimeType, title ?? string.Empty, 0);
 
-    private static bool Dispatch(int kind, string uri, string text)
+    private static bool Dispatch(int kind, string uri, string text, string title, int flags)
     {
         if (!s_available)
         {
             return false;
+        }
+        if (s_exAvailable)
+        {
+            try
+            {
+                return AbilityStartEx(kind, uri, text, title, flags) == 0;
+            }
+            catch (DllNotFoundException)
+            {
+                // An older host library without the five-argument export: fall back below.
+                s_exAvailable = false;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                s_exAvailable = false;
+            }
+        }
+        if (!string.IsNullOrEmpty(title))
+        {
+            // The three-argument form cannot carry the title; note it once instead of dropping
+            // it silently (a five-argument host library would have transmitted it).
+            OpenHarmonyAbilityLog.TitleDroppedOnce();
         }
         try
         {
@@ -113,6 +145,9 @@ internal static class OpenHarmonyAbilityBridge
             return false;
         }
     }
+
+    private static bool IsFileUri(string uri) =>
+        uri.StartsWith("file://", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -124,11 +159,13 @@ internal static class OpenHarmonyAbilityBridge
 internal static class OpenHarmonyAbilityLog
 {
     private static bool s_titleDropped;
-    private static bool s_fileReadGrantMissing;
     private static bool s_browserOptionsIgnored;
     private static bool s_multipleFilesDropped;
 
-    /// <summary>Share/launch titles have no slot in the three-argument ability sink.</summary>
+    /// <summary>
+    /// A title/subject could not ride the three-argument ability sink: this host library lacks
+    /// ohos_host_ability_start_ex, so wantConstant.Params.CONTENT_TITLE_KEY was not set.
+    /// </summary>
     public static void TitleDroppedOnce()
     {
         if (s_titleDropped)
@@ -137,21 +174,8 @@ internal static class OpenHarmonyAbilityLog
         }
         s_titleDropped = true;
         OpenHarmonyBridge.WriteStatus(
-            "[maui] ability bridge: Title/Subject was not transmitted (the startAbility sink carries one content slot); " +
-            "the shell would need wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle') fed from a fourth sink argument");
-    }
-
-    /// <summary>A file:// launched with viewData carries no read grant for the receiver.</summary>
-    public static void FileReadGrantMissingOnce()
-    {
-        if (s_fileReadGrantMissing)
-        {
-            return;
-        }
-        s_fileReadGrantMissing = true;
-        OpenHarmonyBridge.WriteStatus(
-            "[maui] launcher: a file:// uri was opened as a viewData Want without FLAG_AUTH_READ_URI_PERMISSION; " +
-            "the receiving ability may not read the app-sandbox file - the shell must set the flag for file:// uris in the kind 0 branch (kind 3 already does)");
+            "[maui] ability bridge: Title/Subject was not transmitted (this host library has no ohos_host_ability_start_ex export); " +
+            "the shell would set wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle') when it receives one");
     }
 
     /// <summary>The in-app browser and its options have no startAbility representation.</summary>
@@ -214,27 +238,15 @@ public sealed class OpenHarmonyLauncher : ILauncher
         {
             return Task.FromResult(false);
         }
-        // file:// URIs are what viewData handlers expect; the bridge cannot carry the read grant
-        // (see the header), so the missing FLAG_AUTH_READ_URI_PERMISSION is noted once for a
-        // dispatched file:// launch. OpenFileRequest.Title has no slot in the Want either.
+        // file:// URIs are what viewData handlers expect; the bridge sets the read grant for a
+        // file:// uri and carries OpenFileRequest.Title under CONTENT_TITLE_KEY (see the header).
         string location = Uri.TryCreate(path, UriKind.Absolute, out Uri? fileUri) && fileUri.IsFile
             ? fileUri.AbsoluteUri
             : path;
-        bool dispatched = OpenHarmonyAbilityBridge.TryOpenUri(location);
+        bool dispatched = OpenHarmonyAbilityBridge.TryOpenUri(location, request!.Title);
         if (!dispatched)
         {
             OpenHarmonyBridge.WriteStatus("[maui] launcher could not dispatch the file request");
-        }
-        else
-        {
-            if (location.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
-            {
-                OpenHarmonyAbilityLog.FileReadGrantMissingOnce();
-            }
-            if (!string.IsNullOrEmpty(request!.Title))
-            {
-                OpenHarmonyAbilityLog.TitleDroppedOnce();
-            }
         }
         return Task.FromResult(dispatched);
     }
@@ -308,14 +320,12 @@ public sealed class OpenHarmonyShare : IShare
         {
             text = request?.Uri;
         }
-        if (!string.IsNullOrEmpty(text) &&
-            (!string.IsNullOrEmpty(request!.Subject) || !string.IsNullOrEmpty(request.Title)))
-        {
-            // The sink sends the content slot only (see the header); the title/subject note is
-            // once per process instead of per request.
-            OpenHarmonyAbilityLog.TitleDroppedOnce();
-        }
-        if (string.IsNullOrEmpty(text) || !OpenHarmonyAbilityBridge.TryShareText(text))
+        // The content title travels under CONTENT_TITLE_KEY (Title first, then Subject); with a
+        // host library that has no five-argument export the title is noted once (see Dispatch).
+        string title = !string.IsNullOrEmpty(request?.Title)
+            ? request!.Title
+            : (request?.Subject ?? string.Empty);
+        if (string.IsNullOrEmpty(text) || !OpenHarmonyAbilityBridge.TryShareText(text, title))
         {
             OpenHarmonyBridge.WriteStatus("[maui] share request could not be dispatched");
         }
@@ -330,11 +340,7 @@ public sealed class OpenHarmonyShare : IShare
             OpenHarmonyBridge.WriteStatus("[maui] share file request had no file path");
             return Task.CompletedTask;
         }
-        if (!string.IsNullOrEmpty(request!.Title))
-        {
-            OpenHarmonyAbilityLog.TitleDroppedOnce();
-        }
-        if (!OpenHarmonyAbilityBridge.TryShareFile(FileUriForPath(path), MimeTypeForPath(path)))
+        if (!OpenHarmonyAbilityBridge.TryShareFile(FileUriForPath(path), MimeTypeForPath(path), request!.Title))
         {
             OpenHarmonyBridge.WriteStatus($"[maui] share file request could not be dispatched ({MimeTypeForPath(path)})");
         }
@@ -363,11 +369,7 @@ public sealed class OpenHarmonyShare : IShare
             OpenHarmonyBridge.WriteStatus("[maui] share multiple files request had no file path");
             return Task.CompletedTask;
         }
-        if (!string.IsNullOrEmpty(request!.Title))
-        {
-            OpenHarmonyAbilityLog.TitleDroppedOnce();
-        }
-        if (!OpenHarmonyAbilityBridge.TryShareFile(FileUriForPath(path), MimeTypeForPath(path)))
+        if (!OpenHarmonyAbilityBridge.TryShareFile(FileUriForPath(path), MimeTypeForPath(path), request!.Title))
         {
             OpenHarmonyBridge.WriteStatus($"[maui] share file request could not be dispatched ({MimeTypeForPath(path)})");
         }

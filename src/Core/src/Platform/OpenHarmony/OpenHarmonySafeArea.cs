@@ -6,7 +6,7 @@
 // surface at its full bounds and each page/content view decides per edge, through MAUI's
 // cross-platform SafeAreaEdges model, whether its content stays out of the avoid area
 // (SafeAreaRegions.None means edge to edge, Container/All/Default keep out of the bars and the
-// cutout, SoftInput only pads for the keyboard). ISafeAreaView is documented as iOS/Mac
+// cutout, SoftInput pads for the keyboard). ISafeAreaView is documented as iOS/Mac
 // Catalyst-only, so a view that does not implement ISafeAreaElement falls back to the platform
 // default (Container); that keeps the historical look for container pages such as
 // NavigationPage/Shell/FlyoutPage, whose chrome (the navigation bar) must stay out of the
@@ -14,16 +14,16 @@
 // off-device verification harness), every inset is zero and the arrangement is exactly the
 // historical one.
 //
-// Soft keyboard (SoftInput edges): the shell reads window.getWindowAvoidArea(TYPE_SYSTEM) once
-// at page start, so the reported insets are the status/navigation bars and the cutout only; the
-// keyboard height never reaches this slice and a SoftInput edge therefore applies nothing (see
-// EdgeAmount). The shell change that would make it expressible: subscribe to
-// window.on('avoidAreaChange') for window.AvoidAreaType.TYPE_SOFT_INPUT (or the
-// keyboardHeightChange event, API 12+) and push the height through a new host notification
-// (host.notifySoftInputArea), which the host stores (ohos_host_set_soft_input_area /
-// ohos_host_get_soft_input_area, mirroring the avoid-area pair); GetWindowInsets would then
-// expose that keyboard inset separately and EdgeAmount would consume it for SoftInput on the
-// bottom edge (the software keyboard overlaps from the bottom only).
+// Soft keyboard (SoftInput edges): the shell subscribes to the window's avoid-area change for
+// the keyboard (window.on('avoidAreaChange') for AvoidAreaType.TYPE_KEYBOARD) and pushes its
+// height through host.notifySoftInputArea -> ohos_host_set_soft_input_area, which this file
+// reads back through ohos_host_get_soft_input_area (the SoftInputInset getter below). The
+// keyboard overlaps from the bottom only, so the value pads the bottom edge: SoftInput consumes
+// the keyboard inset instead of the system bottom bar, and All consumes whichever of the two
+// reaches deeper (no double padding). Container/Default keep the system-bar behaviour only. The
+// system avoid area itself (GetWindowInsets) is unchanged. Arranging again after the keyboard
+// appears is the app host's/caller's relayout path, exactly like any other layout change.
+using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
 
@@ -31,6 +31,16 @@ namespace Microsoft.Maui.Platform;
 
 internal static class OpenHarmonySafeArea
 {
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    /// <summary>Keyboard height in pixels; the host clamps negatives, and a missing export (an
+    /// older host library or the off-device harness) reports 0 after the first probe.</summary>
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_soft_input_area")]
+    private static extern int GetSoftInputAreaNative(out int bottom);
+
+    private static bool s_softInputAvailable = true;
+    private static bool s_softInputProbed;
+
     /// <summary>Window avoid area in pixels; zero when the shell has no answer.</summary>
     internal static Thickness GetWindowInsets()
     {
@@ -40,6 +50,38 @@ internal static class OpenHarmonySafeArea
         }
         return Thickness.Zero;
     }
+
+    /// <summary>
+    /// Keyboard inset in pixels (0 when the shell reports no keyboard, the host library is
+    /// absent or the export is missing). Read per arrange like the avoid area; the failed
+    /// binding is only probed once.
+    /// </summary>
+    internal static int GetSoftInputInset()
+    {
+        if (s_softInputProbed && !s_softInputAvailable)
+        {
+            return 0;
+        }
+        try
+        {
+            s_softInputProbed = true;
+            return GetSoftInputAreaNative(out int bottom) == 1 ? Math.Max(0, bottom) : 0;
+        }
+        catch (DllNotFoundException)
+        {
+            // No native host (tests): the soft-input inset stays zero.
+            s_softInputAvailable = false;
+            return 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // An older host library without the soft-input export.
+            s_softInputAvailable = false;
+            return 0;
+        }
+    }
+
+    internal static bool HasSoftInput() => GetSoftInputInset() > 0;
 
     internal static bool IsEmpty(Thickness insets) =>
         insets.Left <= 0 && insets.Top <= 0 && insets.Right <= 0 && insets.Bottom <= 0;
@@ -67,19 +109,24 @@ internal static class OpenHarmonySafeArea
     /// <summary>
     /// Shrinks <paramref name="frame"/> by the part of the window insets it actually overlaps,
     /// for the edges the view asks to obey. Only the overlap is consumed, so a view that is
-    /// already inside the avoid area (a nested layout, for example) is not padded twice.
+    /// already inside the avoid area (a nested layout, for example) is not padded twice. The
+    /// keyboard inset (see GetSoftInputInset) pads the bottom edge for SoftInput/All.
     /// </summary>
     internal static Rect Pad(IView view, Rect frame, Rect windowBounds, Thickness insets)
     {
-        if (IsEmpty(insets))
+        int softInput = GetSoftInputInset();
+        if (IsEmpty(insets) && softInput <= 0)
         {
             return frame;
         }
         SafeAreaEdges edges = GetEdges(view);
-        double left = EdgeAmount(edges.Left, insets.Left, OverlapLeft(frame, insets.Left), isBottom: false);
-        double top = EdgeAmount(edges.Top, insets.Top, OverlapTop(frame, insets.Top), isBottom: false);
-        double right = EdgeAmount(edges.Right, insets.Right, OverlapRight(frame, windowBounds, insets.Right), isBottom: false);
-        double bottom = EdgeAmount(edges.Bottom, insets.Bottom, OverlapBottom(frame, windowBounds, insets.Bottom), isBottom: true);
+        double left = EdgeAmount(edges.Left, insets.Left, OverlapLeft(frame, insets.Left), isBottom: false, softInput, 0);
+        double top = EdgeAmount(edges.Top, insets.Top, OverlapTop(frame, insets.Top), isBottom: false, softInput, 0);
+        double right = EdgeAmount(edges.Right, insets.Right, OverlapRight(frame, windowBounds, insets.Right), isBottom: false, softInput, 0);
+        // The keyboard is a second, independent bottom inset: it overlaps the frame on its own,
+        // so the soft-input amount is clamped by its own overlap (the system overlap may be 0).
+        double softOverlap = softInput > 0 ? OverlapBottom(frame, windowBounds, softInput) : 0;
+        double bottom = EdgeAmount(edges.Bottom, insets.Bottom, OverlapBottom(frame, windowBounds, insets.Bottom), isBottom: true, softInput, softOverlap);
         if (left == 0 && top == 0 && right == 0 && bottom == 0)
         {
             return frame;
@@ -88,19 +135,26 @@ internal static class OpenHarmonySafeArea
             Math.Max(0, frame.Width - left - right), Math.Max(0, frame.Height - top - bottom));
     }
 
-    private static double EdgeAmount(SafeAreaRegions region, double inset, double overlap, bool isBottom)
+    private static double EdgeAmount(SafeAreaRegions region, double inset, double overlap, bool isBottom, int softInput, double softOverlap)
     {
-        if (inset <= 0 || overlap <= 0 || region == SafeAreaRegions.None)
+        if (region == SafeAreaRegions.None || (overlap <= 0 && softOverlap <= 0))
         {
             return 0;
         }
-        // SoftInput pads for the keyboard only; the shell reports no keyboard inset (see the
-        // file header), so a SoftInput bottom edge stays at zero instead of guessing a height.
+        // SoftInput pads for the keyboard only: it never consumes the system bars, and a hidden
+        // keyboard (no reported height) applies nothing.
         if (isBottom && region == SafeAreaRegions.SoftInput)
         {
-            return 0;
+            return softOverlap > 0 ? Math.Min(softInput, softOverlap) : 0;
         }
-        return Math.Min(inset, overlap);
+        double amount = inset > 0 && overlap > 0 ? Math.Min(inset, overlap) : 0;
+        if (isBottom && region == SafeAreaRegions.All && softOverlap > 0 && softInput > amount)
+        {
+            // All covers the keyboard as well; the deeper of the two bottom insets wins so the
+            // content clears both without being padded twice.
+            amount = Math.Min(softInput, softOverlap);
+        }
+        return amount;
     }
 
     private static double OverlapLeft(Rect frame, double inset) =>

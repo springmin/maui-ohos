@@ -7,6 +7,7 @@
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Networking;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -193,38 +194,78 @@ public sealed class OpenHarmonyClipboard : IClipboard
 
 /// <summary>
 /// Connectivity for OpenHarmony: <see cref="NetworkAccess"/> maps the host's NDK level
-/// (0 unknown, 1 none, 2 local, 3 internet) and the shell's NetworkKit observer (netAvailable /
-/// netLost / netCapabilitiesChange / netUnavailable) pushes <see cref="ConnectivityChanged"/>
-/// with the level the host re-read. Off-device the read fails and stays
-/// <see cref="NetworkAccess.Unknown"/>.
+/// (0 unknown, 1 none, 2 local, 3 internet) and the shell's NetworkKit observer
+/// (netAvailable / netLost / netCapabilitiesChange / netUnavailable) pushes
+/// <see cref="ConnectivityChanged"/> with the level the host re-read.
 ///
-/// <see cref="ConnectionProfiles"/> stays empty because the transport is not on this bridge: the
-/// shell's observer receives a NetCapabilityInfo but discards it and pushes a bare
-/// host.notifyNetworkAccess(), and the host callback (ohos_host_network_access_register)
-/// forwards only the 0/1/2/3 level. The change that would populate the profiles: the shell
-/// forwards the capability bits (for example a CSV/JSON of the NetCapabilityInfo.networkCap
-/// transports: ethernet/wifi/cellular/bluetooth) with the push, the host's network-access
-/// callback grows a capabilities argument (or a companion getter) and this class maps the bits
-/// onto ConnectionProfile values (Ethernet/WiFi/Cellular/Bluetooth). The first network change
-/// reports the gap once instead of silently answering an empty set forever.
+/// <see cref="ConnectionProfiles"/> maps the bearer mask the host exposes. The shell encodes the
+/// NetCapabilityInfo transports (NetBearType values: 0 cellular, 1 wifi, 2 bluetooth,
+/// 3 ethernet, 4 vpn) into a capped comma-separated payload and pushes it with
+/// host.notifyNetworkAccess(encoded); the host parses it into an ohos_net_bearer mask, which
+/// ohos_host_network_capabilities hands back (falling back to the NDK default network's bearer
+/// types while the shell never published one). The mask is read on demand, so the profiles of a
+/// change event are the ones that arrived with it. An unknown/empty mask (no shell push, no
+/// host library, VPN-only) answers an empty set instead of guessing. Off-device the read fails
+/// and stays <see cref="NetworkAccess.Unknown"/> with no profiles.
 /// </summary>
 public sealed class OpenHarmonyConnectivity : IConnectivity
 {
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    /// <summary>Bearer bits of ohos_net_bearer (see the native header).</summary>
+    private const int BearerCellular = 1 << 0;
+    private const int BearerWifi = 1 << 1;
+    private const int BearerBluetooth = 1 << 2;
+    private const int BearerEthernet = 1 << 3;
+
+    /// <summary>The parsed bearer mask; 0 when unknown (or no host library after the first probe).</summary>
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_network_capabilities")]
+    private static extern int NetworkCapabilitiesNative();
+
+    private static bool s_capabilitiesAvailable = true;
+    private static bool s_capabilitiesProbed;
+
     public OpenHarmonyConnectivity()
     {
         OpenHarmonyConnectivityBridge.Changed += OnPlatformNetworkAccessChanged;
     }
 
-    private static bool s_profilesGapLogged;
-
     /// <summary>Live network state read through ohos_host_network_access.</summary>
     public NetworkAccess NetworkAccess => MapNetworkAccess(OpenHarmonyConnectivityBridge.ReadNetworkAccess());
 
     /// <summary>
-    /// No transport details over this bridge yet (see the type remark): empty is the honest
-    /// answer until the shell forwards the capability bits.
+    /// Active transports from the host's bearer mask (empty when unknown/absent, see the type
+    /// remark). VPN has no MAUI <see cref="ConnectionProfile"/> and is not reported.
     /// </summary>
-    public IEnumerable<ConnectionProfile> ConnectionProfiles => Array.Empty<ConnectionProfile>();
+    public IEnumerable<ConnectionProfile> ConnectionProfiles
+    {
+        get
+        {
+            int mask = ReadCapabilities();
+            if (mask == 0)
+            {
+                return Array.Empty<ConnectionProfile>();
+            }
+            var profiles = new List<ConnectionProfile>(4);
+            if ((mask & BearerCellular) != 0)
+            {
+                profiles.Add(ConnectionProfile.Cellular);
+            }
+            if ((mask & BearerWifi) != 0)
+            {
+                profiles.Add(ConnectionProfile.WiFi);
+            }
+            if ((mask & BearerBluetooth) != 0)
+            {
+                profiles.Add(ConnectionProfile.Bluetooth);
+            }
+            if ((mask & BearerEthernet) != 0)
+            {
+                profiles.Add(ConnectionProfile.Ethernet);
+            }
+            return profiles;
+        }
+    }
 
     /// <summary>Raised for every network change the shell reports.</summary>
     public event EventHandler<ConnectivityChangedEventArgs>? ConnectivityChanged;
@@ -238,14 +279,36 @@ public sealed class OpenHarmonyConnectivity : IConnectivity
         _ => NetworkAccess.Unknown,
     };
 
+    /// <summary>
+    /// The host's parsed bearer mask; 0 off-device. The failed binding is probed once, so every
+    /// later read answers 0 without crossing the host boundary again.
+    /// </summary>
+    private static int ReadCapabilities()
+    {
+        if (s_capabilitiesProbed && !s_capabilitiesAvailable)
+        {
+            return 0;
+        }
+        try
+        {
+            s_capabilitiesProbed = true;
+            return NetworkCapabilitiesNative();
+        }
+        catch (DllNotFoundException)
+        {
+            s_capabilitiesAvailable = false;
+            return 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // An older host library without the capabilities getter.
+            s_capabilitiesAvailable = false;
+            return 0;
+        }
+    }
+
     private void OnPlatformNetworkAccessChanged(int level)
     {
-        if (!s_profilesGapLogged)
-        {
-            s_profilesGapLogged = true;
-            OpenHarmonyBridge.WriteStatus(
-                "[maui] connectivity: ConnectionProfiles stay empty; the shell's NetworkKit observer discards NetCapabilityInfo and pushes only a level (host.notifyNetworkAccess()), so the transport never reaches this bridge");
-        }
         ConnectivityChanged?.Invoke(this, new ConnectivityChangedEventArgs(MapNetworkAccess(level), ConnectionProfiles));
     }
 }

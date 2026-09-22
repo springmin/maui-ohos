@@ -71,6 +71,15 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
     {
         PlatformView.IsFocused = focused;
         OpenHarmonyBridge.RequestTextInput(focused);
+        // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
+        if (focused)
+        {
+            OpenHarmonyFocusBridge.RequestTextInputFocus();
+        }
+        else
+        {
+            OpenHarmonyFocusBridge.RequestSurfaceFocus();
+        }
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element && element.IsFocused != focused)
         {
             element.SetValue(Microsoft.Maui.Controls.VisualElement.IsFocusedPropertyKey, focused);

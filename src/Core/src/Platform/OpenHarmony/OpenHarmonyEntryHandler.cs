@@ -6,25 +6,82 @@
 //   Focus()/Unfocus() sets the platform IsFocused and asks OpenHarmonyBridge.RequestTextInput,
 //   which on device drives the input-method NDK and otherwise reaches the shell's
 //   registerTextInputSink handler (focusControl.requestFocus('ohos_dotnet_input') /
-//   ('ohos_dotnet_surface') plus caretPosition(0)).
-// - Non-text views have no equivalent: the shell's focusControl path is reachable only through
-//   that text-input sink and there is no managed -> shell focus request, so a Button/Label
-//   Focus() cannot hand ArkUI focus to an id. The missing bridge is small: a host export
-//   ohos_host_request_focus(const char* id) (0 when the shell sink handled it), a NAPI wrapper
-//   exposed as host.requestFocus and a shell sink host.registerFocusSink((id: string) =>
-//   focusControl.requestFocus(id)); a non-text VisualElement.Focus() would then route through
-//   it (with the matching Unfocus path).
-// - Hardware key events are not forwarded either: the shell page has no onKeyEvent handler and
-//   the host has no key-event export. The missing bridge: onKeyEvent (page or XComponent) ->
-//   host.notifyKeyEvent(keyCode, eventType) -> ohos_host_register_key_event(void* callback),
-//   the same registration shape as ohos_host_register_text_submitted, plus a managed key event
-//   surface on OpenHarmonyBridge; until then no slice handler can receive a key.
+//   ('ohos_dotnet_surface') plus caretPosition(0)). The dedicated focus bridge below
+//   (OpenHarmonyFocusBridge -> ohos_host_request_focus -> the shell's registerFocusSink handler
+//   -> focusControl.requestFocus(id)) additionally names the ArkUI target, so the ArkUI focus
+//   follows the managed Focus()/Unfocus() even when the NDK keyboard path handled the request
+//   and the shell's text-input sink never ran.
+// - Non-text views have no equivalent: the shell's focus sink is reachable through
+//   OpenHarmonyFocusBridge, but a Button/Label VisualElement.Focus() reaches its own handler and
+//   OpenHarmonyViewHandler does not override Invoke, so nothing routes it to the bridge. A
+//   shared Invoke("Focus"/"Unfocus") override keyed on the platform view (requesting focus for
+//   'ohos_dotnet_surface') is the missing piece; until then a non-text focus is not expressible.
+// - Hardware key events: the shell's XComponent onKeyEvent forwards
+//   host.keyEvent(keyCode, eventType) -> the host's ohos_host_key_event, which reaches the
+//   callback registered with ohos_host_register_key_event (void (*)(int keyCode, int eventType);
+//   0 = down, 1 = up, the ArkUI KeyType encoding). MAUI rc.1 exposes no key surface (no
+//   IKeyListener/KeyDown/KeyUp), so the hosting bridge keeps that callback as its documented
+//   internal surface and no slice handler consumes keys yet.
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.Maui;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;
+
+/// <summary>
+/// Focus requests for this slice: the ArkTS shell's registerFocusSink handler hands ArkUI focus
+/// to an element id (focusControl.requestFocus). The text handlers call it on focus/unfocus so
+/// the shell's input control (or the .NET surface) owns the ArkUI focus even when the input
+/// method NDK path handled the keyboard request and the shell's text-input sink never ran.
+/// Off-device (no host library) and with an older host library every call answers false.
+/// </summary>
+internal static class OpenHarmonyFocusBridge
+{
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    /// <summary>The shell's hidden text input (see the shell's TextInput id).</summary>
+    private const string TextInputId = "ohos_dotnet_input";
+
+    /// <summary>The XComponent the managed content is rendered into.</summary>
+    private const string SurfaceId = "ohos_dotnet_surface";
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_request_focus", CharSet = CharSet.Ansi)]
+    private static extern int RequestFocusNative(string targetId);
+
+    private static bool s_available = true;
+
+    /// <summary>Hands ArkUI focus to the shell's text input; false when the bridge is absent.</summary>
+    public static bool RequestTextInputFocus() => Request(TextInputId);
+
+    /// <summary>Hands ArkUI focus back to the managed surface; false when the bridge is absent.</summary>
+    public static bool RequestSurfaceFocus() => Request(SurfaceId);
+
+    private static bool Request(string targetId)
+    {
+        if (!s_available)
+        {
+            return false;
+        }
+        try
+        {
+            return RequestFocusNative(targetId) == 0;
+        }
+        catch (DllNotFoundException)
+        {
+            // No native host (tests, desktop): focus requests are a no-op.
+            s_available = false;
+            return false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // An older host library without the focus export.
+            s_available = false;
+            return false;
+        }
+    }
+}
 
 public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
 {
@@ -105,6 +162,17 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
         }
         OpenHarmonyBridge.RequestTextInput(focused);
+        // Name the ArkUI target as well (the shell's registerFocusSink handler): with the input
+        // method NDK path RequestTextInput returns before the shell's text-input sink runs, so
+        // this is what hands ArkUI focus to the input (focus) or back to the surface (unfocus).
+        if (focused)
+        {
+            OpenHarmonyFocusBridge.RequestTextInputFocus();
+        }
+        else
+        {
+            OpenHarmonyFocusBridge.RequestSurfaceFocus();
+        }
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element &&
             element.IsFocused != focused)
         {

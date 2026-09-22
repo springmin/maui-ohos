@@ -52,14 +52,37 @@ public enum OpenHarmonyAccessibilityAction
 public static class OpenHarmonyAccessibility
 {
     /// <summary>Actions a node with the given role can perform (published to the provider).</summary>
+    /// <remarks>
+    /// Only actions the host really executes are advertised. The provider's action listener is
+    /// <c>(nodeId, action)</c> with no value payload, so SET_TEXT and SET_CURSOR_POSITION can never
+    /// be honoured and are not published. This slice has no platform long-press path either, so
+    /// LONG_CLICK is not published. CLICK, the scroll actions (IScrollView/ISlider) and the text
+    /// input actions (copy/paste/cut/select, all executed on the node's view) are.
+    /// </remarks>
     public static IReadOnlyList<OpenHarmonyAccessibilityAction> ActionsFor(string role)
         => role switch
         {
-            "button" => new[] { OpenHarmonyAccessibilityAction.Click, OpenHarmonyAccessibilityAction.LongClick },
+            "button" => new[] { OpenHarmonyAccessibilityAction.Click },
             "text" => new[] { OpenHarmonyAccessibilityAction.Click },
-            "textInput" => new[] { OpenHarmonyAccessibilityAction.Click, OpenHarmonyAccessibilityAction.SetText, OpenHarmonyAccessibilityAction.SetCursorPosition, OpenHarmonyAccessibilityAction.SelectText, OpenHarmonyAccessibilityAction.Copy, OpenHarmonyAccessibilityAction.Paste, OpenHarmonyAccessibilityAction.Cut },
+            "textInput" => new[]
+            {
+                OpenHarmonyAccessibilityAction.Click,
+                OpenHarmonyAccessibilityAction.Copy,
+                OpenHarmonyAccessibilityAction.Paste,
+                OpenHarmonyAccessibilityAction.Cut,
+                OpenHarmonyAccessibilityAction.SelectText,
+            },
             "checkBox" or "switch" => new[] { OpenHarmonyAccessibilityAction.Click },
-            "slider" => new[] { OpenHarmonyAccessibilityAction.ScrollForward, OpenHarmonyAccessibilityAction.ScrollBackward, OpenHarmonyAccessibilityAction.SetText },
+            "slider" => new[]
+            {
+                OpenHarmonyAccessibilityAction.ScrollForward,
+                OpenHarmonyAccessibilityAction.ScrollBackward,
+            },
+            "scroll" => new[]
+            {
+                OpenHarmonyAccessibilityAction.ScrollForward,
+                OpenHarmonyAccessibilityAction.ScrollBackward,
+            },
             _ => Array.Empty<OpenHarmonyAccessibilityAction>(),
         };
 
@@ -69,7 +92,28 @@ public static class OpenHarmonyAccessibility
     // observing a list being cleared or appended to, and a node's bounds always belong to one
     // coherent frame. Old snapshots stay valid for any in-flight enumeration.
     private static OpenHarmonyAccessibilityNode[] s_nodes = Array.Empty<OpenHarmonyAccessibilityNode>();
-    private static Dictionary<int, OpenHarmonyAccessibilityNode> s_index = new();
+
+    /// <summary>
+    /// One immutable frame mapping: node id to the published node and to the view it was built
+    /// from. Both dictionaries are swapped together, so an action callback always routes against
+    /// a single complete frame, never a partially rebuilt one.
+    /// </summary>
+    private sealed class FrameIndex
+    {
+        public static readonly FrameIndex Empty = new(new(), new());
+
+        public FrameIndex(Dictionary<int, OpenHarmonyAccessibilityNode> nodes, Dictionary<int, IView> views)
+        {
+            Nodes = nodes;
+            Views = views;
+        }
+
+        public Dictionary<int, OpenHarmonyAccessibilityNode> Nodes { get; }
+
+        public Dictionary<int, IView> Views { get; }
+    }
+
+    private static FrameIndex s_index = FrameIndex.Empty;
 
     /// <summary>Nodes of the last published frame (root first, parents before children).</summary>
     public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_nodes);
@@ -327,12 +371,27 @@ public static class OpenHarmonyAccessibility
         // One immutable index snapshot: an action arriving while Refresh rebuilds the tree routes
         // with the last complete frame (never a half-swapped one and never a partially updated
         // rectangle), so a click cannot be misrouted onto torn bounds.
-        if (Volatile.Read(ref s_index).TryGetValue(id, out OpenHarmonyAccessibilityNode? found))
+        if (Volatile.Read(ref s_index).Nodes.TryGetValue(id, out OpenHarmonyAccessibilityNode? found))
         {
             node = found;
             return true;
         }
         node = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the view a published node was built from, so an action can be executed on it
+    /// (scrolling, text edits). False when the node is unknown or its view has gone away.
+    /// </summary>
+    public static bool TryFindView(int id, out IView view)
+    {
+        if (Volatile.Read(ref s_index).Views.TryGetValue(id, out IView? found))
+        {
+            view = found;
+            return true;
+        }
+        view = null!;
         return false;
     }
 
@@ -407,11 +466,12 @@ public static class OpenHarmonyAccessibility
     {
         var nodes = new List<OpenHarmonyAccessibilityNode>();
         var index = new Dictionary<int, OpenHarmonyAccessibilityNode>();
-        Visit(root, 0, nodes, index);
+        var views = new Dictionary<int, IView>();
+        Visit(root, 0, nodes, index, views);
         // Publish the completed frame with atomic reference swaps: a callback on the accessibility
         // thread either sees the previous complete frame or this one, never a partial rebuild.
         Volatile.Write(ref s_nodes, nodes.ToArray());
-        Volatile.Write(ref s_index, index);
+        Volatile.Write(ref s_index, new FrameIndex(index, views));
     }
 
     /// <summary>
@@ -469,7 +529,7 @@ public static class OpenHarmonyAccessibility
     }
 
     private static int BuildNode(IView view, int parentId, List<OpenHarmonyAccessibilityNode> nodes,
-        Dictionary<int, OpenHarmonyAccessibilityNode> index)
+        Dictionary<int, OpenHarmonyAccessibilityNode> index, Dictionary<int, IView> views)
     {
         int id = nodes.Count + 1;
         RectF bounds = default;
@@ -520,17 +580,18 @@ public static class OpenHarmonyAccessibility
             rangeMin, rangeMax, rangeCurrent, checkedState);
         nodes.Add(node);
         index[id] = node;
+        views[id] = view;
         return id;
     }
     private static void Visit(IView root, int parentId, List<OpenHarmonyAccessibilityNode> nodes,
-        Dictionary<int, OpenHarmonyAccessibilityNode> index)
+        Dictionary<int, OpenHarmonyAccessibilityNode> index, Dictionary<int, IView> views)
     {
         var pending = new Stack<(IView View, int ParentId)>();
         pending.Push((root, parentId));
         while (pending.Count > 0)
         {
             (IView view, int parent) = pending.Pop();
-            int id = BuildNode(view, parent, nodes, index);
+            int id = BuildNode(view, parent, nodes, index, views);
             var children = new List<IView>();
             foreach (IView child in ChildrenOf(view))
             {
@@ -570,6 +631,7 @@ public static class OpenHarmonyAccessibility
         ICheckBox => "checkBox",
         ISwitch => "switch",
         ISlider => "slider",
+        IScrollView => "scroll",
         IProgress => "progress",
         Microsoft.Maui.IImage => "image",
         ILabel => "text",

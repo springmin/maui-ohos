@@ -1,5 +1,7 @@
 // Border handler for OpenHarmony: draws the stroke shape and arranges the content inside the
-// border padding.
+// border padding. The stroke and background keep their MAUI Paint so gradient/image brushes render
+// through the canvas paint facilities (strokes are approximated to their first stop colour and
+// reported once - the canvas strokes solid colours only).
 using Microsoft.Maui;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
@@ -14,11 +16,14 @@ public sealed class OpenHarmonyBorderHandler : OpenHarmonyViewHandler<IBorderVie
             [nameof(IBorderStroke.Shape)] = MapBorder,
             [nameof(IStroke.Stroke)] = MapBorder,
             [nameof(IStroke.StrokeThickness)] = MapBorder,
+            [nameof(IView.Background)] = MapBackground,
         };
 
     public OpenHarmonyBorderHandler() : base(Mapper) { }
 
-    protected override OpenHarmonyView CreatePlatformView() => new() { IsBorder = true };
+    protected override OpenHarmonyView CreatePlatformView() => new OpenHarmonyShapeView { IsBorder = true };
+
+    private OpenHarmonyShapeView ShapeView => (OpenHarmonyShapeView)PlatformView;
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
     {
@@ -54,12 +59,27 @@ public sealed class OpenHarmonyBorderHandler : OpenHarmonyViewHandler<IBorderVie
 
     public static void MapBorder(OpenHarmonyBorderHandler handler, IBorderView border)
     {
-        OpenHarmonyView view = handler.PlatformView;
+        OpenHarmonyShapeView view = handler.ShapeView;
         view.Shape = border.Shape;
-        if (border is IStroke stroke)
+        Paint? stroke = (border as IStroke)?.Stroke;
+        view.ShapeStrokePaint = stroke;
+        // Keep the solid colour mirror coherent for the base view state/tests; a non-solid paint
+        // is drawn (or reported) by OpenHarmonyShapeView at paint time.
+        view.BorderStroke = stroke is null
+            ? Colors.Gray
+            : OpenHarmonyPaintRenderer.ApproximateColor(stroke) ?? Colors.Gray;
+        if (border is IStroke strokePart)
         {
-            view.BorderStroke = (stroke.Stroke as SolidPaint)?.Color ?? Colors.Gray;
-            view.BorderStrokeThickness = (float)stroke.StrokeThickness;
+            view.BorderStrokeThickness = (float)strokePart.StrokeThickness;
         }
+    }
+
+    /// <summary>Maps the border's background brush: solid through the base colour, paints through the canvas.</summary>
+    public static void MapBackground(OpenHarmonyBorderHandler handler, IBorderView border)
+    {
+        Paint? background = (border as IView)?.Background;
+        OpenHarmonyShapeView view = handler.ShapeView;
+        view.BackgroundPaint = background is SolidPaint or null ? null : background;
+        view.Background = (background as SolidPaint)?.Color;
     }
 }

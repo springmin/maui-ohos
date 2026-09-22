@@ -74,13 +74,51 @@ public sealed class OpenHarmonyClipboard : IClipboard
         }
     }
 
-    public Task SetDataPackageAsync(DataPackage package)
-        => package.Text is not null ? SetTextAsync(package.Text) : Task.CompletedTask;
+    /// <summary>
+    /// Publishes a MAUI data package. The OpenHarmony pasteboard bridge is the host's
+    /// <c>ohos_host_clipboard_request(id, op, text)</c> protocol (op 0 has / 1 get / 2 set, a single
+    /// text payload; the shell's registerClipboardSink answers with @ohos.pasteboard plain text), so
+    /// text is published on the normal path and a package whose payload is an image or a custom
+    /// property cannot be represented. That used to complete silently - pretending success - now it
+    /// is reported once through the status channel instead.
+    /// </summary>
+    public async Task SetDataPackageAsync(DataPackage package)
+    {
+        if (package is null)
+        {
+            return;
+        }
+        if (package.Text is not null)
+        {
+            await SetTextAsync(package.Text).ConfigureAwait(false);
+            return;
+        }
+        if (package.Image is not null || package.Properties?.Count > 0)
+        {
+            LogNonTextPackageOnce();
+        }
+    }
 
     public async Task<DataPackage?> GetDataPackageAsync()
     {
+        // Same bridge boundary as the setter: the pasteboard answers text only, so a read package
+        // never carries image or custom-property content.
         string? text = await GetTextAsync().ConfigureAwait(false);
         return text is null ? null : new DataPackage { Text = text };
+    }
+
+    private static bool _nonTextPackageLogged;
+
+    private static void LogNonTextPackageOnce()
+    {
+        if (_nonTextPackageLogged)
+        {
+            return;
+        }
+        _nonTextPackageLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] clipboard: the OpenHarmony pasteboard bridge publishes plain text only " +
+            "(ohos_host_clipboard_request ops 0/1/2); the image/custom payload of this DataPackage was not published");
     }
 
     private void Store(string text)

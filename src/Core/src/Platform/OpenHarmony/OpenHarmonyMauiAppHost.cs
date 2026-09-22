@@ -241,23 +241,243 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>
-    /// Routes an accessibility action back into the normal input path: CLICK simulates a tap at the
-    /// node centre, which is exactly what a real touch would do.
+    /// Executes an accessibility action routed from the provider. It maps exactly - and only - the
+    /// actions <see cref="OpenHarmonyAccessibility.ActionsFor"/> advertises: CLICK simulates a tap
+    /// at the node centre, SCROLL_FORWARD/BACKWARD move an IScrollView or step an ISlider, and the
+    /// textInput actions work on the node's Entry/Editor (COPY/CUT write the clipboard, PASTE
+    /// reads it back at the caret, SELECT_TEXT selects the whole text).
     /// </summary>
     public bool HandleAccessibilityAction(int nodeId, int action)
     {
-        if (action != 0x10 || !OpenHarmonyAccessibility.TryFindNode(nodeId, out OpenHarmonyAccessibilityNode node))
+        if (!OpenHarmonyAccessibility.TryFindNode(nodeId, out OpenHarmonyAccessibilityNode node))
         {
             return false;
         }
+        OpenHarmonyAccessibility.TryFindView(nodeId, out IView? target);
+        switch ((OpenHarmonyAccessibilityAction)action)
+        {
+            case OpenHarmonyAccessibilityAction.Click:
+                return ClickAccessibilityNode(node);
+            case OpenHarmonyAccessibilityAction.ScrollForward:
+                return ScrollAccessibilityNode(target, forward: true);
+            case OpenHarmonyAccessibilityAction.ScrollBackward:
+                return ScrollAccessibilityNode(target, forward: false);
+            case OpenHarmonyAccessibilityAction.Copy:
+                return CopyAccessibilityNode(target, node, cut: false);
+            case OpenHarmonyAccessibilityAction.Cut:
+                return CopyAccessibilityNode(target, node, cut: true);
+            case OpenHarmonyAccessibilityAction.Paste:
+                return PasteAccessibilityNode(target);
+            case OpenHarmonyAccessibilityAction.SelectText:
+                return SelectAllAccessibilityNode(target);
+            default:
+                // Never advertised: SET_TEXT/SET_CURSOR_POSITION need a value payload the listener
+                // does not carry, and this slice has no long-press path. Stale requests stay unhandled.
+                return false;
+        }
+    }
+
+    /// <summary>CLICK simulates a tap at the node centre, exactly what a real touch would do.</summary>
+    private bool ClickAccessibilityNode(OpenHarmonyAccessibilityNode node)
+    {
         if (RootView is not IView content)
         {
             return false;
         }
         float x = (float)(node.Bounds.X + node.Bounds.Width / 2);
         float y = (float)(node.Bounds.Y + node.Bounds.Height / 2);
-        _renderer.HandleTouch(content, true, true, x, y);
+        // Two phases like a real touch: the renderer's press tracking only fires a button's Tap on
+        // the release phase, so a single down+up call would only set Pressed and never click.
+        _renderer.HandleTouch(content, true, false, x, y);
+        _renderer.HandleTouch(content, false, true, x, y);
+        _dirty = true;
         return true;
+    }
+
+    /// <summary>Scrolls an IScrollView by most of a viewport, or steps an ISlider by 10% of its range.</summary>
+    private bool ScrollAccessibilityNode(IView? target, bool forward)
+    {
+        if (target?.Handler?.PlatformView is not OpenHarmonyView platform)
+        {
+            return false;
+        }
+        if (platform.IsScrollView)
+        {
+            bool horizontal = target is IScrollView { Orientation: ScrollOrientation.Horizontal };
+            float viewport = horizontal ? platform.Frame.Width : platform.Frame.Height;
+            float content = horizontal ? platform.ScrollContentWidth : platform.ScrollContentHeight;
+            float current = horizontal ? platform.ScrollOffsetX : platform.ScrollOffsetY;
+            float step = Math.Max(40f, viewport * 0.8f);
+            float limit = Math.Max(0f, content - viewport);
+            float offset = Math.Clamp(current + (forward ? step : -step), 0f, limit);
+            if (Math.Abs(offset - current) > 0.01f)
+            {
+                if (horizontal)
+                {
+                    platform.ScrollOffsetX = offset;
+                    if (target is IScrollView scrollViewX)
+                    {
+                        scrollViewX.HorizontalOffset = offset;
+                    }
+                }
+                else
+                {
+                    platform.ScrollOffsetY = offset;
+                    // Keep the virtual view in sync the same way a real drag does.
+                    if (target is IScrollView scrollViewY)
+                    {
+                        scrollViewY.VerticalOffset = offset;
+                    }
+                }
+                platform.ScrollOffsetChanged?.Invoke();
+            }
+            _dirty = true;
+            return true;
+        }
+        if (target is ISlider slider)
+        {
+            double range = slider.Maximum - slider.Minimum;
+            double step = range > 0 ? range / 10.0 : 1.0;
+            double value = Math.Clamp(slider.Value + (forward ? step : -step), slider.Minimum, slider.Maximum);
+            if (value != slider.Value)
+            {
+                slider.Value = value;
+            }
+            _dirty = true;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>COPY/CUT put the node's text on the system clipboard; CUT clears the editable text.</summary>
+    private bool CopyAccessibilityNode(IView? target, OpenHarmonyAccessibilityNode node, bool cut)
+    {
+        string? text = target is IText textPart && !string.IsNullOrEmpty(textPart.Text) ? textPart.Text : node.Text;
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+        _ = WriteClipboardAsync(text);
+        if (cut)
+        {
+            SetEditableText(target, string.Empty);
+        }
+        _dirty = true;
+        return true;
+    }
+
+    /// <summary>SELECT_TEXT selects the whole editable text (caret at the end).</summary>
+    private bool SelectAllAccessibilityNode(IView? target)
+    {
+        if (target is not ITextInput input)
+        {
+            return false;
+        }
+        int length = (input.Text ?? string.Empty).Length;
+        input.CursorPosition = length;
+        input.SelectionLength = length;
+        _dirty = true;
+        return true;
+    }
+
+    /// <summary>PASTE reads the clipboard and applies the edit on the UI thread when one is available.</summary>
+    private bool PasteAccessibilityNode(IView? target)
+    {
+        if (target is not ITextInput)
+        {
+            return false;
+        }
+        _ = PasteClipboardAsync(target);
+        return true;
+    }
+
+    private async Task PasteClipboardAsync(IView target)
+    {
+        try
+        {
+            Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard? clipboard =
+                _context.Services.GetService(typeof(Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard))
+                as Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard;
+            string? text = clipboard is null ? null : await clipboard.GetTextAsync().ConfigureAwait(false);
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+            // The action arrives on the platform accessibility thread; the text edit belongs on the UI thread.
+            Microsoft.Maui.Dispatching.IDispatcher? dispatcher =
+                _context.Services.GetService(typeof(Microsoft.Maui.Dispatching.IDispatcher))
+                as Microsoft.Maui.Dispatching.IDispatcher;
+            if (dispatcher is not null && dispatcher.IsDispatchRequired)
+            {
+                dispatcher.Dispatch(() => ApplyPaste(target, text));
+                return;
+            }
+            ApplyPaste(target, text);
+        }
+        catch (Exception ex)
+        {
+            // Reverse P/Invoke boundary: the continuation must never throw either.
+            OpenHarmonyBridge.WriteStatus(
+                $"[maui] accessibility paste failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private void ApplyPaste(IView target, string pasted)
+    {
+        if (target is not ITextInput input)
+        {
+            return;
+        }
+        string current = input.Text ?? string.Empty;
+        int index = Math.Clamp(input.CursorPosition, 0, current.Length);
+        int selection = Math.Clamp(input.SelectionLength, 0, current.Length - index);
+        string updated = current.Remove(index, selection).Insert(index, pasted);
+        SetEditableText(target, updated, index + pasted.Length);
+        _dirty = true;
+    }
+
+    /// <summary>Writes the text through the DI clipboard (the documented text pasteboard path).</summary>
+    private async Task WriteClipboardAsync(string text)
+    {
+        try
+        {
+            Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard? clipboard =
+                _context.Services.GetService(typeof(Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard))
+                as Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard;
+            if (clipboard is not null)
+            {
+                await clipboard.SetTextAsync(text).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyBridge.WriteStatus(
+                $"[maui] accessibility copy failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Applies a text edit through the Controls types: IText.Text is read-only, exactly like the
+    /// Entry/Editor handlers, so the assignment raises TextChanged and the platform mapper runs.
+    /// </summary>
+    private static void SetEditableText(IView? target, string text, int? caret = null)
+    {
+        switch (target)
+        {
+            case Microsoft.Maui.Controls.Entry entry:
+                entry.Text = text;
+                break;
+            case Microsoft.Maui.Controls.Editor editor:
+                editor.Text = text;
+                break;
+            default:
+                return;
+        }
+        if (caret is int position && target is ITextInput input)
+        {
+            input.CursorPosition = position;
+            input.SelectionLength = 0;
+        }
     }
 
     private void OnPinch(int phase, double scale, float x, float y)

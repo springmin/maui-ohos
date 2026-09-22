@@ -124,6 +124,12 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeolocation>(geolocation);
         builder.Services.AddSingleton<Microsoft.Maui.Storage.IFilePicker>(filePicker);
         builder.Services.AddSingleton<Microsoft.Maui.Media.IMediaPicker>(mediaPicker);
+        // WebAuthenticator: the browser redirect cannot come back to the app in this slice (no
+        // callback ability skill in the HAP and no want->host forwarding in the shell), so the
+        // honest implementation answers FeatureNotSupportedException; registering it here keeps
+        // both DI resolution and WebAuthenticator.Default (ModuleInitializer field install) off
+        // the Essentials reference-assembly exception (see OpenHarmonyWebAuthenticator.cs).
+        builder.Services.AddSingleton<Microsoft.Maui.Authentication.IWebAuthenticator>(OpenHarmonyWebAuthenticator.Instance);
         // Communication / capture / geocoding: the statics (Email.Default, Sms.Default,
         // PhoneDialer.Default, Screenshot.Default, Geocoding.Default) resolve from these
         // registrations when the app is built, exactly like Clipboard/Connectivity above.

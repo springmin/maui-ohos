@@ -17,12 +17,13 @@
 // Soft keyboard (SoftInput edges): the shell subscribes to the window's avoid-area change for
 // the keyboard (window.on('avoidAreaChange') for AvoidAreaType.TYPE_KEYBOARD) and pushes its
 // height through host.notifySoftInputArea -> ohos_host_set_soft_input_area, which this file
-// reads back through ohos_host_get_soft_input_area (the SoftInputInset getter below). The
+// reads back through ohos_host_get_soft_input_area (the SoftInputInset getter below) and also
+// receives as a change callback (ohos_host_register_soft_input_change): the callback asks the
+// app host for a redraw, so the keyboard's avoid-area change re-runs the layout by itself. The
 // keyboard overlaps from the bottom only, so the value pads the bottom edge: SoftInput consumes
 // the keyboard inset instead of the system bottom bar, and All consumes whichever of the two
 // reaches deeper (no double padding). Container/Default keep the system-bar behaviour only. The
-// system avoid area itself (GetWindowInsets) is unchanged. Arranging again after the keyboard
-// appears is the app host's/caller's relayout path, exactly like any other layout change.
+// system avoid area itself (GetWindowInsets) is unchanged.
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
@@ -40,6 +41,15 @@ internal static class OpenHarmonySafeArea
 
     private static bool s_softInputAvailable = true;
     private static bool s_softInputProbed;
+    private static bool s_softInputCallbackRegistered;
+    private static SoftInputChanged? s_softInputChangedThunk;
+
+    /// <summary>Managed form of the host's soft-input change callback: void (*)(int bottom).</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SoftInputChanged(int bottom);
+
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_register_soft_input_change")]
+    private static extern void RegisterSoftInputChangeNative(IntPtr callback);
 
     /// <summary>Window avoid area in pixels; zero when the shell has no answer.</summary>
     internal static Thickness GetWindowInsets()
@@ -52,12 +62,44 @@ internal static class OpenHarmonySafeArea
     }
 
     /// <summary>
+    /// Registers the host's soft-input change callback once (best effort; off-device the host
+    /// library is absent). The callback asks the app host for a redraw, which re-measures and
+    /// re-arranges the tree, so the keyboard's avoid-area change re-applies the safe-area
+    /// padding without waiting for another input event.
+    /// </summary>
+    private static void EnsureSoftInputCallback()
+    {
+        if (s_softInputCallbackRegistered)
+        {
+            return;
+        }
+        s_softInputCallbackRegistered = true;
+        s_softInputChangedThunk = OnSoftInputChangedNative;
+        try
+        {
+            RegisterSoftInputChangeNative(Marshal.GetFunctionPointerForDelegate(s_softInputChangedThunk));
+        }
+        catch (Exception)
+        {
+            // No native host (the off-device harness): only the pull path is available.
+        }
+    }
+
+    private static void OnSoftInputChangedNative(int bottom)
+    {
+        // The keyboard height changed: a redraw re-runs Measure/Arrange, which reads the new
+        // inset through GetSoftInputInset.
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
     /// Keyboard inset in pixels (0 when the shell reports no keyboard, the host library is
     /// absent or the export is missing). Read per arrange like the avoid area; the failed
     /// binding is only probed once.
     /// </summary>
     internal static int GetSoftInputInset()
     {
+        EnsureSoftInputCallback();
         if (s_softInputProbed && !s_softInputAvailable)
         {
             return 0;

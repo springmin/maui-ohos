@@ -18,6 +18,9 @@ public sealed class OpenHarmonyMauiAppHost
     private bool _dirty = true;
     private bool _created;
     private bool _activated;
+    // The platform Create event can be delivered before Run creates the window; it is then
+    // completed (Created, then Activated) when the window exists.
+    private bool _createReceived;
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
@@ -89,7 +92,9 @@ public sealed class OpenHarmonyMauiAppHost
                     case OpenHarmonyLifecycleEvent.Create:
                         // MAUI's window lifecycle starts with Created (the platform window now
                         // exists); the platform event carries the activation, so raise Created
-                        // first and only once.
+                        // first and only once. Before Run the window does not exist yet, so Run
+                        // completes the activation for this event.
+                        _createReceived = true;
                         EnsureWindowCreated();
                         EnsureWindowActivated();
                         break;
@@ -149,9 +154,14 @@ public sealed class OpenHarmonyMauiAppHost
         OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
         OpenHarmonyBridge.WriteStatus($"[maui] window created ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
         // The platform's Create lifecycle event activates the window (and may arrive before Run
-        // when the shell is fast); Created must precede it either way.
+        // when the shell is fast); Created must precede it either way. When Create arrived first
+        // the handler had no window yet, so the activation is completed here.
         EnsureWindowCreated();
         _dirty = true;
+        if (_createReceived)
+        {
+            EnsureWindowActivated();
+        }
     }
 
     /// <summary>

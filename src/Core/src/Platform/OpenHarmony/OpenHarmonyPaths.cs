@@ -34,4 +34,24 @@ internal static class OpenHarmonyPaths
             return DataDirectory;
         }
     }
+
+    /// <summary>
+    /// Root of the packaged application files (the HAP payload/assets). On device the ArkTS
+    /// shell extracts <c>resources/rawfile/dotnet.zip</c> into <c>FilesDir/dotnet</c> and
+    /// publishes that directory as the context's <see cref="OpenHarmonyAppContext.AppDir"/>,
+    /// so the published output (MauiAsset items included) lives there. Falls back to the data
+    /// directory off-device or with a host that does not publish an AppDir.
+    /// </summary>
+    public static string AppPackageDirectory
+    {
+        get
+        {
+            string? appDir = OpenHarmonyBridge.Context?.AppDir;
+            if (!string.IsNullOrEmpty(appDir))
+            {
+                return appDir;
+            }
+            return DataDirectory;
+        }
+    }
 }

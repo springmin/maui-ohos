@@ -66,6 +66,10 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
                 return;
             }
         }
+        // HUKS is unavailable: the value is obfuscated with the per-install file key only.
+        // Report it once so the weaker protection is visible at runtime, not just in the header.
+        OpenHarmonyStatus.Once("securestorage.filekey",
+            "secure storage is using the per-install file key: HUKS is unavailable, values are obfuscated but not hardware-backed");
         values[key] = value;
         Save(values);
     }

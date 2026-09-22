@@ -1,7 +1,9 @@
 // CarouselView handler for OpenHarmony: shows the current item and pages on a horizontal
 // swipe (no page animation yet). PeekAreaInsets materializes the neighbouring slides inside the
 // platform view's clipped scroll path; Loop wraps the position and Position/CurrentItem are kept
-// in sync. IsSwipeEnabled(false) pins the carousel; IsBounceEnabled has no compositor animation
+// in sync. A grouped ItemsSource (elements are collections) is materialized to its items with a
+// one-time status note - the carousel has no group concept, so headers/footers cannot be drawn.
+// IsSwipeEnabled(false) pins the carousel; IsBounceEnabled has no compositor animation
 // and is reported once instead of pretending.
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
@@ -97,13 +99,18 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         }
         PlatformView.ViewChildren.Clear();
         _current = null;
-        if (VirtualView is not { } carousel || Count(carousel) == 0 || carousel.ItemsSource is not { } source)
+        if (VirtualView is not { } carousel)
         {
             PlatformView.IsScrollView = false;
             return;
         }
-        int count = Count(carousel);
-        int position = Math.Clamp(carousel.Position, 0, count - 1);
+        List<object?> items = MaterializeItems(carousel);
+        if (items.Count == 0)
+        {
+            PlatformView.IsScrollView = false;
+            return;
+        }
+        int position = Math.Clamp(carousel.Position, 0, items.Count - 1);
         Thickness peek = carousel.PeekAreaInsets;
         bool peeked = peek.Left != 0 || peek.Right != 0 || peek.Top != 0 || peek.Bottom != 0;
         // The peek strips need the renderer's clip + translate path (IsScrollView); without peeks
@@ -114,7 +121,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         double itemHeight = Math.Max(1, frame.Height - peek.Top - peek.Bottom);
         double itemX = frame.X + peek.Left;
         double itemY = frame.Y + peek.Top;
-        _current = AddSlide(source, carousel, count, position, itemX, itemY, itemWidth, itemHeight);
+        _current = AddSlide(items, carousel, position, itemX, itemY, itemWidth, itemHeight);
         if (peeked)
         {
             // The neighbouring slides sit one slide width away and are clipped by the frame, so
@@ -123,23 +130,23 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
             PlatformView.ScrollOffsetY = 0;
             PlatformView.ScrollContentWidth = (float)frame.Width;
             PlatformView.ScrollContentHeight = (float)frame.Height;
-            AddSlide(source, carousel, count, position - 1, itemX - itemWidth, itemY, itemWidth, itemHeight);
-            AddSlide(source, carousel, count, position + 1, itemX + itemWidth, itemY, itemWidth, itemHeight);
+            AddSlide(items, carousel, position - 1, itemX - itemWidth, itemY, itemWidth, itemHeight);
+            AddSlide(items, carousel, position + 1, itemX + itemWidth, itemY, itemWidth, itemHeight);
         }
     }
 
-    private View? AddSlide(System.Collections.IEnumerable source, CarouselView carousel, int count,
+    private View? AddSlide(List<object?> items, CarouselView carousel,
         int index, double x, double y, double width, double height)
     {
-        if (index < 0 || index >= count)
+        if (index < 0 || index >= items.Count)
         {
             if (!carousel.Loop)
             {
                 return null;
             }
-            index = (index % count + count) % count;
+            index = (index % items.Count + items.Count) % items.Count;
         }
-        object? item = source.Cast<object?>().ElementAtOrDefault(index);
+        object? item = items[index];
         View? view = null;
         if (carousel.ItemTemplate?.CreateContent() is View templated)
         {
@@ -167,8 +174,46 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         return double.IsFinite(heightConstraint) ? heightConstraint : 200;
     }
 
-    private static int Count(CarouselView carousel)
-        => carousel.ItemsSource?.Cast<object?>().Count() ?? 0;
+    private static int Count(CarouselView carousel) => MaterializeItems(carousel).Count;
+
+    /// <summary>
+    /// The slides the carousel pages through. CarouselView has no grouping API in this MAUI
+    /// version (it derives from <c>ItemsView</c>), so a grouped data source - every element is
+    /// itself a non-string collection, the shape CollectionView uses for groups - is
+    /// materialised into its items: each item gets a slide and group headers/footers cannot be
+    /// drawn, which is reported once instead of silently binding a group object.
+    /// </summary>
+    internal static List<object?> MaterializeItems(ItemsView itemsView)
+    {
+        var items = new List<object?>();
+        if (itemsView.ItemsSource is not { } source)
+        {
+            return items;
+        }
+        foreach (object? item in source)
+        {
+            items.Add(item);
+        }
+        if (items.Count == 0 || !items.All(IsGroup))
+        {
+            return items;
+        }
+        OpenHarmonyStatus.Once("carousel.grouped",
+            "CarouselView.ItemsSource is grouped (every item is a collection): each group's items " +
+            "are shown as slides; group headers/footers cannot be expressed by this carousel");
+        var flattened = new List<object?>();
+        foreach (object? group in items)
+        {
+            foreach (object? item in (System.Collections.IEnumerable)group!)
+            {
+                flattened.Add(item);
+            }
+        }
+        return flattened;
+    }
+
+    private static bool IsGroup(object? item)
+        => item is System.Collections.IEnumerable && item is not string;
 
     /// <summary>Mirrors the selected slide into CurrentItem (Position is the source of truth).</summary>
     private void SyncCurrentItem()
@@ -177,9 +222,9 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         {
             return;
         }
-        int count = Count(carousel);
-        object? item = count > 0 && carousel.ItemsSource is { } source
-            ? source.Cast<object?>().ElementAtOrDefault(Math.Clamp(carousel.Position, 0, count - 1))
+        List<object?> items = MaterializeItems(carousel);
+        object? item = items.Count > 0
+            ? items[Math.Clamp(carousel.Position, 0, items.Count - 1)]
             : null;
         if (Equals(carousel.CurrentItem, item))
         {
@@ -199,13 +244,13 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
     /// <summary>Moves the position to the slide an app assigned through CurrentItem.</summary>
     private void SyncPositionFromCurrentItem()
     {
-        if (_syncingItem || VirtualView is not { } carousel || carousel.ItemsSource is not { } source)
+        if (_syncingItem || VirtualView is not { } carousel)
         {
             return;
         }
         int index = 0;
         bool found = false;
-        foreach (object? item in source)
+        foreach (object? item in MaterializeItems(carousel))
         {
             if (Equals(item, carousel.CurrentItem))
             {
@@ -231,7 +276,12 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
 
     private void OnScrollToRequested(object? sender, ScrollToRequestEventArgs args)
     {
-        if (VirtualView is not { } carousel || carousel.ItemsSource is not { } source || Count(carousel) == 0)
+        if (VirtualView is not { } carousel)
+        {
+            return;
+        }
+        List<object?> items = MaterializeItems(carousel);
+        if (items.Count == 0)
         {
             return;
         }
@@ -244,7 +294,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         {
             index = 0;
             bool found = false;
-            foreach (object? item in source)
+            foreach (object? item in items)
             {
                 if (Equals(item, args.Item))
                 {
@@ -258,7 +308,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
                 return;
             }
         }
-        if (index < 0 || index >= Count(carousel) || index == carousel.Position)
+        if (index < 0 || index >= items.Count || index == carousel.Position)
         {
             return;
         }

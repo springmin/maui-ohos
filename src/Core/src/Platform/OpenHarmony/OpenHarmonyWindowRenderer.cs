@@ -23,6 +23,8 @@ public sealed class OpenHarmonyWindowRenderer
     public OpenHarmonyWindowRenderer()
     {
         _canvas = CanvasFactory?.Invoke() ?? new MauiCanvas();
+        // A changed IView.Shadow must repaint; the drawing below reads the shadow directly.
+        OpenHarmonyShadow.Install();
     }
 
     public Color BackgroundColor { get; set; } = Colors.DarkSlateBlue;
@@ -261,6 +263,7 @@ public sealed class OpenHarmonyWindowRenderer
                     }
                 }
             }
+            platform.DrawShadow(_canvas);
             platform.Draw(_canvas);
             if (platform.PopupVisible)
             {
@@ -349,11 +352,11 @@ public sealed class OpenHarmonyWindowRenderer
     /// <summary>Page indicator dots for a carousel.</summary>
     private void DrawCarouselIndicator(OpenHarmonyView carousel)
     {
-        if (carousel.VirtualView is not Microsoft.Maui.Controls.CarouselView view || view.ItemsSource is not { } source)
+        if (carousel.VirtualView is not Microsoft.Maui.Controls.CarouselView view)
         {
             return;
         }
-        int count = source.Cast<object?>().Count();
+        int count = OpenHarmonyCarouselViewHandler.MaterializeItems(view).Count;
         if (count <= 1)
         {
             return;
@@ -362,10 +365,11 @@ public sealed class OpenHarmonyWindowRenderer
         float spacing = 16f;
         float startX = frame.X + (frame.Width - count * spacing) / 2f + spacing / 2f;
         float y = frame.Y + frame.Height - 16f;
+        int position = Math.Clamp(view.Position, 0, count - 1);
         for (int i = 0; i < count; i++)
         {
-            _canvas.FillColor = i == view.Position ? Colors.White : Colors.Gray;
-            _canvas.FillCircle(startX + i * spacing, y, i == view.Position ? 6f : 4f);
+            _canvas.FillColor = i == position ? Colors.White : Colors.Gray;
+            _canvas.FillCircle(startX + i * spacing, y, i == position ? 6f : 4f);
         }
     }
 

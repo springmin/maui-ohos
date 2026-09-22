@@ -1,6 +1,7 @@
 // Platform view for the OpenHarmony compositor: a lightweight drawing element. Handlers set
 // its properties from the virtual view; OpenHarmonyWindowRenderer draws and hit-tests it.
 using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Handlers;
 using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
 
 namespace Microsoft.Maui.Platform;
@@ -525,6 +526,60 @@ public class OpenHarmonyView
     public RectF Frame => VirtualView?.Frame is Rect frame
         ? new RectF((float)frame.X, (float)frame.Y, (float)frame.Width, (float)frame.Height)
         : default;
+
+    /// <summary>
+    /// Draws the view's MAUI shadow (<see cref="IView.Shadow"/>) behind its content. The host
+    /// canvas shadow layer takes an offset, a blur and one colour, so the view's frame is filled
+    /// with a fully transparent brush (the geometry casts the shadow, the brush itself stays
+    /// invisible); the effect is cleared before the view draws. A shadow the drawing cannot
+    /// express (non-solid paint) is reported once instead of being dropped.
+    /// </summary>
+    public void DrawShadow(MauiCanvas canvas)
+    {
+        if (VirtualView?.Shadow is not { } shadow || shadow.Opacity <= 0 || shadow.Radius <= 0)
+        {
+            return;
+        }
+        Paint? paint = shadow.Paint;
+        if (paint is PatternPaint { Pattern: PaintPattern wrapper })
+        {
+            paint = wrapper.Paint;
+        }
+        if (paint is not SolidPaint { Color: { } color })
+        {
+            OpenHarmonyStatus.Once("shadow.paint." + (paint?.GetType().Name ?? "null"),
+                $"IShadow.Paint '{paint?.GetType().Name ?? "<null>"}' is not a solid colour: the " +
+                "OpenHarmony shadow layer carries a single colour, so this shadow was not drawn");
+            return;
+        }
+        RectF frame = Frame;
+        if (frame.Width <= 0 || frame.Height <= 0)
+        {
+            return;
+        }
+        float alpha = Math.Clamp(shadow.Opacity, 0f, 1f) * color.Alpha *
+            (float)Math.Clamp(VirtualView.Opacity, 0d, 1d);
+        if (alpha <= 0)
+        {
+            return;
+        }
+        Color previousFill = canvas.FillColor;
+        // FillColor resets the host effects; the shadow layer then applies to the next fill.
+        canvas.FillColor = Colors.Transparent;
+        canvas.SetShadow(new SizeF((float)shadow.Offset.X, (float)shadow.Offset.Y), shadow.Radius,
+            color.WithAlpha(alpha));
+        if (CornerRadius > 0)
+        {
+            canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
+        }
+        else
+        {
+            canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+        }
+        // Never leak the shadow layer into the view's own fills/text.
+        canvas.FillColor = previousFill;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.ClearEffects();
+    }
 
     public virtual void Draw(MauiCanvas canvas)
     {
@@ -1379,5 +1434,49 @@ public class OpenHarmonyView
             return true;
         }
         return handled || Pressed;
+    }
+}
+
+/// <summary>
+/// MAUI maps <see cref="IView.Shadow"/> through the shared ViewMapper; the slice has no other
+/// sink for it. This replaces the entry once so a shadow change requests a frame. The drawing
+/// itself happens in <see cref="OpenHarmonyWindowRenderer"/> through
+/// <see cref="OpenHarmonyView.DrawShadow"/>, which reads the virtual view's shadow directly.
+/// </summary>
+internal static class OpenHarmonyShadow
+{
+    private static bool s_installed;
+
+    /// <summary>Installs the redraw hook (idempotent; called by the renderer's constructor).</summary>
+    internal static void Install()
+    {
+        if (s_installed)
+        {
+            return;
+        }
+        s_installed = true;
+        if (ViewHandler.ViewMapper is PropertyMapper<IView, IViewHandler> mapper)
+        {
+            Action<IViewHandler, IView>? previous = mapper[nameof(IView.Shadow)];
+            mapper[nameof(IView.Shadow)] = (handler, view) =>
+            {
+                try
+                {
+                    previous?.Invoke(handler, view);
+                }
+                catch (Exception)
+                {
+                    // The default rc.1 mapping has no OpenHarmony platform view contract; ignore.
+                }
+                try
+                {
+                    Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.RequestRedraw();
+                }
+                catch (Exception)
+                {
+                    // No host: the next input/frame event repaints anyway.
+                }
+            };
+        }
     }
 }

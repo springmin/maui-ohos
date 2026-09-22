@@ -4,8 +4,10 @@
 // The ArkTS shell keeps AppStorage 'colorMode' in sync with the device light/dark setting
 // (Environment.envProp('colorMode') plus @StorageProp/@Watch in pages/Index.ets) and forwards
 // every change with host.notifyTheme(isDark). The native host hands that to the managed
-// callback registered through ohos_host_theme_set_listener, and Application.Current.UserAppTheme
-// is set to Dark/Light so RequestedTheme and AppThemeBinding follow the platform.
+// callback registered through ohos_host_theme_set_listener, and the handler sets
+// Application.Current.UserAppTheme to Dark/Light so RequestedTheme and AppThemeBinding follow
+// the platform - but only while the app has not chosen a theme itself: an app-set UserAppTheme
+// is respected (and LastIsDark keeps tracking the system mode for IAppInfo.RequestedTheme).
 //
 // Every native call is guarded: without libopenharmonyhost.so (desktop builds) or without the
 // export (an older host), Register is a no-op, the MAUI default stays in place and nothing throws.
@@ -33,6 +35,9 @@ internal static class OpenHarmonyTheme
     private static bool s_registered;
     private static bool s_available = true;
     private static bool? s_lastTheme;
+
+    /// <summary>The AppTheme this handler last wrote to UserAppTheme.</summary>
+    private static AppTheme s_appliedTheme = AppTheme.Unspecified;
 
     /// <summary>The last mode reported by the shell (null until the shell reports one).</summary>
     internal static bool? LastIsDark => s_lastTheme;
@@ -70,7 +75,14 @@ internal static class OpenHarmonyTheme
     /// <summary>Native-shaped thunk: the NAPI export delivers 0/1.</summary>
     private static void OnNativeTheme(int isDark) => OnPlatformThemeChanged(isDark != 0);
 
-    /// <summary>Sets <see cref="Application.UserAppTheme"/> when the application is running.</summary>
+    /// <summary>
+    /// Follows the platform mode by setting <see cref="Application.UserAppTheme"/>, but only
+    /// while the app has not chosen a theme itself: an app-set value (anything other than
+    /// Unspecified and other than the value written here) is left untouched while the platform
+    /// mode is still tracked in <see cref="LastIsDark"/>. The one indistinguishable case is an
+    /// app setting exactly the value this handler last wrote - MAUI exposes no hook that
+    /// separates the two writes, so that value is treated as still following the platform.
+    /// </summary>
     private static void Apply(bool isDark)
     {
         try
@@ -80,11 +92,18 @@ internal static class OpenHarmonyTheme
             {
                 return;
             }
+            AppTheme current = application.UserAppTheme;
+            if (current != AppTheme.Unspecified && current != s_appliedTheme)
+            {
+                // The app explicitly requested its own theme: respect it.
+                return;
+            }
             AppTheme theme = isDark ? AppTheme.Dark : AppTheme.Light;
-            if (application.UserAppTheme != theme)
+            if (current != theme)
             {
                 application.UserAppTheme = theme;
             }
+            s_appliedTheme = theme;
         }
         catch (Exception)
         {
@@ -101,7 +120,14 @@ internal static class OpenHarmonyTheme
         }
         try
         {
-            application.UserAppTheme = isDark ? AppTheme.Dark : AppTheme.Light;
+            if (application.UserAppTheme != AppTheme.Unspecified)
+            {
+                // The app already picked its theme (typically in its constructor): keep it.
+                return;
+            }
+            AppTheme theme = isDark ? AppTheme.Dark : AppTheme.Light;
+            application.UserAppTheme = theme;
+            s_appliedTheme = theme;
         }
         catch (Exception)
         {

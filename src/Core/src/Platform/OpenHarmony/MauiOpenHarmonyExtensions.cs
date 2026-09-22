@@ -90,6 +90,7 @@ public static class MauiOpenHarmonyExtensions
         var appInfo = new OpenHarmonyAppInfo();
         var deviceInfo = new OpenHarmonyDeviceInfo();
         var versionTracking = new OpenHarmonyVersionTracking(preferences);
+        var appActions = new OpenHarmonyAppActions();
         var clipboard = new OpenHarmonyClipboard();
         var connectivity = new OpenHarmonyConnectivity();
         var launcher = new OpenHarmonyLauncher();
@@ -104,6 +105,10 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IAppInfo>(appInfo);
         builder.Services.AddSingleton<Microsoft.Maui.Devices.IDeviceInfo>(deviceInfo);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IVersionTracking>(versionTracking);
+        // IAppActions has no runtime shortcut setter on OpenHarmony; registering the degrading
+        // implementation keeps AppActions.Current (and apps iterating shortcuts) from hitting
+        // the reference-assembly not-implemented exception.
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IAppActions>(appActions);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.DataTransfer.IClipboard>(clipboard);
         builder.Services.AddSingleton<Microsoft.Maui.Networking.IConnectivity>(connectivity);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.ILauncher>(launcher);

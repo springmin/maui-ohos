@@ -1,6 +1,14 @@
 # OpenHarmony platform slice (start)
 
-Status: scaffolding. The fork's platform block (`Directory.Build.props`) enables the
+Status (2026-09-22): implemented and off-device verified. The slice registers 41 view-handler
+entries (pages/controls, WebView/HybridWebView, build-gated BlazorWebView) and draws the whole
+tree through the self-drawn compositor route: one ArkUI `XComponent` surface + canvas, custom
+`IView`/list materializer, and a shadow accessibility tree published to the ArkUI provider
+(route decision: `runtime-ohos` `docs/plans/2026-09-22-ohos-render-route-decision.md`).
+Baseline: the `ohos-workload` `test/maui-platform-verify` harness at 288 `[verify]` checks
+(floor 268). Device bring-up is in progress and independent of the render route.
+
+The fork's platform block (`Directory.Build.props`) enables the
 `net11.0-openharmony<api>` TFM automatically when the
 `microsoft.net.sdk.openharmony` workload is installed (`IncludeOpenHarmonyTargetFrameworks`),
 defines `OPENHARMONY` for compiled code, and the `maui-openharmony` workload extends

@@ -155,6 +155,12 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<OpenHarmonyWindowSurface>();
         builder.Services.AddSingleton<OpenHarmonyWindowRenderer>();
         builder.Services.AddSingleton<OpenHarmonyMauiAppHost>();
+        // Missing MAUI platform interfaces (audit): IPlatformApplication.Current is published by
+        // MauiAppBuilder.Build() through the initializer (which receives the app's service
+        // provider), and the overlay host installs the IWindowOverlay frame hook/registry. See
+        // OpenHarmonyMauiApplication.cs and OpenHarmonyWindowOverlay.cs.
+        builder.Services.AddSingleton<OpenHarmonyMauiApplication>();
+        builder.Services.AddSingleton<Microsoft.Maui.Hosting.IMauiInitializeService, OpenHarmonyMauiApplicationInitializer>();
         builder.ConfigureMauiHandlers(handlers =>
         {
             foreach (KeyValuePair<Type, Type> entry in SliceHandlers)

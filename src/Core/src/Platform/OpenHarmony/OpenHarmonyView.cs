@@ -470,8 +470,45 @@ public class OpenHarmonyView
 
     // Scroll support
     public bool IsScrollView { get; set; }
-    public float ScrollOffsetX { get; set; }
-    public float ScrollOffsetY { get; set; }
+
+    private float _scrollOffsetX;
+    private float _scrollOffsetY;
+
+    /// <summary>
+    /// Horizontal scroll offset. Writes feed the shared scroll physics so a fling can pick up
+    /// the velocity of a drag; with the physics disabled the property is a plain assignment.
+    /// </summary>
+    public float ScrollOffsetX
+    {
+        get => _scrollOffsetX;
+        set
+        {
+            if (value == _scrollOffsetX)
+            {
+                return;
+            }
+            float previous = _scrollOffsetX;
+            _scrollOffsetX = value;
+            OpenHarmonyScrollPhysics.OnOffsetChanged(this, horizontal: true, previous, value);
+        }
+    }
+
+    /// <summary>Vertical scroll offset (see <see cref="ScrollOffsetX"/>).</summary>
+    public float ScrollOffsetY
+    {
+        get => _scrollOffsetY;
+        set
+        {
+            if (value == _scrollOffsetY)
+            {
+                return;
+            }
+            float previous = _scrollOffsetY;
+            _scrollOffsetY = value;
+            OpenHarmonyScrollPhysics.OnOffsetChanged(this, horizontal: false, previous, value);
+        }
+    }
+
     public float ScrollContentWidth { get; set; }
     public float ScrollContentHeight { get; set; }
     /// <summary>Invoked when the scroll offset changes (virtualized lists slide their window).</summary>
@@ -509,6 +546,10 @@ public class OpenHarmonyView
                 canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
             }
         }
+        // Focus affordance for the self-drawn route: the PE2/OpenHarmonyFocusManager path marks
+        // this platform view's IsFocused, so the outline is painted here (opt-out via
+        // OpenHarmonyFocusRing.Enabled).
+        OpenHarmonyFocusRing.Draw(canvas, this);
         if (IsNavigationPage)
         {
             DrawNavigationBar(canvas, frame);
@@ -641,6 +682,12 @@ public class OpenHarmonyView
             }
             canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+        if (IsScrollView)
+        {
+            // Auto-hiding vertical thumb, painted from the view's own pass (opt-out via
+            // OpenHarmonyScrollbars.Enabled).
+            OpenHarmonyScrollbars.Draw(canvas, this);
         }
         // Children are drawn by OpenHarmonyWindowRenderer walking the MAUI tree; the list here
         // is used for hit-testing.

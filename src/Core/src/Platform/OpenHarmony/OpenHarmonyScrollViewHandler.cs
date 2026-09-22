@@ -56,8 +56,16 @@ public sealed class OpenHarmonyScrollViewHandler : OpenHarmonyViewHandler<IScrol
     }
 
     public static void MapVerticalOffset(OpenHarmonyScrollViewHandler handler, IScrollView scrollView)
-        => handler.PlatformView.ScrollOffsetY = (float)scrollView.VerticalOffset;
+    {
+        // An app-driven offset write takes over from a fling (the fling's own sync write is
+        // recognised by the physics and does not cancel itself).
+        OpenHarmonyScrollPhysics.CancelIfAppDriven(handler.PlatformView);
+        handler.PlatformView.ScrollOffsetY = (float)scrollView.VerticalOffset;
+    }
 
     public static void MapHorizontalOffset(OpenHarmonyScrollViewHandler handler, IScrollView scrollView)
-        => handler.PlatformView.ScrollOffsetX = (float)scrollView.HorizontalOffset;
+    {
+        OpenHarmonyScrollPhysics.CancelIfAppDriven(handler.PlatformView);
+        handler.PlatformView.ScrollOffsetX = (float)scrollView.HorizontalOffset;
+    }
 }

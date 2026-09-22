@@ -284,6 +284,8 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
             OpenHarmonyStatus.Once("collection.scrollto.animated",
                 "CollectionView.ScrollTo jumps to the target; the compositor has no scroll animation");
         }
+        // A jump requested by app code takes over from an in-flight fling.
+        OpenHarmonyScrollPhysics.Cancel(PlatformView);
         materializer.ScrollTo(row, args.ScrollToPosition);
     }
 

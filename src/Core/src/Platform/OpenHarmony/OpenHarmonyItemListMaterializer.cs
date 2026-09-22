@@ -101,6 +101,8 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// <summary>Replaces the data behind the list (grouped sources become header rows).</summary>
     public void SetItems(System.Collections.IEnumerable? source, bool grouped = false, Func<object?, string>? headerText = null)
     {
+        // A data change invalidates the momentum (the content height may have shrunk under it).
+        OpenHarmonyScrollPhysics.Cancel(_platformView);
         _data.Clear();
         _headerRows.Clear();
         _groups.Clear();
@@ -155,6 +157,7 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// <summary>Drops all materialized views (item template changed).</summary>
     public void Reset()
     {
+        OpenHarmonyScrollPhysics.Cancel(_platformView);
         _pool.Clear();
         _materialized.Clear();
         _windowFirst = -1;
@@ -165,6 +168,7 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// <summary>Drops the header/footer/empty content (their template or value changed).</summary>
     public void ResetExtras()
     {
+        OpenHarmonyScrollPhysics.Cancel(_platformView);
         _headerView = null;
         _footerView = null;
         _emptyView = null;
@@ -246,6 +250,8 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// <summary>Scrolls the row so that it lands at the requested position in the viewport.</summary>
     public void ScrollTo(int row, ScrollToPosition position)
     {
+        // The jump owns the offset from here: stop any momentum moving the same view.
+        OpenHarmonyScrollPhysics.Cancel(_platformView);
         RectF frame = _platformView.Frame;
         if (row < 0 || row >= _data.Count || frame.Height <= 0)
         {

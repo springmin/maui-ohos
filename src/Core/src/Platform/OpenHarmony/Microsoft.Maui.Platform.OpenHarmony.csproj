@@ -5,7 +5,6 @@
     <RootNamespace>Microsoft.Maui.Platform</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <NoWarn>$(NoWarn);CA1418</NoWarn>
     <!-- The platform bridge (Microsoft.OpenHarmony.Hosting) ships in the OpenHarmony platform
          workload packs; point this at a built or installed copy when building outside the
          workload repo. -->
@@ -26,12 +25,25 @@
          fork's full solve is unchanged). -->
     <_MauiDirectoryBuildTargetsPath>$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), 'Directory.Build.targets'))</_MauiDirectoryBuildTargetsPath>
     <ImportDirectoryBuildTargets Condition=" '$(_MauiDirectoryBuildTargetsPath)' != '' and !Exists('$(_MauiDirectoryBuildTargetsPath)/eng/AndroidX.targets') ">false</ImportDirectoryBuildTargets>
-    <!-- Directory.Build.props turns warnings into errors for the shipping MAUI build. The slice
-         deliberately uses APIs MAUI marks obsolete (ListView, Frame) and a couple of interfaces
-         with looser nullability, all of which the harness compiles with warnings enabled but not
-         fatal; keep the same policy here so the standalone build reports them without failing. -->
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Directory.Build.props turns warnings into errors for the shipping MAUI build. Keep that
+         policy here and leave only the diagnostics this compile vehicle knowingly produces and
+         cannot fix without editing the slice sources (owned by the slice work, not this
+         project): CS0618 (the slice deliberately implements the obsolete ListView/Frame
+         handlers), CA2255 (the Essentials entry points are [ModuleInitializer]s), and the
+         CS8604/CS8766/CS8613 nullability mismatches against the platform-less interfaces. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618;CA2255;CS8604;CS8766;CS8613</WarningsNotAsErrors>
+    <!-- The darc feeds only serve the vulnerability audit when the network is up; the standalone
+         vehicle must also restore/build in partial, offline checkouts. The shipping build keeps
+         the audit (NU1900 would otherwise be promoted by TreatWarningsAsErrors). -->
+    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- CA1418: OpenHarmony is not in the platform-compatibility analyzer's known-platform list
+         (this vehicle targets plain net11.0, not net*-openharmony); declare the platform
+         explicitly instead of suppressing the rule, mirroring the runtime's sdk-ohos projects. -->
+    <SupportedPlatform Include="openharmony" />
+  </ItemGroup>
   <ItemGroup>
     <!-- Microsoft.Maui.Controls also carries the MAUI implicit global usings
          (Microsoft.Maui.Controls/Graphics/Devices/... via buildTransitive Globs.props); the
@@ -42,6 +54,12 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.1.26451.6" />
   </ItemGroup>
   <ItemGroup>
+    <!-- ABI freeze (R5): the native host entry points keep the `ohos_host_*` symbol prefix and
+         the `OHOS_HOST_APP_CONTEXT` environment variable, and the hosting bridge keeps the
+         Microsoft.OpenHarmony.Hosting names it P/Invokes them through. Those identifiers
+         crossed the ArkTS/NAPI boundary and are baked into published app bundles and shells,
+         so they are the frozen compatibility surface even though everything user-visible uses
+         the OpenHarmony name; renaming them would break already-shipped apps. -->
     <Reference Include="Microsoft.OpenHarmony.Hosting">
       <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
       <Private>false</Private>

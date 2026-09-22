@@ -144,6 +144,11 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.Media.IScreenshot>(screenshot);
         builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeocoding>(geocoding);
         InstallEssentials();
+        // Generic focus hook for non-text views (the shared ViewHandler Focus/Unfocus commands)
+        // and the internal hardware-key surface; MAUI rc.1 has no key contract, so the key
+        // listener stays internal (see OpenHarmonyKeyListener for what a public surface needs).
+        OpenHarmonyFocusManager.Install();
+        OpenHarmonyKeyListener.Install();
         // MAUI animations (FadeTo/TranslateTo/...): the ticker drives the animation manager.
         builder.Services.AddSingleton<Microsoft.Maui.Animations.ITicker, OpenHarmonyTicker>();
         builder.Services.AddSingleton<Microsoft.Maui.Animations.IAnimationManager, Microsoft.Maui.Animations.AnimationManager>();

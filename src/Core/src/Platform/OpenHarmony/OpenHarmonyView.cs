@@ -875,21 +875,36 @@ public class OpenHarmonyView
     private void DrawCaret(MauiCanvas canvas, RectF frame, string text)
     {
         int caretIndex = CursorPosition >= 0 && CursorPosition <= text.Length ? CursorPosition : text.Length;
-        float caretWidth = 0;
-        if (caretIndex > 0)
-        {
-            string prefix = text[..caretIndex];
-            if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(prefix, FontSize, out int measured, out int _) && measured > 0)
-            {
-                caretWidth = measured;
-            }
-            else
-            {
-                caretWidth = prefix.Length * FontSize * 0.55f;
-            }
-        }
+        float caretWidth = CaretWidth(text, caretIndex);
         canvas.FillColor = Colors.White;
         canvas.FillRectangle(frame.X + 12 + caretWidth, frame.Y + 8, 2, frame.Height - 16);
+    }
+
+    /// <summary>
+    /// Width of the text before the caret from the cached per-character widths - the same array
+    /// caret hit-testing uses, so the drawn caret and <see cref="CursorIndexFromX"/> always agree.
+    /// <see cref="CharWidths"/> stores each glyph as the difference of two prefix measurements
+    /// (and the estimate fallback is a per-character constant), so summing the prefix is exactly
+    /// the whole-prefix measurement the previous implementation took per frame, without the
+    /// substring allocation and the native call.
+    /// </summary>
+    private float CaretWidth(string text, int caretIndex)
+    {
+        if (caretIndex <= 0)
+        {
+            return 0;
+        }
+        if (caretIndex > text.Length)
+        {
+            caretIndex = text.Length;
+        }
+        float[] widths = CharWidths(text);
+        float width = 0;
+        for (int i = 0; i < caretIndex && i < widths.Length; i++)
+        {
+            width += widths[i];
+        }
+        return width;
     }
 
     private void DrawSelection(MauiCanvas canvas, RectF frame, string text)
@@ -901,7 +916,7 @@ public class OpenHarmonyView
         int start = Math.Clamp(Math.Min(CursorPosition, CursorPosition - SelectionLength), 0, text.Length);
         int end = Math.Clamp(Math.Max(CursorPosition, CursorPosition - SelectionLength), 0, text.Length);
         float left = frame.X + 12;
-        float right = left + EstimateWidth(text, FontSize);
+        float right = left + CaretWidth(text, text.Length);
         float startX = left + (text.Length > 0 ? (right - left) * start / text.Length : 0);
         float endX = left + (text.Length > 0 ? (right - left) * end / text.Length : 0);
         if (endX > startX)
@@ -909,15 +924,6 @@ public class OpenHarmonyView
             canvas.FillColor = Colors.DodgerBlue.WithAlpha(0.4f);
             canvas.FillRectangle(startX, frame.Y + 8, endX - startX, frame.Height - 16);
         }
-    }
-
-    private static float EstimateWidth(string text, float fontSize)
-    {
-        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(text, fontSize, out int measured, out int _) && measured > 0)
-        {
-            return measured;
-        }
-        return text.Length * fontSize * 0.55f;
     }
 
     private void DrawImage(MauiCanvas canvas, RectF frame)
@@ -1033,13 +1039,36 @@ public class OpenHarmonyView
         canvas.StrokeSize = 1;
         canvas.DrawRectangle(x, y, width, height);
         canvas.FontSize = FontSize;
-        for (int i = 0; i < PopupItems.Count; i++)
+        // Only rows the surface can show are drawn. A long dropdown (a picker with hundreds of
+        // items) otherwise pays one native text draw per item on every frame, and the canvas
+        // clips every row below the surface anyway, so the pixels are unchanged.
+        int lastRow = PopupItems.Count;
+        if (SurfaceViewportHeight > 0)
+        {
+            lastRow = (int)Math.Ceiling((SurfaceViewportHeight - y) / PopupRowHeight);
+            lastRow = Math.Clamp(lastRow, 0, PopupItems.Count);
+        }
+        for (int i = 0; i < lastRow; i++)
         {
             float rowY = y + i * PopupRowHeight;
             canvas.FontColor = i == PopupSelectedIndex ? Colors.DodgerBlue : Colors.White;
             canvas.DrawString(PopupItems[i], x + 16, rowY, width - 32, PopupRowHeight,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
+    }
+
+    /// <summary>
+    /// Size of the surface the compositor last drew into. The popup and carousel indicator draws
+    /// use it to skip rows/dots the canvas clips; 0 means unknown and draws everything.
+    /// </summary>
+    internal static int SurfaceViewportWidth { get; private set; }
+
+    internal static int SurfaceViewportHeight { get; private set; }
+
+    internal static void SetSurfaceViewport(int width, int height)
+    {
+        SurfaceViewportWidth = width;
+        SurfaceViewportHeight = height;
     }
 
     /// <summary>Index of the dropdown row at the point (-1 when outside the popup).</summary>

@@ -57,6 +57,7 @@ public sealed class OpenHarmonyWindowRenderer
             popup.DrawPopup(_canvas);
         }
         OpenHarmonyAlertHost.SetSurface(width, height);
+        OpenHarmonyView.SetSurfaceViewport(width, height);
         DrawAlertOverlay();
         OpenHarmonyDiagnostics.Reset();
         OpenHarmonyAccessibility.Refresh(content);
@@ -173,50 +174,116 @@ public sealed class OpenHarmonyWindowRenderer
         }
     }
 
-    /// <summary>Child views of a view: layout children and content-view content (pages).</summary>
-    private static IEnumerable<IView> ChildrenOf(IView view)
+    /// <summary>
+    /// Child views of a view: layout children and content-view content (pages).
+    /// </summary>
+    /// <remarks>
+    /// The sequence is produced by the allocation-free <see cref="ChildEnumerator"/> struct instead
+    /// of an iterator method: the frame path walks every node of the tree (drawing, hit-testing,
+    /// animation probing), and a C# iterator allocated a state machine plus the layout's interface
+    /// enumerator per node per walk, which the Debug build measured at ~180 B per node per frame.
+    /// The order, the reference-identity comparisons (presented content vs. navigation page) and
+    /// the laziness (later branches are only read once the earlier ones are exhausted, so a
+    /// hit-test that stops at a view outside the point never touches its page/flyout state) are
+    /// exactly those of the iterator this replaces.
+    /// </remarks>
+    private struct ChildEnumerator
     {
-        if (view is ILayout layout)
+        private static readonly List<IView> s_noChildren = new();
+
+        private readonly IView _view;
+        private IView? _current;
+        private IView? _presentedContent;
+        private List<IView>? _viewChildren;
+        private int _phase;
+        private int _index;
+
+        public ChildEnumerator(IView view)
         {
-            foreach (IView child in layout)
-            {
-                yield return child;
-            }
+            _view = view;
+            _current = null;
+            _presentedContent = null;
+            _viewChildren = null;
+            _phase = 0;
+            _index = 0;
         }
-        IView? presentedContent = (view as IContentView)?.PresentedContent as IView;
-        if (presentedContent is not null)
+
+        /// <summary>Pattern-based foreach entry point: copied per loop, still allocation-free.</summary>
+        public readonly ChildEnumerator GetEnumerator() => this;
+
+        public readonly IView Current => _current!;
+
+        public bool MoveNext()
         {
-            yield return presentedContent;
-        }
-        // The current page of a navigation page is what is visible; avoid double-yielding when
-        // it is also the presented content.
-        if (view is Microsoft.Maui.Controls.NavigationPage navigation &&
-            navigation.CurrentPage is IView currentPage &&
-            !ReferenceEquals(currentPage, presentedContent))
-        {
-            yield return currentPage;
-        }
-        // Flyout pages: the detail is always visible, the flyout only while presented.
-        if (view is Microsoft.Maui.Controls.FlyoutPage flyoutPage)
-        {
-            if (flyoutPage.Detail is IView flyoutDetail)
+            switch (_phase)
             {
-                yield return flyoutDetail;
-            }
-            if (flyoutPage.IsPresented && flyoutPage.Flyout is IView flyoutContent)
-            {
-                yield return flyoutContent;
-            }
-        }
-        // Platform-owned children (collection view items) are part of the rendered tree.
-        if (view.Handler?.PlatformView is OpenHarmonyView { ViewChildren.Count: > 0 } platform)
-        {
-            foreach (IView child in platform.ViewChildren)
-            {
-                yield return child;
+                case 0: // layout children, in list order
+                    if (_view is ILayout layout)
+                    {
+                        while (_index < layout.Count)
+                        {
+                            _current = layout[_index++];
+                            return true;
+                        }
+                    }
+                    _phase = 1;
+                    _index = 0;
+                    goto case 1;
+                case 1: // the content view's presented content
+                    _phase = 2;
+                    _presentedContent = (_view as IContentView)?.PresentedContent as IView;
+                    if (_presentedContent is not null)
+                    {
+                        _current = _presentedContent;
+                        return true;
+                    }
+                    goto case 2;
+                case 2: // the visible page of a navigation page (unless already presented above)
+                    _phase = 3;
+                    if (_view is Microsoft.Maui.Controls.NavigationPage navigation &&
+                        navigation.CurrentPage is IView currentPage &&
+                        !ReferenceEquals(currentPage, _presentedContent))
+                    {
+                        _current = currentPage;
+                        return true;
+                    }
+                    goto case 3;
+                case 3: // flyout page detail (always visible)
+                    _phase = 4;
+                    if (_view is Microsoft.Maui.Controls.FlyoutPage flyoutPage && flyoutPage.Detail is IView detail)
+                    {
+                        _current = detail;
+                        return true;
+                    }
+                    goto case 4;
+                case 4: // flyout page panel (only while presented)
+                    _phase = 5;
+                    if (_view is Microsoft.Maui.Controls.FlyoutPage presented &&
+                        presented.IsPresented &&
+                        presented.Flyout is IView flyoutContent)
+                    {
+                        _current = flyoutContent;
+                        return true;
+                    }
+                    goto case 5;
+                case 5: // platform-owned children (collection view items)
+                    _viewChildren ??= _view.Handler?.PlatformView is OpenHarmonyView { ViewChildren.Count: > 0 } platform
+                        ? platform.ViewChildren
+                        : s_noChildren;
+                    while (_index < _viewChildren.Count)
+                    {
+                        _current = _viewChildren[_index++];
+                        return true;
+                    }
+                    _phase = 6;
+                    return false;
+                default:
+                    return false;
             }
         }
     }
+
+    private static ChildEnumerator ChildrenOf(IView view) => new(view);
 
     private void DrawView(IView view)
     {
@@ -280,20 +347,37 @@ public sealed class OpenHarmonyWindowRenderer
             }
             if (platform.IsFlyoutPage)
             {
-                // Detail fills the window; the flyout is an overlay clipped to its panel.
-                IReadOnlyList<IView> flyoutChildren = ChildrenOf(view).ToList();
-                if (flyoutChildren.Count > 0)
+                // Detail fills the window; the flyout is an overlay clipped to its panel. Only the
+                // first two children are drawn, so the walk stops there instead of materialising
+                // the list the iterator version needed.
+                IView? flyoutDetail = null;
+                IView? flyoutContent = null;
+                int childIndex = 0;
+                foreach (IView child in ChildrenOf(view))
                 {
-                    DrawView(flyoutChildren[0]);
+                    if (childIndex == 0)
+                    {
+                        flyoutDetail = child;
+                    }
+                    else if (childIndex == 1)
+                    {
+                        flyoutContent = child;
+                        break;
+                    }
+                    childIndex++;
                 }
-                if (platform.FlyoutPresented && flyoutChildren.Count > 1)
+                if (flyoutDetail is not null)
+                {
+                    DrawView(flyoutDetail);
+                }
+                if (platform.FlyoutPresented && flyoutContent is not null)
                 {
                     RectF flyoutFrame = platform.Frame;
                     _canvas.FillColor = Colors.Black.WithAlpha(0.5f);
                     _canvas.FillRectangle(flyoutFrame.X, flyoutFrame.Y, flyoutFrame.Width, flyoutFrame.Height);
                     _canvas.SaveState();
                     _canvas.ClipRectangle(flyoutFrame.X, flyoutFrame.Y, platform.FlyoutWidth, flyoutFrame.Height);
-                    DrawView(flyoutChildren[1]);
+                    DrawView(flyoutContent);
                     _canvas.RestoreState();
                 }
                 return;
@@ -345,6 +429,8 @@ public sealed class OpenHarmonyWindowRenderer
     private float _dragPressY;
     private long _dragPressTicks;
     private bool _dragRejected;
+    /// <summary>Press-time fact: does any view in the tree own a usable drop recognizer?</summary>
+    private bool _dropCapableSeen;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
     public bool HasAnimations(IView? root)
@@ -376,7 +462,18 @@ public sealed class OpenHarmonyWindowRenderer
         float startX = frame.X + (frame.Width - count * spacing) / 2f + spacing / 2f;
         float y = frame.Y + frame.Height - 16f;
         int position = Math.Clamp(view.Position, 0, count - 1);
-        for (int i = 0; i < count; i++)
+        // Only dots the surface can show are drawn: a carousel with hundreds of items lays them
+        // out past both screen edges, and a dot outside the surface is clipped, so its colour and
+        // circle are invisible work. The index range is derived from the same startX/spacing the
+        // drawing loop uses, so the visible pixels are identical.
+        int first = 0;
+        int last = count;
+        if (OpenHarmonyView.SurfaceViewportWidth > 0)
+        {
+            first = Math.Clamp((int)Math.Floor((-startX) / spacing), 0, count);
+            last = Math.Clamp((int)Math.Ceiling((OpenHarmonyView.SurfaceViewportWidth - startX) / spacing), 0, count);
+        }
+        for (int i = first; i < last; i++)
         {
             _canvas.FillColor = i == position ? Colors.White : Colors.Gray;
             _canvas.FillCircle(startX + i * spacing, y, i == position ? 6f : 4f);
@@ -484,7 +581,12 @@ public sealed class OpenHarmonyWindowRenderer
         {
             if (_dragRoot is { } sessionRoot)
             {
-                OpenHarmonyDragAndDrop.Update(session, FindDropTarget(sessionRoot, x, y));
+                // The press-time structure decides whether a drop target can exist at all; only
+                // then does the move pay for the positional walk (which cannot be answered from a
+                // flat candidate list: the ancestor frames that prune a subtree, and the scroll
+                // offsets that shift it, depend on the path to each view).
+                OpenHarmonyDragAndDrop.Update(session,
+                    _dropCapableSeen ? FindDropTarget(sessionRoot, x, y) : null);
             }
             return true;
         }
@@ -511,7 +613,8 @@ public sealed class OpenHarmonyWindowRenderer
         AbortDragCompetitors();
         if (_dragRoot is { } dragRoot)
         {
-            OpenHarmonyDragAndDrop.Update(_dragSession, FindDropTarget(dragRoot, x, y));
+            OpenHarmonyDragAndDrop.Update(_dragSession,
+                _dropCapableSeen ? FindDropTarget(dragRoot, x, y) : null);
         }
         return true;
     }
@@ -572,7 +675,9 @@ public sealed class OpenHarmonyWindowRenderer
         // Pointer gestures (pointer recognizers receive enter/press on touch down, release/exit on up).
         if (down || up)
         {
-            if (FindPointerTarget(root, x, y) is { } pointerView)
+            TouchWalk pointerWalk = default;
+            CollectTouchTargets(root, x, y, true, TouchTargets.Pointer, ref pointerWalk);
+            if (pointerWalk.Pointer is { } pointerView)
             {
                 if (up)
                 {
@@ -587,16 +692,46 @@ public sealed class OpenHarmonyWindowRenderer
             }
         }
 
-        // An open dropdown owns all touches until it is used or dismissed. The popup is found
-        // in the tree (it must also work when nothing has been drawn yet, e.g. in tests).
+        // Every remaining hit-test the touch path needs is answered by one walk instead of one
+        // walk per query. The queries the walk replaces - popup, flyout, scroll view, slider,
+        // drag target, gesture target - all share the same traversal rules (a platform view whose
+        // frame excludes the point hides its whole subtree; scroll offsets shift the children),
+        // and the popup/flyout searches walk the whole tree whenever no dropdown is open, i.e. on
+        // every ordinary touch. The walk runs after the pointer dispatch exactly like the queries
+        // it replaces, so a handler that mutates the tree while handling the press is observed by
+        // the remaining queries just as before.
+        TouchTargets wanted = TouchTargets.None;
         if (_popupView is not { PopupVisible: true })
         {
-            _popupView = FindOpenPopup(root);
+            wanted |= TouchTargets.Popup;
         }
-        // Shell flyout panels behave the same way.
         if (_flyoutPanelView is not { FlyoutOpen: true })
         {
-            _flyoutPanelView = FindOpenFlyout(root);
+            wanted |= TouchTargets.Flyout;
+        }
+        if (down)
+        {
+            wanted |= TouchTargets.Scroll | TouchTargets.Slider | TouchTargets.Drag
+                | TouchTargets.Gesture | TouchTargets.Drop;
+        }
+        TouchWalk walk = default;
+        if (wanted != TouchTargets.None)
+        {
+            CollectTouchTargets(root, x, y, true, wanted, ref walk);
+            if ((wanted & TouchTargets.Popup) != 0)
+            {
+                _popupView = walk.Popup;
+            }
+            if ((wanted & TouchTargets.Flyout) != 0)
+            {
+                _flyoutPanelView = walk.Flyout;
+            }
+            if ((wanted & TouchTargets.Drop) != 0)
+            {
+                // Structural hint for drag moves: with no drop recognizer anywhere no move can
+                // resolve a drop target, so the per-move full-tree search is skipped.
+                _dropCapableSeen = walk.SawDropCapable;
+            }
         }
         if (_flyoutPanelView is { FlyoutOpen: true } flyoutPanel)
         {
@@ -677,8 +812,8 @@ public sealed class OpenHarmonyWindowRenderer
             _downX = x;
             _downY = y;
             _moved = false;
-            _dragScrollTarget = FindScrollView(root, x, y);
-            _dragSliderTarget = FindSlider(root, x, y);
+            _dragScrollTarget = walk.Scroll;
+            _dragSliderTarget = walk.Slider;
             _dragLastY = y;
             _panTarget = null;
             _swipeTarget = null;
@@ -690,13 +825,13 @@ public sealed class OpenHarmonyWindowRenderer
                 OpenHarmonyDragAndDrop.Cancel(unexpectedDrag);
             }
             _dragSession = null;
-            _dragCandidate = FindDragTarget(root, x, y);
+            _dragCandidate = walk.Drag;
             _dragRoot = root;
             _dragPressX = x;
             _dragPressY = y;
             _dragPressTicks = Environment.TickCount64;
             _dragRejected = false;
-            if (FindGestureTarget(root, x, y) is { } panCandidate)
+            if (walk.Gesture is { } panCandidate)
             {
                 if (!OpenHarmonyGestures.HasPan(panCandidate) && OpenHarmonyGestures.HasSwipe(panCandidate))
                 {
@@ -726,7 +861,7 @@ public sealed class OpenHarmonyWindowRenderer
             if (_dragSession is { } dragSession)
             {
                 // The release completes the drag over the view under the pointer (if any).
-                OpenHarmonyDragAndDrop.Drop(dragSession, FindDropTarget(root, x, y));
+                OpenHarmonyDragAndDrop.Drop(dragSession, _dropCapableSeen ? FindDropTarget(root, x, y) : null);
                 _dragSession = null;
                 _dragCandidate = null;
                 _dragRoot = null;
@@ -860,40 +995,111 @@ public sealed class OpenHarmonyWindowRenderer
         return handled;
     }
 
-    /// <summary>Applies a cursor/selection update to the entry (platform + virtual view).</summary>
-    private OpenHarmonyView? FindOpenFlyout(IView view)
+    /// <summary>Which hit-tests a touch walk should answer.</summary>
+    [Flags]
+    private enum TouchTargets
     {
-        if (view.Handler?.PlatformView is OpenHarmonyView { FlyoutOpen: true } flyout)
-        {
-            return flyout;
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            OpenHarmonyView? found = FindOpenFlyout(child);
-            if (found is not null)
-            {
-                return found;
-            }
-        }
-        return null;
+        None = 0,
+        Pointer = 1 << 0,
+        Scroll = 1 << 1,
+        Slider = 1 << 2,
+        Drag = 1 << 3,
+        Gesture = 1 << 4,
+        Popup = 1 << 5,
+        Flyout = 1 << 6,
+        Drop = 1 << 7,
     }
 
-    /// <summary>First platform view in the tree with an open dropdown.</summary>
-    private OpenHarmonyView? FindOpenPopup(IView view)
+    /// <summary>Results of one touch walk; null means "nothing of that kind under the point".</summary>
+    private struct TouchWalk
     {
-        if (view.Handler?.PlatformView is OpenHarmonyView { PopupVisible: true } popup)
+        public IView? Pointer;
+        public OpenHarmonyView? Scroll;
+        public OpenHarmonyView? Slider;
+        public IView? Drag;
+        public IView? Gesture;
+        public OpenHarmonyView? Popup;
+        public OpenHarmonyView? Flyout;
+
+        /// <summary>True when the walk saw a usable drop recognizer anywhere (structure, not position).</summary>
+        public bool SawDropCapable;
+    }
+
+    /// <summary>
+    /// One walk that answers every touch hit-test the press path needs. Each query keeps its
+    /// original traversal rule: the five position queries prune a subtree whose platform view
+    /// does not contain the point and shift child coordinates by scroll offsets, while the popup
+    /// and flyout searches are pre-order first matches and are not pruned. Deepest-match queries
+    /// resolve like the recursive originals: the last child that produced a match wins, and the
+    /// view itself only matches when no child did.
+    /// </summary>
+    private void CollectTouchTargets(IView view, float x, float y, bool positioned, TouchTargets wanted, ref TouchWalk walk)
+    {
+        OpenHarmonyView? platform = view.Handler?.PlatformView as OpenHarmonyView;
+        if (platform is not null)
         {
-            return popup;
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            OpenHarmonyView? found = FindOpenPopup(child);
-            if (found is not null)
+            if ((wanted & TouchTargets.Popup) != 0 && walk.Popup is null && platform.PopupVisible)
             {
-                return found;
+                walk.Popup = platform;
+            }
+            if ((wanted & TouchTargets.Flyout) != 0 && walk.Flyout is null && platform.FlyoutOpen)
+            {
+                walk.Flyout = platform;
+            }
+            if (positioned && !platform.Frame.Contains(x, y))
+            {
+                positioned = false;
             }
         }
-        return null;
+        float localX = x;
+        float localY = y;
+        if (positioned && platform is { IsScrollView: true })
+        {
+            localX += platform.ScrollOffsetX;
+            localY += platform.ScrollOffsetY;
+        }
+        if ((wanted & TouchTargets.Drop) != 0 && OpenHarmonyDragAndDrop.HasDrop(view))
+        {
+            walk.SawDropCapable = true;
+        }
+        IView? pointerBefore = walk.Pointer;
+        OpenHarmonyView? scrollBefore = walk.Scroll;
+        OpenHarmonyView? sliderBefore = walk.Slider;
+        IView? dragBefore = walk.Drag;
+        IView? gestureBefore = walk.Gesture;
+        foreach (IView child in ChildrenOf(view))
+        {
+            CollectTouchTargets(child, localX, localY, positioned, wanted, ref walk);
+        }
+        if (!positioned)
+        {
+            return;
+        }
+        if ((wanted & TouchTargets.Pointer) != 0 && ReferenceEquals(walk.Pointer, pointerBefore)
+            && OpenHarmonyPointer.HasPointer(view))
+        {
+            walk.Pointer = view;
+        }
+        if ((wanted & TouchTargets.Scroll) != 0 && ReferenceEquals(walk.Scroll, scrollBefore)
+            && platform is { IsScrollView: true })
+        {
+            walk.Scroll = platform;
+        }
+        if ((wanted & TouchTargets.Slider) != 0 && ReferenceEquals(walk.Slider, sliderBefore)
+            && platform is { IsSlider: true })
+        {
+            walk.Slider = platform;
+        }
+        if ((wanted & TouchTargets.Drag) != 0 && ReferenceEquals(walk.Drag, dragBefore)
+            && OpenHarmonyDragAndDrop.HasDrag(view))
+        {
+            walk.Drag = view;
+        }
+        if ((wanted & TouchTargets.Gesture) != 0 && ReferenceEquals(walk.Gesture, gestureBefore)
+            && (OpenHarmonyGestures.HasGestures(view) || platform is { Swipe: not null }))
+        {
+            walk.Gesture = view;
+        }
     }
 
     private IView? _pointerHover;
@@ -963,31 +1169,6 @@ public sealed class OpenHarmonyWindowRenderer
         return found ?? (OpenHarmonyPointer.HasPointer(view) ? view : null);
     }
 
-    /// <summary>Deepest view containing the point that owns a usable drag recognizer.</summary>
-    private IView? FindDragTarget(IView view, float x, float y)
-    {
-        IView? found = null;
-        float localX = x;
-        float localY = y;
-        if (view.Handler?.PlatformView is OpenHarmonyView platform)
-        {
-            if (!platform.Frame.Contains(x, y))
-            {
-                return null;
-            }
-            if (platform.IsScrollView)
-            {
-                localX += platform.ScrollOffsetX;
-                localY += platform.ScrollOffsetY;
-            }
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            found = FindDragTarget(child, localX, localY) ?? found;
-        }
-        return found ?? (OpenHarmonyDragAndDrop.HasDrag(view) ? view : null);
-    }
-
     /// <summary>Deepest view containing the point that owns a usable drop recognizer.</summary>
     private IView? FindDropTarget(IView view, float x, float y)
     {
@@ -1013,91 +1194,21 @@ public sealed class OpenHarmonyWindowRenderer
         return found ?? (OpenHarmonyDragAndDrop.HasDrop(view) ? view : null);
     }
 
-    /// <summary>Deepest view containing the point that owns gesture recognizers.</summary>
-    private IView? FindGestureTarget(IView view, float x, float y)
-    {
-        IView? found = null;
-        float localX = x;
-        float localY = y;
-        if (view.Handler?.PlatformView is OpenHarmonyView platform)
-        {
-            if (!platform.Frame.Contains(x, y))
-            {
-                return null;
-            }
-            if (platform.IsScrollView)
-            {
-                localX += platform.ScrollOffsetX;
-                localY += platform.ScrollOffsetY;
-            }
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            found = FindGestureTarget(child, localX, localY) ?? found;
-        }
-        return found ?? (OpenHarmonyGestures.HasGestures(view) ||
-                         view.Handler?.PlatformView is OpenHarmonyView { Swipe: not null } ? view : null);
-    }
-
-    /// <summary>Slider containing the point (the nearest ancestor wins).</summary>
-    private OpenHarmonyView? FindSlider(IView view, float x, float y)
-    {
-        OpenHarmonyView? found = null;
-        float localX = x;
-        float localY = y;
-        if (view.Handler?.PlatformView is OpenHarmonyView platform)
-        {
-            if (!platform.Frame.Contains(x, y))
-            {
-                return null;
-            }
-            if (platform.IsSlider)
-            {
-                found = platform;
-            }
-            if (platform.IsScrollView)
-            {
-                localX += platform.ScrollOffsetX;
-                localY += platform.ScrollOffsetY;
-            }
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            found = FindSlider(child, localX, localY) ?? found;
-        }
-        return found;
-    }
-
-    /// <summary>Deepest scroll view containing the point (coordinates adjusted for offsets).</summary>
-    private OpenHarmonyView? FindScrollView(IView view, float x, float y)
-    {
-        OpenHarmonyView? found = null;
-        float localX = x;
-        float localY = y;
-        if (view.Handler?.PlatformView is OpenHarmonyView platform)
-        {
-            if (!platform.Frame.Contains(x, y))
-            {
-                return null;
-            }
-            if (platform.IsScrollView)
-            {
-                found = platform;
-                localX += platform.ScrollOffsetX;
-                localY += platform.ScrollOffsetY;
-            }
-        }
-        foreach (IView child in ChildrenOf(view))
-        {
-            found = FindScrollView(child, localX, localY) ?? found;
-        }
-        return found;
-    }
-
     /// <summary>Human-readable tree for logs/tests: type, text and arranged frame.</summary>
     public string Describe(IView view, int depth = 0)
     {
         var sb = new StringBuilder();
+        DescribeInto(view, depth, sb);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends the description to one builder. The recursion used to return a string per subtree
+    /// and append it to the parent's builder, which copied every node once per ancestor (O(n*depth),
+    /// measured at 150 levels); writing into a single builder is O(n).
+    /// </summary>
+    private static void DescribeInto(IView view, int depth, StringBuilder sb)
+    {
         string indent = new string(' ', depth * 2);
         Rect frame = view.Frame;
         OpenHarmonyView? platform = view.Handler?.PlatformView as OpenHarmonyView;
@@ -1168,8 +1279,7 @@ public sealed class OpenHarmonyWindowRenderer
         sb.AppendLine();
         foreach (IView child in ChildrenOf(view))
         {
-            sb.Append(Describe(child, depth + 1));
+            DescribeInto(child, depth + 1, sb);
         }
-        return sb.ToString();
     }
 }

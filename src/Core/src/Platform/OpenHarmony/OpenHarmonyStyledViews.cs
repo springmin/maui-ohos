@@ -362,7 +362,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
             TextAlignment.End => top + height - blockHeight,
             _ => top,
         };
-        canvas.FontColor = Dimmed ? TextColor.WithAlpha(0.5f) : TextColor;
+        canvas.FontColor = TextColorForDraw;
         canvas.FontSize = fontSize;
         bool bold = IsBold(TextFont);
         if (IsItalic(TextFont))
@@ -447,7 +447,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
         }
         Color stroke = canvas.StrokeColor;
         float strokeSize = canvas.StrokeSize;
-        canvas.StrokeColor = Dimmed ? TextColor.WithAlpha(0.5f) : TextColor;
+        canvas.StrokeColor = TextColorForDraw;
         canvas.StrokeSize = Math.Max(1f, fontSize / 14f);
         float extent = Math.Max(1f, lineWidth);
         if ((decorations & TextDecorations.Underline) != TextDecorations.None)
@@ -753,7 +753,7 @@ public sealed class OpenHarmonyShapeView : OpenHarmonyView
         }
         else if (Background is not null)
         {
-            canvas.FillColor = Pressed ? Colors.OrangeRed : (Dimmed ? Background.WithAlpha(0.5f) : Background);
+            canvas.FillColor = Pressed ? Colors.OrangeRed : BackgroundForDraw!;
             if (CornerRadius > 0)
             {
                 canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);

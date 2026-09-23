@@ -160,6 +160,10 @@ internal static class OpenHarmonyScrollPhysics
     private static WeakReference<OpenHarmonyView>? s_lastScrolled;
     private static bool s_touchHooked;
 
+    // One cached delegate for the platform touch subscription: subscribing must not build a
+    // method-group delegate (the touch stream is a frame-path input).
+    private static readonly Action<OpenHarmonyTouchEventArgs> s_onTouch = OnTouch;
+
     // True between a platform touch down and its up/cancel. Set from the platform touch thread
     // and read on the frame thread; it keeps the stalled-sample fallback from starting a fling
     // while the finger is still down.
@@ -390,7 +394,7 @@ internal static class OpenHarmonyScrollPhysics
                 return;
             }
             s_touchHooked = true;
-            OpenHarmonyBridge.Touch += OnTouch;
+            OpenHarmonyBridge.Touch += s_onTouch;
         }
     }
 

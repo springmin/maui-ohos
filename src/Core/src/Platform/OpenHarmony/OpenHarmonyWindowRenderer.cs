@@ -29,6 +29,12 @@ public sealed class OpenHarmonyWindowRenderer
 
     public Color BackgroundColor { get; set; } = Colors.DarkSlateBlue;
 
+    /// <summary>Alert scrim: one shared colour, not a new Color per open-alert frame.</summary>
+    private static readonly Color s_alertScrim = Colors.Black.WithAlpha(0.55f);
+
+    /// <summary>Flyout scrim over the covered detail: derived once instead of per frame.</summary>
+    private static readonly Color s_flyoutScrim = Colors.Black.WithAlpha(0.5f);
+
     /// <summary>Measures and arranges the tree, then draws it when a surface is available.</summary>
     public bool Render(IView content, int width, int height)
     {
@@ -119,7 +125,7 @@ public sealed class OpenHarmonyWindowRenderer
         {
             return;
         }
-        _canvas.FillColor = Colors.Black.WithAlpha(0.55f);
+        _canvas.FillColor = s_alertScrim;
         _canvas.FillRectangle(0, 0, (float)OpenHarmonyAlertHost.Width, (float)OpenHarmonyAlertHost.Height);
         RectF box = OpenHarmonyAlertHost.BoxRect;
         _canvas.FillColor = Colors.DimGray;
@@ -373,7 +379,7 @@ public sealed class OpenHarmonyWindowRenderer
                 if (platform.FlyoutPresented && flyoutContent is not null)
                 {
                     RectF flyoutFrame = platform.Frame;
-                    _canvas.FillColor = Colors.Black.WithAlpha(0.5f);
+                    _canvas.FillColor = s_flyoutScrim;
                     _canvas.FillRectangle(flyoutFrame.X, flyoutFrame.Y, flyoutFrame.Width, flyoutFrame.Height);
                     _canvas.SaveState();
                     _canvas.ClipRectangle(flyoutFrame.X, flyoutFrame.Y, platform.FlyoutWidth, flyoutFrame.Height);

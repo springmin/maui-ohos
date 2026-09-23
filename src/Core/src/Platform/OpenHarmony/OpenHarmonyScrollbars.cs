@@ -149,9 +149,27 @@ internal static class OpenHarmonyScrollbars
         {
             return;
         }
-        canvas.FillColor = ThumbColor.WithAlpha(fade * ThumbOpacity);
+        canvas.FillColor = TintFor(fade);
         canvas.FillRoundedRectangle(thumb.X, thumb.Y, thumb.Width, thumb.Height, thumb.Width / 2f);
         Draws++;
+    }
+
+    // One Color per distinct (colour, opacity): the bar holds full opacity for HoldMs, so the
+    // frames in that window reuse the same tint instead of allocating a Color per draw.
+    private static Color s_tint = Colors.White;
+    private static float s_tintOpacity = -1f;
+    private static Color? s_tintSource;
+
+    private static Color TintFor(float fade)
+    {
+        float opacity = fade * ThumbOpacity;
+        if (s_tintSource is null || !ReferenceEquals(s_tintSource, ThumbColor) || s_tintOpacity != opacity)
+        {
+            s_tintSource = ThumbColor;
+            s_tintOpacity = opacity;
+            s_tint = ThumbColor.WithAlpha(opacity);
+        }
+        return s_tint;
     }
 
     /// <summary>Drops all bar state (tests only).</summary>
@@ -160,6 +178,7 @@ internal static class OpenHarmonyScrollbars
         lock (s_sync)
         {
             s_states = new ConditionalWeakTable<OpenHarmonyView, BarState>();
+            s_tintSource = null;
             Draws = 0;
         }
     }

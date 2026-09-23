@@ -12,9 +12,58 @@ public class OpenHarmonyView
 
     public string? Text { get; set; }
     public float FontSize { get; set; } = 14f;
-    public Color TextColor { get; set; } = Colors.White;
-    public Color? Background { get; set; }
+
+    private Color _textColor = Colors.White;
+    private Color? _dimmedTextColor;
+
+    /// <summary>
+    /// Text colour. Assigning a different colour drops the cached disabled variant, so the
+    /// derived colour the draw path uses is built once per source colour instead of once per
+    /// frame (which allocated a Color per dimmed view per frame).
+    /// </summary>
+    public Color TextColor
+    {
+        get => _textColor;
+        set
+        {
+            if (ReferenceEquals(_textColor, value))
+            {
+                return;
+            }
+            _textColor = value;
+            _dimmedTextColor = null;
+        }
+    }
+
+    private Color? _background;
+    private Color? _dimmedBackground;
+
+    /// <summary>Optional background fill; same cache invalidation as <see cref="TextColor"/>.</summary>
+    public Color? Background
+    {
+        get => _background;
+        set
+        {
+            if (ReferenceEquals(_background, value))
+            {
+                return;
+            }
+            _background = value;
+            _dimmedBackground = null;
+        }
+    }
+
     public float CornerRadius { get; set; }
+
+    /// <summary>Alpha applied to a disabled view's colours.</summary>
+    private const float DimAlpha = 0.5f;
+
+    /// <summary>Text colour for this draw pass; the disabled variant is reused, not re-derived.</summary>
+    internal Color TextColorForDraw => Dimmed ? _dimmedTextColor ??= _textColor.WithAlpha(DimAlpha) : _textColor;
+
+    /// <summary>Background colour for this draw pass; null when none is set.</summary>
+    internal Color? BackgroundForDraw =>
+        !Dimmed || _background is null ? _background : _dimmedBackground ??= _background.WithAlpha(DimAlpha);
 
     /// <summary>Invoked when a tap lands inside this view (buttons wire it to SendClicked).</summary>
     public Action? Tap { get; set; }
@@ -213,11 +262,14 @@ public class OpenHarmonyView
     public Action<int>? FlyoutSelect { get; set; }
     public Action? FlyoutRequested { get; set; }
 
+    /// <summary>Dimming scrim over the covered content: one shared colour, not per-frame.</summary>
+    private static readonly Color s_flyoutScrim = Colors.Black.WithAlpha(0.5f);
+
     public void DrawFlyoutPanel(MauiCanvas canvas)
     {
         RectF frame = Frame;
         float width = Math.Min(320f, frame.Width);
-        canvas.FillColor = Colors.Black.WithAlpha(0.5f);
+        canvas.FillColor = s_flyoutScrim;
         canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
         canvas.FillColor = Colors.DimGray;
         canvas.FillRectangle(frame.X, frame.Y, width, frame.Height);
@@ -264,67 +316,6 @@ public class OpenHarmonyView
     public const int CalendarWeeks = 6;
 
     public static float CalendarHeight => CalendarHeaderHeight + CalendarRowHeight * (CalendarWeeks + 1);
-
-    /// <summary>Draws the month calendar overlay.</summary>
-    public void DrawCalendar(MauiCanvas canvas)
-    {
-        RectF frame = Frame;
-        float x = frame.X;
-        float y = frame.Y + frame.Height;
-        float width = CalendarWidth;
-        canvas.FillColor = Colors.Black;
-        canvas.FillRectangle(x, y, width, CalendarHeight);
-        canvas.StrokeColor = Colors.Gray;
-        canvas.StrokeSize = 1;
-        canvas.DrawRectangle(x, y, width, CalendarHeight);
-
-        // Header: < Month Year >
-        canvas.FontSize = 26;
-        canvas.FontColor = Colors.White;
-        canvas.DrawString("<", x + 8, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
-        canvas.DrawString($"{CalendarYear:0000}-{CalendarMonth:00}", x + 48, y, width - 96, CalendarHeaderHeight,
-            HorizontalAlignment.Center, VerticalAlignment.Center);
-        canvas.DrawString(">", x + width - 48, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
-
-        // Weekday header (Monday first).
-        string[] names = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
-        canvas.FontSize = 20;
-        canvas.FontColor = Colors.Gray;
-        for (int column = 0; column < 7; column++)
-        {
-            canvas.DrawString(names[column], x + column * width / 7f, y + CalendarHeaderHeight,
-                width / 7f, CalendarRowHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
-        }
-
-        // Day grid.
-        DateTime first = new(CalendarYear, CalendarMonth, 1);
-        int leading = ((int)first.DayOfWeek + 6) % 7;
-        int days = DateTime.DaysInMonth(CalendarYear, CalendarMonth);
-        DateTime today = DateTime.Today;
-        canvas.FontSize = 22;
-        for (int day = 1; day <= days; day++)
-        {
-            int cell = leading + day - 1;
-            int row = cell / 7;
-            int column = cell % 7;
-            float cellX = x + column * width / 7f;
-            float cellY = y + CalendarHeaderHeight + (row + 1) * CalendarRowHeight;
-            if (row >= CalendarWeeks)
-            {
-                break;
-            }
-            bool isSelected = day == CalendarSelectedDay;
-            bool isToday = CalendarYear == today.Year && CalendarMonth == today.Month && day == today.Day;
-            if (isSelected)
-            {
-                canvas.FillColor = Colors.DodgerBlue;
-                canvas.FillCircle(cellX + width / 14f, cellY + CalendarRowHeight / 2f, CalendarRowHeight / 2f - 2);
-            }
-            canvas.FontColor = isSelected ? Colors.White : isToday ? Colors.DodgerBlue : Colors.White;
-            canvas.DrawString(day.ToString(), cellX, cellY, width / 7f, CalendarRowHeight,
-                HorizontalAlignment.Center, VerticalAlignment.Center);
-        }
-    }
 
     /// <summary>Hit test for the calendar: -1 outside, -2 previous, -3 next, 1..31 day.</summary>
     public int CalendarHit(float x, float y)
@@ -650,8 +641,7 @@ public class OpenHarmonyView
         }
         if (Background is not null)
         {
-            Color background = Background;
-            canvas.FillColor = Pressed ? Colors.OrangeRed : (Dimmed ? background.WithAlpha(0.5f) : background);
+            canvas.FillColor = Pressed ? Colors.OrangeRed : BackgroundForDraw!;
             if (CornerRadius > 0)
             {
                 canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
@@ -787,7 +777,7 @@ public class OpenHarmonyView
         }
         if (!string.IsNullOrEmpty(text))
         {
-            canvas.FontColor = Dimmed ? TextColor.WithAlpha(0.5f) : TextColor;
+            canvas.FontColor = TextColorForDraw;
             canvas.FontSize = FontSize;
             float padding = IsTextEntry ? 12f : (CornerRadius > 0 ? 24f : 0f);
             if (IsTextEntry && IsFocused)
@@ -921,10 +911,13 @@ public class OpenHarmonyView
         float endX = left + (text.Length > 0 ? (right - left) * end / text.Length : 0);
         if (endX > startX)
         {
-            canvas.FillColor = Colors.DodgerBlue.WithAlpha(0.4f);
+            canvas.FillColor = s_selectionFill;
             canvas.FillRectangle(startX, frame.Y + 8, endX - startX, frame.Height - 16);
         }
     }
+
+    /// <summary>Selection highlight: one shared colour, not a new Color per drawn frame.</summary>
+    private static readonly Color s_selectionFill = Colors.DodgerBlue.WithAlpha(0.4f);
 
     private void DrawImage(MauiCanvas canvas, RectF frame)
     {

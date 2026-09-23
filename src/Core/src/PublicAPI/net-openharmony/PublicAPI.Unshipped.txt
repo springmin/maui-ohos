@@ -637,7 +637,6 @@ Microsoft.Maui.Platform.OpenHarmonyView.DotsColor.get -> Microsoft.Maui.Graphics
 Microsoft.Maui.Platform.OpenHarmonyView.DotsColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DotsSize.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.DotsSize.set -> void
-Microsoft.Maui.Platform.OpenHarmonyView.DrawCalendar(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawFlyoutPanel(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawPopup(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawShadow(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void

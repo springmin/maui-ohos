@@ -40,6 +40,11 @@ internal static class OpenHarmonyAnimationLoop
 {
     private static readonly object s_sync = new();
     private static readonly List<IOpenHarmonyAnimation> s_animations = new();
+
+    // One cached delegate for the frame subscription: registering animations (which the scroll
+    // physics and the scrollbar fade do around every gesture) must not build a method-group
+    // delegate each time, and an idle loop must not hold one alive beyond the subscription.
+    private static readonly Action<OpenHarmonyFrameEventArgs> s_onFrame = OnFrame;
     private static bool s_subscribed;
     private static long s_lastTickMs;
     private static bool s_enabled = true;
@@ -114,7 +119,7 @@ internal static class OpenHarmonyAnimationLoop
             if (!s_subscribed)
             {
                 s_subscribed = true;
-                OpenHarmonyBridge.Frame += OnFrame;
+                OpenHarmonyBridge.Frame += s_onFrame;
             }
         }
     }
@@ -152,7 +157,9 @@ internal static class OpenHarmonyAnimationLoop
         // Snapshot: Step runs outside the loop lock, so an animation that registers or cancels
         // another one (the scroll physics does when a fling starts/stops) can never deadlock
         // against the frame thread. Registrations made during a tick start on the next one. The
-        // snapshot is a pooled copy instead of ToArray(): ticking an animation must not allocate.
+        // snapshot is a pooled copy instead of ToArray(): ticking an animation must not allocate,
+        // and the same copy carries the finished animations into the removal pass below instead
+        // of building a per-tick list.
         IOpenHarmonyAnimation[] batch;
         int count;
         lock (s_sync)
@@ -178,7 +185,7 @@ internal static class OpenHarmonyAnimationLoop
             s_animations.CopyTo(batch, 0);
         }
         bool requestRedraw = false;
-        List<IOpenHarmonyAnimation>? finished = null;
+        int finishedCount = 0;
         try
         {
             for (int i = 0; i < count; i++)
@@ -200,31 +207,32 @@ internal static class OpenHarmonyAnimationLoop
                 }
                 else
                 {
-                    (finished ??= new List<IOpenHarmonyAnimation>()).Add(animation);
+                    // The snapshot doubles as the removal list: finished animations are compacted
+                    // into its front, so retiring one (a fling that settles, a fade that ends) no
+                    // longer builds a per-tick List. Entries at or below the current index are
+                    // already processed, so nothing pending is overwritten.
+                    batch[finishedCount++] = animation;
                 }
             }
         }
         finally
         {
-            Array.Clear(batch, 0, count);
-            ArrayPool<IOpenHarmonyAnimation>.Shared.Return(batch);
-        }
-        lock (s_sync)
-        {
-            if (finished is not null)
+            lock (s_sync)
             {
-                foreach (IOpenHarmonyAnimation animation in finished)
+                for (int i = 0; i < finishedCount; i++)
                 {
-                    s_animations.Remove(animation);
+                    s_animations.Remove(batch[i]);
+                }
+                StopIfIdleLocked();
+                if (requestRedraw)
+                {
+                    // The next platform frame repaints; the app host's RedrawRequested handler
+                    // marks it dirty. Only animated steps ask for this, never idle tracking.
+                    RedrawRequests++;
                 }
             }
-            StopIfIdleLocked();
-            if (requestRedraw)
-            {
-                // The next platform frame repaints; the app host's RedrawRequested handler
-                // marks it dirty. Only animated steps ask for this, never idle tracking.
-                RedrawRequests++;
-            }
+            Array.Clear(batch, 0, count);
+            ArrayPool<IOpenHarmonyAnimation>.Shared.Return(batch);
         }
         if (requestRedraw)
         {
@@ -239,7 +247,7 @@ internal static class OpenHarmonyAnimationLoop
             return;
         }
         s_subscribed = false;
-        OpenHarmonyBridge.Frame -= OnFrame;
+        OpenHarmonyBridge.Frame -= s_onFrame;
     }
 
     private static void OnFrame(OpenHarmonyFrameEventArgs args) => Pump(NowMs, 0f);

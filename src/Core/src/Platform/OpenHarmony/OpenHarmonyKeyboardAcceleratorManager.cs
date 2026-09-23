@@ -1,59 +1,11 @@
-// Keyboard accelerators for the OpenHarmony slice's hardware-key surface.
-//
-// MAUI rc.1 surface (verified against Microsoft.Maui.Controls 11.0.0-rc.1.26451.6):
-//   * Microsoft.Maui.Controls.KeyboardAccelerator (BindableObject: Key string, Modifiers
-//     KeyboardAcceleratorModifiers; IKeyboardAccelerator) and the public flag enum
-//     Microsoft.Maui.KeyboardAcceleratorModifiers (None/Shift/Ctrl/Alt/Cmd/Windows);
-//   * the only collection on the public surface is MenuFlyoutItem.KeyboardAccelerators
-//     (IList<KeyboardAccelerator>) - there is no VisualElement/Element.KeyboardAccelerators in
-//     rc.1. On this slice MenuFlyoutItem has no platform view/handler at all, so there is no
-//     public per-element accelerator surface to consume automatically.
-// The manager therefore keeps the documented internal registry:
-//   * Register(element, accelerator|key, modifiers, invoked?) records an accelerator for a
-//     BindableObject (a Button/ImageButton/MenuFlyoutItem or any element with a Command) plus an
-//     optional callback; RegisterElementAccelerators reads the one rc.1 collection
-//     (MenuFlyoutItem.KeyboardAccelerators) when a caller hands the item in.
-//   * matching runs from PE2's OpenHarmonyKeyListener.KeyEvent surface (the raw ArkUI
-//     (keyCode, KeyType) callback), so the host needs no change: the manager subscribes on the
-//     first registration and unsubscribes with the last one (inert when unused).
-//   * on a match the element is invoked with the same semantics as a click: IButton.Clicked()
-//     (runs Command and raises Clicked), MenuFlyoutItem's IMenuItemController.Activate()
-//     (reflection: the rc.1 interface is internal), a registered callback, or a generic public
-//     Command property, in that order.
-//
-// Host key codes: ArkUI forwards the numeric @ohos.multimodalInput.keyCode value and KeyType
-// (0 down / 1 up). The modifier letters are NOT part of the callback signature
-// (void (*)(int keyCode, int eventType) in the native host), so Ctrl/Shift/Alt/Meta are tracked
-// from the modifier keys' own down/up events (2045-2048 alt/shift, 2072-2073 ctrl,
-// 2076-2077 meta). Matching requires the tracked modifier bits to match exactly
-// ((event & Ctrl|Shift|Alt|Cmd|Windows) == (accelerator.Modifiers & ...)); the host Meta key
-// maps to Cmd|Windows so either flag matches, and Cmd never matches anything else.
-//
-// Modifier semantics mapping (documented):
-//   ArkUI CTRL_LEFT/RIGHT (2072/2073) -> KeyboardAcceleratorModifiers.Ctrl
-//   ArkUI ALT_LEFT/RIGHT  (2045/2046) -> KeyboardAcceleratorModifiers.Alt
-//   ArkUI SHIFT_LEFT/RIGHT(2047/2048) -> KeyboardAcceleratorModifiers.Shift
-//   ArkUI META_LEFT/RIGHT (2076/2077) -> KeyboardAcceleratorModifiers.Cmd | Windows
-//
-// Key names (documented subset; the listener comment is the source of the numeric values):
-// letters A-Z 2017-2042, digits 0-9 2000-2009 (also D0..D9/Number0..9), F1-F12 2090-2101,
-// arrows 2012-2015 (Up/ArrowUp, ...), Enter/Return 2054, Escape/Esc 2070, Tab 2049,
-// Space/Spacebar 2050, Backspace/Back 2055, Delete/Del/ForwardDelete 2071, Home 2081, End 2082,
-// PageUp 2068, PageDown 2069, Insert 2083, CapsLock 2074, NumLock 2102, Menu 2067,
-// OemComma/Comma 2043, OemPeriod/Period 2044, OemPlus/Equals/Plus 2058, OemMinus/Minus 2057,
-// OemQuestion/Slash 2064, Numpad0-9 2103-2112, NumpadEnter 2119. A Key that is all digits
-// matches the raw ArkUI code (an escape hatch for keys outside the subset). Names are matched
-// case-insensitively.
-//
-// What a public rc.1 surface would need (documented once):
-//   1. VisualElement.KeyboardAccelerators (IList<KeyboardAccelerator>) or an attached property,
-//      with a property-changed push into the handler mapper (like ToolTipProperties.Text does);
-//   2. a ViewMapper entry (e.g. MapKeyboardAccelerators) so the platform can observe the
-//      collection per element without a slice-side registry;
-//   3. consumed-by-handler semantics on the key contract (an IKeyListener whose OnKeyDown
-//      returns bool / a VisualElement.KeyDown routed event) so a matched accelerator can stop
-//      ArkUI from also processing the key; the current host callback is void, so consumption
-//      cannot be reported back and the slice only records/invokes.
+// Keyboard accelerators for the OpenHarmony slice's hardware-key surface - an
+// OpenHarmony-specific extension over rc.1's Microsoft.Maui.Controls.KeyboardAccelerator
+// (the only public collection is MenuFlyoutItem.KeyboardAccelerators; there is no per-element
+// surface to consume automatically). The manager keeps an internal registry fed by the
+// OpenHarmonyKeyListener hardware-key callback, matches the tracked modifier bits exactly and
+// invokes as a click; the key-name/code subset, the modifier mapping and the changes a public
+// rc.1 surface would need are documented in docs/openharmony-slice-notes.md
+// ("Keyboard accelerators").
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;

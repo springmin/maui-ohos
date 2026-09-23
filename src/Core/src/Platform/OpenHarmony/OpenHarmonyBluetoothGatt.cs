@@ -1,60 +1,11 @@
-// Bluetooth GATT client for OpenHarmony - a platform extension, NOT a MAUI core interface.
-//
-// MAUI has no BLE/GATT API (there is no IBle/IBluetooth interface to implement), so this type
-// is an OpenHarmony-specific extra compiled into the platform slice. Apps that want BLE link it
-// explicitly; nothing in MAUI references it.
-//
-// It rides the established host/ArkTS request-response bridge (the same shape as
-// OpenHarmonyBluetooth/OpenHarmonyPrinting):
-//
-//   managed call -> P/Invoke ohos_host_bluetooth_gatt_request(requestId, op, payload) ->
-//     ArkTS shell sink (host.registerBluetoothGattSink) requests ohos.permission.ACCESS_BLUETOOTH
-//     when needed, lazily imports @kit.ConnectivityKit and runs the kotlin-free GATT calls on
-//     ble.createGattClientDevice(address) (connect/disconnect, getServices, read/write
-//     characteristic and descriptor, setCharacteristicChangeNotification, setBLEMtuSize) ->
-//     host.notifyBluetoothGattResult(requestId, code, payload) ->
-//     managed OnResultNative completes the awaiting Task.
-//
-// Unsolicited device events (characteristic value changed, connection state changed, MTU
-// changed) are pushed by the same shell sink through host.notifyBluetoothGattEvent(payload) and
-// arrive on the events below: ValueChanged, ConnectionStateChanged, MtuChanged. The push is a
-// separate export (ohos_host_bluetooth_gatt_register_event), so an older host library that only
-// serves the request/response half still works - the events then never fire.
-//
-// Result codes: 0 = the request completed (an empty success payload is a valid answer),
-// -1 = the platform path is unavailable (no host library, no shell sink, the Connectivity Kit is
-// missing or the ACCESS_BLUETOOTH permission was denied), -2 = a transient kit failure (the
-// adapter is off, the device is not connected, the SDK rejected the argument). -1 flips
-// IsSupported false and keeps it there; -2 only fails that one call. A failed request may carry
-// a diagnostic message that is logged, never thrown.
-//
-// Permissions: ohos.permission.ACCESS_BLUETOOTH (user_grant; requested at call time by the
-// shell). Without the manifest declaration the shell answers -1 instead of guessing.
-//
-// Wire format. Requests carry tab-separated fields (the managed side rejects any field that
-// contains a tab/LF/CR, so no escaping is needed in that direction). op and fields:
-//   0 connect                address
-//   1 disconnect             address
-//   2 services               address
-//   3 read characteristic    address, serviceUuid, characteristicUuid
-//   4 write characteristic   address, serviceUuid, characteristicUuid, writeType (1 with
-//                            response / 2 without), valueBase64
-//   5 notifications          address, serviceUuid, characteristicUuid, enable (0/1)
-//   6 read descriptor        address, serviceUuid, characteristicUuid, descriptorUuid
-//   7 write descriptor       address, serviceUuid, characteristicUuid, descriptorUuid, valueBase64
-//   8 request MTU            address, mtu
-//   9 release                address
-// Success payloads: op 2 answers one "serviceUuid\tsPrimary\tcharacteristicUuid\tproperties"
-// record per characteristic (4 escaped fields per line, the same OpenHarmonyKitRecords shape
-// the other extras use; a service without characteristics carries empty uuid/properties), op
-// 3/6 answer the raw value as base64, op 8 the negotiated MTU in decimal (empty when the
-// platform did not report one), and the remaining ops answer empty.
-//
-// Event payloads (host.notifyBluetoothGattEvent), tab-separated:
-//   value  address, serviceUuid, characteristicUuid, valueBase64
-//   state  address, state (ProfileConnectionState), reason (decimal, empty when absent)
-//   mtu    address, mtu (decimal)
-// Malformed event payloads are ignored; a value event whose base64 does not decode is ignored.
+// Bluetooth GATT client for OpenHarmony - a platform extension, NOT a MAUI core interface
+// (MAUI has no BLE/GATT API and nothing in MAUI references this type). It rides the
+// established host/ArkTS request-response bridge (ohos_host_bluetooth_gatt_request ->
+// host.registerBluetoothGattSink -> host.notifyBluetoothGattResult) plus a separate
+// unsolicited-event export (ohos_host_bluetooth_gatt_register_event), and needs
+// ohos.permission.ACCESS_BLUETOOTH (user_grant, requested by the shell at call time). Result
+// codes, the request op/field table and the event wire format are documented in
+// docs/openharmony-slice-notes.md ("Bluetooth GATT").
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;

@@ -26,7 +26,7 @@ shell and managed code:
 | `OpenHarmonyBridge.NodeContent` | native ArkUI node attachment point (overlays, custom widgets) |
 | `OpenHarmonyBridge.SurfaceChanged` / `.Surface` | the `OHNativeWindow*` handed over by the ArkUI `XComponent` (surface type) |
 | `OpenHarmonyBridge.FillSurface(argb)` | managed-driven frame; the placeholder a real renderer replaces |
-| `OpenHarmonyOpenHarmonyRuntime.IsOpenHarmony` (`Microsoft.OpenHarmony.dll`) | platform check for user code |
+| `OpenHarmonyRuntime.IsOpenHarmony` (`Microsoft.OpenHarmony.dll`) | platform check for user code |
 
 The shell (`templates/ets/**` in the platform pack) is prebuilt both headless
 (`modules.abc`) and with a UI page + `XComponent` (`modules.ui.abc`); the MAUI slice only

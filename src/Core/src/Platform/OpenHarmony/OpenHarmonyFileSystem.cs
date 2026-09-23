@@ -5,13 +5,16 @@
 // Raw-resource fallback: the payload directory only holds the published dotnet output, so a file
 // packed directly under resources/rawfile/** is not a sandbox file at all. The ArkTS shell owns
 // those bytes through resourceManager; the managed side asks through the host bridge
-// (ohos_host_raw_file_request -> registerRawFileSink -> host.notifyRawFileResult). The answer
-// travels as one base64 string - no temp files or shared paths cross the bridge, so there is no
-// cleanup or name-collision race. One read is capped at 8 MiB (mirrors
-// OHOS_HOST_RAW_FILE_MAX_BYTES): the shell refuses a bigger file with rc=-3 before encoding, the
-// host refuses an over-long base64 argument the same way, and the decode below length-checks
-// again, so the transient copies stay bounded. The helper below degrades quietly off-device
-// (no host library) and never throws from the native boundary.
+// (ohos_host_raw_file_request -> registerRawFileSink). The answer arrives either as raw bytes the
+// host preads from a rawfile descriptor (host.notifyRawFileFd -> the bytes callback, preferred:
+// no base64 string, no UTF-16 copy) or as one base64 string (host.notifyRawFileResult, the
+// fallback when the shell has no usable descriptor or the host could not read it). Neither
+// transport uses temp files or shared paths, so there is no cleanup or name-collision race. One
+// read is capped at 8 MiB (mirrors OHOS_HOST_RAW_FILE_MAX_BYTES): the shell refuses a bigger file
+// with rc=-3 before reading or encoding, the host refuses an over-long base64 argument or
+// descriptor the same way, and both callbacks length-check again, so the transient copies stay
+// bounded. The helper below degrades quietly off-device (no host library) and never throws from
+// the native boundary.
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Storage;
@@ -151,11 +154,13 @@ internal static class OpenHarmonyPackagePaths
 
 /// <summary>
 /// Managed side of the raw HAP resource bridge: requests are queued with ids and answered by the
-/// ArkTS shell's registerRawFileSink handler through ohos_host_raw_file_result. Op 0 reads one
-/// resources/rawfile/** entry as base64, op 1 probes its existence without reading it. rc values
-/// mirror ohos_raw_file_rc in openharmony_host.h. When no shell answers (tests, headless, older
-/// hosts) every call answers false/null - the host rejects an undispatchable request with rc -1
-/// immediately, and a request that is never answered trips the bounded timeout below.
+/// ArkTS shell's registerRawFileSink handler through the bytes callback (host.notifyRawFileFd,
+/// preferred) or ohos_host_raw_file_result (base64 fallback, and the only transport when the
+/// shell has no usable rawfile descriptor). Op 0 reads one resources/rawfile/** entry, op 1
+/// probes its existence without reading it. rc values mirror ohos_raw_file_rc in
+/// openharmony_host.h. When no shell answers (tests, headless, older hosts) every call answers
+/// false/null - the host rejects an undispatchable request with rc -1 immediately, and a request
+/// that is never answered trips the bounded timeout below.
 /// </summary>
 internal static class OpenHarmonyRawFiles
 {
@@ -360,6 +365,7 @@ internal static class OpenHarmonyRawFiles
     }
 
     private static RawFileResultCallback? s_callback;
+    private static RawFileBytesCallback? s_bytesCallback;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -371,8 +377,17 @@ internal static class OpenHarmonyRawFiles
     [DllImport(HostLibrary, EntryPoint = "ohos_host_raw_file_register_result")]
     private static extern void RawFileRegisterResult(IntPtr callback);
 
+    // The byte transport exists in the same host library as the descriptor notify, but keep the
+    // registration optional: a host library built before H7 answers EntryPointNotFound here and
+    // the base64 callback above still serves every request.
+    [DllImport(HostLibrary, EntryPoint = "ohos_host_raw_file_register_result_bytes")]
+    private static extern void RawFileRegisterResultBytes(IntPtr callback);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void RawFileResultCallback(int requestId, int rc, IntPtr dataBase64Utf8);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void RawFileBytesCallback(int requestId, int rc, IntPtr data, UIntPtr length);
 
     private static async Task<(int Rc, byte[]? Data)> ExecuteAsync(int op, string filename)
     {
@@ -429,8 +444,48 @@ internal static class OpenHarmonyRawFiles
             }
             s_callback = OnRawFileResult;
             RawFileRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            try
+            {
+                s_bytesCallback = OnRawFileBytesResult;
+                RawFileRegisterResultBytes(Marshal.GetFunctionPointerForDelegate(s_bytesCallback));
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                // An older host library has no byte transport; the base64 callback stays the
+                // only one and the shell's descriptor notify (also absent there) never runs.
+                s_bytesCallback = null;
+            }
             s_registered = true;
         }
+    }
+
+    // Runs on the shell's thread when the host answered a rawfile descriptor read; the host's
+    // buffer is only valid for this call, so the bytes are copied out before it returns.
+    private static void OnRawFileBytesResult(int requestId, int rc, IntPtr data, UIntPtr length)
+    {
+        if (!s_pending.TryRemove(requestId, out TaskCompletionSource<(int Rc, byte[]? Data)>? source))
+        {
+            return;
+        }
+        byte[]? bytes = null;
+        if (rc == RcOk)
+        {
+            ulong size = length.ToUInt64();
+            if (size > MaxBytes || (size > 0 && data == IntPtr.Zero))
+            {
+                rc = size > MaxBytes ? RcTooLarge : RcUnavailable;
+            }
+            else if (size == 0)
+            {
+                bytes = Array.Empty<byte>();
+            }
+            else
+            {
+                bytes = new byte[(int)size];
+                Marshal.Copy(data, bytes, 0, (int)size);
+            }
+        }
+        source.TrySetResult((rc, bytes));
     }
 
     // Runs on the shell's thread when the ArkTS sink answers; completes the matching request.

@@ -23,7 +23,23 @@ internal static class OpenHarmonyPointer
     private static readonly Dictionary<string, MethodInfo?> Methods = new();
 
     public static bool HasPointer(IView view)
-        => view is View controlsView && controlsView.GestureRecognizers.OfType<PointerGestureRecognizer>().Any();
+    {
+        // An indexed loop, not OfType().Any(): the hit-test walk asks this once per node and the
+        // LINQ pipeline allocated an iterator on every call.
+        if (view is not View controlsView)
+        {
+            return false;
+        }
+        IList<IGestureRecognizer> recognizers = controlsView.GestureRecognizers;
+        for (int i = 0; i < recognizers.Count; i++)
+        {
+            if (recognizers[i] is PointerGestureRecognizer)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public static bool Dispatch(IView view, Kind kind, float x, float y)
     {

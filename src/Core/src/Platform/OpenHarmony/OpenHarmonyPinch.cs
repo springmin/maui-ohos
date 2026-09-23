@@ -12,7 +12,22 @@ internal static class OpenHarmonyPinch
 {
     /// <summary>Phases reported by the shell: 0 = started, 1 = running, 2 = completed.</summary>
     public static bool HasPinch(IView view)
-        => view is View controlsView && controlsView.GestureRecognizers.OfType<PinchGestureRecognizer>().Any();
+    {
+        // Indexed scan, not OfType().Any(): the pinch walk asks this once per node.
+        if (view is not View controlsView)
+        {
+            return false;
+        }
+        IList<IGestureRecognizer> recognizers = controlsView.GestureRecognizers;
+        for (int i = 0; i < recognizers.Count; i++)
+        {
+            if (recognizers[i] is PinchGestureRecognizer)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public static bool Dispatch(IView view, int phase, double scale, float x, float y)
     {

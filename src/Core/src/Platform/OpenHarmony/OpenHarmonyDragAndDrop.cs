@@ -51,13 +51,40 @@ internal static class OpenHarmonyDragAndDrop
 
     /// <summary>True when the view owns a drag recognizer that accepts drags.</summary>
     public static bool HasDrag(IView view)
-        => view is View controlsView &&
-           controlsView.GestureRecognizers.OfType<DragGestureRecognizer>().Any(recognizer => recognizer.CanDrag);
+    {
+        // Indexed scan, not OfType().Any(): the hit-test walk asks this once per node.
+        if (view is not View controlsView)
+        {
+            return false;
+        }
+        IList<IGestureRecognizer> recognizers = controlsView.GestureRecognizers;
+        for (int i = 0; i < recognizers.Count; i++)
+        {
+            if (recognizers[i] is DragGestureRecognizer drag && drag.CanDrag)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>True when the view owns a drop recognizer that accepts drops.</summary>
     public static bool HasDrop(IView view)
-        => view is View controlsView &&
-           controlsView.GestureRecognizers.OfType<DropGestureRecognizer>().Any(recognizer => recognizer.AllowDrop);
+    {
+        if (view is not View controlsView)
+        {
+            return false;
+        }
+        IList<IGestureRecognizer> recognizers = controlsView.GestureRecognizers;
+        for (int i = 0; i < recognizers.Count; i++)
+        {
+            if (recognizers[i] is DropGestureRecognizer drop && drop.AllowDrop)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>
     /// Raises DragStarting on the source's recognizers. Returns a session (with the DataPackage of

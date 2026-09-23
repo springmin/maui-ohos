@@ -117,10 +117,31 @@ internal static class OpenHarmonyGestures
     }
 
     public static bool HasSwipe(IView view)
-        => view is View controlsView && controlsView.GestureRecognizers.OfType<SwipeGestureRecognizer>().Any();
+        => HasRecognizer<SwipeGestureRecognizer>(view);
 
     public static bool HasPan(IView view)
-        => view is View controlsView && controlsView.GestureRecognizers.OfType<PanGestureRecognizer>().Any();
+        => HasRecognizer<PanGestureRecognizer>(view);
+
+    /// <summary>
+    /// Indexed scan over the recognizer list. The touch walk asks these once per node, and the
+    /// LINQ pipeline (OfType().Any()) allocated an iterator on every call.
+    /// </summary>
+    private static bool HasRecognizer<T>(IView view) where T : class, IGestureRecognizer
+    {
+        if (view is not View controlsView)
+        {
+            return false;
+        }
+        IList<IGestureRecognizer> recognizers = controlsView.GestureRecognizers;
+        for (int i = 0; i < recognizers.Count; i++)
+        {
+            if (recognizers[i] is T)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public static bool HasGestures(IView view)
         => view is View controlsView && controlsView.GestureRecognizers.Count > 0;

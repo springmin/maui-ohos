@@ -9,7 +9,15 @@ namespace Microsoft.Maui.Platform;
 public sealed class OpenHarmonyFontManager : IFontManager
 {
     private static readonly Dictionary<string, string> s_registered = new(StringComparer.OrdinalIgnoreCase);
+    private static int s_typefaceGeneration;
     private string? _current;
+
+    /// <summary>
+    /// Bumped whenever the process-wide typeface changes (a font family resolving to a font file).
+    /// Text measurements depend on the selected typeface, so caches keyed by (text, size) include
+    /// this generation and can never serve a width measured with a different font file.
+    /// </summary>
+    internal static int TypefaceGeneration => Volatile.Read(ref s_typefaceGeneration);
 
     public IFontRegistrar Registrar { get; }
 
@@ -63,5 +71,7 @@ public sealed class OpenHarmonyFontManager : IFontManager
             path = candidate;
         }
         OpenHarmony.Hosting.OpenHarmonyBridge.SetFontFile(path);
+        // Any measurement cached before this point was taken with the previous typeface.
+        Interlocked.Increment(ref s_typefaceGeneration);
     }
 }

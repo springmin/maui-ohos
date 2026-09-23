@@ -220,7 +220,16 @@ internal static class OpenHarmonyScrollPhysics
                 // A real drag during momentum grabs the scroller instead of fighting it.
                 StopFling(tracked);
             }
-            s_lastScrolled = new WeakReference<OpenHarmonyView>(view);
+            // The release hint walks the last scrolled view through a weak reference so a static
+            // never roots a view. It is only re-created when the scrolled view changes: a drag or
+            // a fling emits one sample per frame, and a fresh WeakReference per sample was the
+            // only allocation left on that path.
+            if (s_lastScrolled is null ||
+                !s_lastScrolled.TryGetTarget(out OpenHarmonyView? lastScrolled) ||
+                !ReferenceEquals(lastScrolled, view))
+            {
+                s_lastScrolled = new WeakReference<OpenHarmonyView>(view);
+            }
             OpenHarmonyScrollbars.NotifyScrolled(view);
             HookTouch();
             EnsureRegistered(tracked);

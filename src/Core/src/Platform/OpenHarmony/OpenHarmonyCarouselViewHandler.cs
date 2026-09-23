@@ -86,8 +86,22 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
+        // The compositor arranges the tree on every frame, and a frame that neither moved nor
+        // resized cannot change what the slides look like: every input that does (ItemsSource,
+        // ItemTemplate, Position, CurrentItem, Loop, PeekAreaInsets) rebuilds through its mapper or
+        // event, so an unchanged arrange keeps the existing slides instead of disconnecting and
+        // recreating one handler-bearing view per frame.
+        if (_arranged && _arrangedFrame == frame)
+        {
+            return;
+        }
+        _arranged = true;
+        _arrangedFrame = frame;
         Rebuild();
     }
+
+    private bool _arranged;
+    private Rect _arrangedFrame;
 
     private void Rebuild()
     {
@@ -176,6 +190,24 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
 
     private static int Count(CarouselView carousel) => MaterializeItems(carousel).Count;
 
+    // Page-indicator slide list. The renderer asks for the slide count on every frame, and a
+    // rebuild asks for the list itself; materialising the ItemsSource is O(N) per call (plus the
+    // grouping scan), so the list is cached per carousel (a weak key: the entry never keeps a
+    // carousel alive) and handed out again while it is still the list the carousel shows: the
+    // source reference is unchanged and - when the source is an ICollection - its element count
+    // is unchanged, so an Add/Remove/Reset or a reassigned ItemsSource materialises fresh. A
+    // grouped source (the count is the sum over the groups, which the outer collection's count
+    // cannot predict) and a plain IEnumerable (every enumeration may differ) are never cached.
+    // The returned list is read-only by contract: every caller only reads Count/index/items.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ItemsView, SlideCache> s_slides = new();
+
+    private sealed class SlideCache
+    {
+        public object? Source;
+        public int SourceCount = -1;
+        public List<object?> Items = new();
+    }
+
     /// <summary>
     /// The slides the carousel pages through. CarouselView has no grouping API in this MAUI
     /// version (it derives from <c>ItemsView</c>), so a grouped data source - every element is
@@ -185,17 +217,30 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
     /// </summary>
     internal static List<object?> MaterializeItems(ItemsView itemsView)
     {
-        var items = new List<object?>();
-        if (itemsView.ItemsSource is not { } source)
+        object? source = itemsView.ItemsSource;
+        SlideCache? cached = null;
+        if (source is System.Collections.ICollection collection
+            && s_slides.TryGetValue(itemsView, out SlideCache? found)
+            && ReferenceEquals(found.Source, source)
+            && found.SourceCount == collection.Count)
         {
-            return items;
+            return found.Items;
         }
-        foreach (object? item in source)
+        if (source is System.Collections.ICollection)
         {
-            items.Add(item);
+            s_slides.TryGetValue(itemsView, out cached);
+        }
+        var items = new List<object?>();
+        if (source is System.Collections.IEnumerable sequence)
+        {
+            foreach (object? item in sequence)
+            {
+                items.Add(item);
+            }
         }
         if (items.Count == 0 || !items.All(IsGroup))
         {
+            StoreSlides(itemsView, source, cached, items);
             return items;
         }
         OpenHarmonyStatus.Once("carousel.grouped",
@@ -210,6 +255,23 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
             }
         }
         return flattened;
+    }
+
+    /// <summary>Caches a materialised slide list while the source is still the same collection.</summary>
+    private static void StoreSlides(ItemsView itemsView, object? source, SlideCache? cached, List<object?> items)
+    {
+        if (source is not System.Collections.ICollection current)
+        {
+            return;
+        }
+        SlideCache entry = cached ?? new SlideCache();
+        entry.Source = source;
+        entry.SourceCount = current.Count;
+        entry.Items = items;
+        if (cached is null)
+        {
+            s_slides.Add(itemsView, entry);
+        }
     }
 
     private static bool IsGroup(object? item)

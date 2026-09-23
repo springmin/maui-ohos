@@ -49,14 +49,46 @@ public sealed class OpenHarmonyLabelHandler : OpenHarmonyViewHandler<ILabel>
 
     private static float FontSizeOf(OpenHarmonyTextView view) => view.FontSize > 0 ? view.FontSize : 14f;
 
+    // Text measurements are cached per (text, size, typeface generation). A frame measures every
+    // laid-out line at least twice (measure/arrange desired size plus the draw pass) and each
+    // measurement is a native call plus a UTF-8 string marshal, so a label-heavy tree paid the
+    // same measurements on every frame. Only successful native measurements are cached; the
+    // estimate fallback is pure arithmetic and needs no cache. The cache is keyed on the font
+    // manager's typeface generation because the platform selects one process-wide typeface, so a
+    // font-family switch must not serve widths measured with the old one.
+    private const int MeasureCacheCapacity = 1024;
+    private static readonly object s_measureLock = new();
+    private static readonly Dictionary<MeasureKey, (float Width, float Height)> s_measureCache = new();
+
+    private readonly record struct MeasureKey(string Text, float FontSize, int TypefaceGeneration);
+
     /// <summary>Platform text metrics with an estimate fallback (device text APIs need a surface).</summary>
     internal static (float Width, float Height) MeasureText(string text, float fontSize)
     {
-        if (!string.IsNullOrEmpty(text) &&
-            HostCanvas.MeasureText(text, fontSize, out int measuredWidth, out int measuredHeight) &&
-            measuredWidth > 0)
+        if (!string.IsNullOrEmpty(text))
         {
-            return (measuredWidth, measuredHeight);
+            var key = new MeasureKey(text, fontSize, OpenHarmonyFontManager.TypefaceGeneration);
+            lock (s_measureLock)
+            {
+                if (s_measureCache.TryGetValue(key, out (float Width, float Height) cached))
+                {
+                    return cached;
+                }
+            }
+            if (HostCanvas.MeasureText(text, fontSize, out int measuredWidth, out int measuredHeight) &&
+                measuredWidth > 0)
+            {
+                var measured = ((float)measuredWidth, (float)measuredHeight);
+                lock (s_measureLock)
+                {
+                    if (s_measureCache.Count >= MeasureCacheCapacity)
+                    {
+                        s_measureCache.Clear();
+                    }
+                    s_measureCache[key] = measured;
+                }
+                return measured;
+            }
         }
         return (text.Length * fontSize * 0.55f, fontSize * 1.35f);
     }

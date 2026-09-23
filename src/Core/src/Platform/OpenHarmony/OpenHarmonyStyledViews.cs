@@ -398,10 +398,15 @@ public class OpenHarmonyTextView : OpenHarmonyView
             }
             return;
         }
+        // Character spacing is emulated by drawing one glyph at a time, so each glyph needs its
+        // own advance: MeasureLine(glyph) adds the glyph's own width, and the per-glyph widths
+        // are served by the shared (text, size) measurement cache after the first frame. The
+        // glyph strings themselves are cached per character so a per-frame line does not allocate
+        // one string per character.
         float cx = x;
         foreach (char character in line)
         {
-            string glyph = character.ToString();
+            string glyph = Glyph(character);
             float glyphWidth = MeasureLine(glyph, fontSize);
             canvas.DrawString(glyph, cx, y, Math.Max(1f, glyphWidth), lineHeight,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
@@ -412,6 +417,25 @@ public class OpenHarmonyTextView : OpenHarmonyView
             }
             cx += glyphWidth + (float)CharacterSpacing;
         }
+    }
+
+    private Dictionary<char, string>? _glyphs;
+
+    /// <summary>The one-character string for a glyph, reused across frames (bounded cache).</summary>
+    private string Glyph(char character)
+    {
+        Dictionary<char, string> glyphs = _glyphs ??= new Dictionary<char, string>();
+        if (glyphs.TryGetValue(character, out string? glyph))
+        {
+            return glyph;
+        }
+        if (glyphs.Count >= 256)
+        {
+            glyphs.Clear();
+        }
+        glyph = character.ToString();
+        glyphs[character] = glyph;
+        return glyph;
     }
 
     private void DrawDecorations(MauiCanvas canvas, float lineWidth, float x, float y, float lineHeight, float fontSize)

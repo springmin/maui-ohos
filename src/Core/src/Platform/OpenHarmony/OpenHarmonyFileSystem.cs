@@ -178,6 +178,187 @@ internal static class OpenHarmonyRawFiles
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Rc, byte[]? Data)>> s_pending = new();
     private static readonly object s_registration = new();
 
+    // ---- answered-request cache -------------------------------------------------------------
+    // A packaged asset cannot change while the process runs, so one answered request serves every
+    // later one: apps ask for the same assets repeatedly (image source resolution, virtualised
+    // list recycling), and each rawfile request is a bridge round trip with a base64 answer. The
+    // read cache is bounded by entries and by total bytes (below the 8 MiB read cap), evicts the
+    // least recently used entry and never stores a read too large to fit. Existence answers,
+    // including the "not found" answer an app probing optional assets gets most of the time, are
+    // cached separately with a smaller bound, and a known-missing name skips the read round trip.
+    private const int ReadCacheMaxEntries = 16;
+    private const int ReadCacheMaxBytes = 12 * 1024 * 1024;
+    private const int ExistsCacheMaxEntries = 256;
+
+    private static readonly object s_cacheLock = new();
+    private static readonly Dictionary<string, CacheEntry<byte[]>> s_readCache = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, CacheEntry<bool>> s_existsCache = new(StringComparer.Ordinal);
+    private static long s_cacheTick;
+    private static long s_readCacheBytes;
+
+    private sealed class CacheEntry<T>
+    {
+        public CacheEntry(T value) => Value = value;
+
+        public T Value { get; set; }
+
+        public long Tick { get; set; }
+    }
+
+    /// <summary>Reads one raw HAP resource; null when it is missing or the bridge is unavailable.</summary>
+    public static async Task<byte[]?> ReadAsync(string filename)
+    {
+        if (TryGetCachedRead(filename, out byte[] cached))
+        {
+            return cached;
+        }
+        if (TryGetCachedExists(filename, out bool known) && !known)
+        {
+            // The shell already answered "not found" for this name; no need to ask again.
+            return null;
+        }
+        (int rc, byte[]? data) = await ExecuteAsync(OpRead, filename).ConfigureAwait(false);
+        if (rc == RcOk)
+        {
+            byte[] result = data ?? Array.Empty<byte>();
+            StoreRead(filename, result);
+            StoreExists(filename, true);
+            return result;
+        }
+        if (rc != RcNotFound)
+        {
+            LogUnavailableOnce(rc);
+        }
+        else
+        {
+            StoreExists(filename, false);
+        }
+        return null;
+    }
+
+    /// <summary>True only when the shell confirmed the rawfile exists (or answered it with bytes).</summary>
+    public static async Task<bool> ExistsAsync(string filename)
+    {
+        if (TryGetCachedExists(filename, out bool cached))
+        {
+            return cached;
+        }
+        (int rc, _) = await ExecuteAsync(OpExists, filename).ConfigureAwait(false);
+        if (rc == RcOk)
+        {
+            StoreExists(filename, true);
+            return true;
+        }
+        if (rc != RcNotFound)
+        {
+            LogUnavailableOnce(rc);
+        }
+        else
+        {
+            StoreExists(filename, false);
+        }
+        return false;
+    }
+
+    private static bool TryGetCachedRead(string filename, out byte[] data)
+    {
+        lock (s_cacheLock)
+        {
+            if (s_readCache.TryGetValue(filename, out CacheEntry<byte[]>? entry))
+            {
+                entry.Tick = ++s_cacheTick;
+                data = entry.Value;
+                return true;
+            }
+        }
+        data = Array.Empty<byte>();
+        return false;
+    }
+
+    private static bool TryGetCachedExists(string filename, out bool exists)
+    {
+        lock (s_cacheLock)
+        {
+            if (s_existsCache.TryGetValue(filename, out CacheEntry<bool>? entry))
+            {
+                entry.Tick = ++s_cacheTick;
+                exists = entry.Value;
+                return true;
+            }
+        }
+        exists = false;
+        return false;
+    }
+
+    private static void StoreRead(string filename, byte[] data)
+    {
+        if (data.Length == 0 || data.Length > ReadCacheMaxBytes)
+        {
+            // Nothing to cache, or an entry that would evict every other one.
+            return;
+        }
+        lock (s_cacheLock)
+        {
+            if (s_readCache.TryGetValue(filename, out CacheEntry<byte[]>? existing))
+            {
+                existing.Tick = ++s_cacheTick;
+                return;
+            }
+            while (s_readCache.Count >= ReadCacheMaxEntries || s_readCacheBytes + data.Length > ReadCacheMaxBytes)
+            {
+                if (!EvictOldest(s_readCache, entry => s_readCacheBytes -= entry.Value.Length))
+                {
+                    break;
+                }
+            }
+            s_readCache[filename] = new CacheEntry<byte[]>(data) { Tick = ++s_cacheTick };
+            s_readCacheBytes += data.Length;
+        }
+    }
+
+    private static void StoreExists(string filename, bool exists)
+    {
+        lock (s_cacheLock)
+        {
+            if (s_existsCache.TryGetValue(filename, out CacheEntry<bool>? existing))
+            {
+                existing.Value = exists;
+                existing.Tick = ++s_cacheTick;
+                return;
+            }
+            if (s_existsCache.Count >= ExistsCacheMaxEntries)
+            {
+                EvictOldest(s_existsCache, null);
+            }
+            s_existsCache[filename] = new CacheEntry<bool>(exists) { Tick = ++s_cacheTick };
+        }
+    }
+
+    /// <summary>Removes the least recently used entry; false when the cache is empty.</summary>
+    private static bool EvictOldest<T>(Dictionary<string, CacheEntry<T>> cache, Action<CacheEntry<T>>? onEvict)
+    {
+        string? oldestKey = null;
+        long oldestTick = long.MaxValue;
+        foreach (KeyValuePair<string, CacheEntry<T>> pair in cache)
+        {
+            if (pair.Value.Tick < oldestTick)
+            {
+                oldestTick = pair.Value.Tick;
+                oldestKey = pair.Key;
+            }
+        }
+        if (oldestKey is null)
+        {
+            return false;
+        }
+        if (onEvict is not null && cache.TryGetValue(oldestKey, out CacheEntry<T>? evicted))
+        {
+            onEvict(evicted);
+        }
+        cache.Remove(oldestKey);
+        return true;
+    }
+
     private static RawFileResultCallback? s_callback;
     private static int s_nextId;
     private static bool s_registered;
@@ -192,36 +373,6 @@ internal static class OpenHarmonyRawFiles
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void RawFileResultCallback(int requestId, int rc, IntPtr dataBase64Utf8);
-
-    /// <summary>Reads one raw HAP resource; null when it is missing or the bridge is unavailable.</summary>
-    public static async Task<byte[]?> ReadAsync(string filename)
-    {
-        (int rc, byte[]? data) = await ExecuteAsync(OpRead, filename).ConfigureAwait(false);
-        if (rc == RcOk)
-        {
-            return data ?? Array.Empty<byte>();
-        }
-        if (rc != RcNotFound)
-        {
-            LogUnavailableOnce(rc);
-        }
-        return null;
-    }
-
-    /// <summary>True only when the shell confirmed the rawfile exists (or answered it with bytes).</summary>
-    public static async Task<bool> ExistsAsync(string filename)
-    {
-        (int rc, _) = await ExecuteAsync(OpExists, filename).ConfigureAwait(false);
-        if (rc == RcOk)
-        {
-            return true;
-        }
-        if (rc != RcNotFound)
-        {
-            LogUnavailableOnce(rc);
-        }
-        return false;
-    }
 
     private static async Task<(int Rc, byte[]? Data)> ExecuteAsync(int op, string filename)
     {
@@ -252,15 +403,20 @@ internal static class OpenHarmonyRawFiles
             LogUnavailableOnce(RcUnavailable);
             return (RcUnavailable, null);
         }
-        Task completed = await Task.WhenAny(source.Task, Task.Delay(s_timeout)).ConfigureAwait(false);
-        if (completed != source.Task)
+        // WaitAsync's timeout uses the runtime's shared timer queue; the per-request
+        // Task.Delay(3s) this replaces allocated a timer plus its task on every request, answered
+        // or not (240 B measured), while the success path here allocates nothing for the timeout.
+        try
+        {
+            return await source.Task.WaitAsync(s_timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
         {
             s_pending.TryRemove(requestId, out _);
             s_unavailable = true;
             LogUnavailableOnce(RcUnavailable);
             return (RcUnavailable, null);
         }
-        return await source.Task.ConfigureAwait(false);
     }
 
     private static void EnsureRegistered()

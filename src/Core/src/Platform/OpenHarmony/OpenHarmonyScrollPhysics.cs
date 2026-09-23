@@ -44,9 +44,6 @@ internal static class OpenHarmonyScrollPhysics
     /// <summary>Fallback: start a fling when the sample stream stalls at high speed.</summary>
     internal const long StallWindowMs = 80;
 
-    /// <summary>Drop a tracked view when no offset moved for this long.</summary>
-    internal const long ExpireMs = 300;
-
     /// <summary>Two samples farther apart than this start a new velocity window.</summary>
     internal const long SampleGapMs = 120;
 
@@ -94,16 +91,19 @@ internal static class OpenHarmonyScrollPhysics
                 {
                     return Fling(nowMs, dtSeconds);
                 }
-                long age = nowMs - LastSampleMs;
-                if (age <= ExpireMs)
+                // No momentum is in flight, so the only frame work left is the stalled-sample
+                // release fallback. Keep asking for frames exactly while that fallback can still
+                // fire: the finger is up, the last sample is inside the stall window and the
+                // sampled speed can still start a fling. A settled or slow drag stops the ticker
+                // right away instead of spinning for the old 300 ms expire window (18 idle
+                // frames); a press has its own release path (OnTouch) and the next offset write,
+                // release hint or fling re-registers this tracker.
+                if (!OpenHarmonyScrollPhysics.s_pointerDown &&
+                    nowMs - LastSampleMs <= OpenHarmonyScrollPhysics.StallWindowMs &&
+                    Samples >= OpenHarmonyScrollPhysics.MinSamples &&
+                    Math.Abs(Velocity) >= OpenHarmonyScrollPhysics.MinFlingVelocity)
                 {
-                    // Keep watching: the release hint may arrive any frame, or (when the host
-                    // does not surface the pointer state) the stalled samples are the release
-                    // signal. A pointer that is still down never starts a fling here.
-                    if (!OpenHarmonyScrollPhysics.s_pointerDown)
-                    {
-                        OpenHarmonyScrollPhysics.TryStartFling(View, StallWindowMs);
-                    }
+                    OpenHarmonyScrollPhysics.TryStartFling(View, StallWindowMs);
                     return true;
                 }
                 Unregister(this);

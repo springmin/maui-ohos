@@ -167,12 +167,21 @@ public sealed class OpenHarmonyBattery : IBattery
         }
     }
 
+    // A reverse P/Invoke entry: applying the snapshot raises BatteryInfoChanged /
+    // EnergySaverStatusChanged, so an exception must not unwind into the native frame (MB-2).
     private static void OnBatteryNative(IntPtr payloadUtf8)
     {
-        string payload = payloadUtf8 == IntPtr.Zero
-            ? string.Empty
-            : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
-        OnBatteryPayload(payload);
+        try
+        {
+            string payload = payloadUtf8 == IntPtr.Zero
+                ? string.Empty
+                : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
+            OnBatteryPayload(payload);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("battery", ex);
+        }
     }
 
     /// <summary>Registers the managed battery callback with the host; guarded no-op off-device.</summary>
@@ -360,12 +369,21 @@ public sealed class OpenHarmonyDeviceDisplay : IDeviceDisplay
         Instance.MainDisplayInfoChanged?.Invoke(null, new DisplayInfoChangedEventArgs(info));
     }
 
+    // A reverse P/Invoke entry: applying the snapshot raises MainDisplayInfoChanged, so an
+    // exception must not unwind into the native frame (MB-2).
     private static void OnDisplayNative(IntPtr payloadUtf8)
     {
-        string payload = payloadUtf8 == IntPtr.Zero
-            ? string.Empty
-            : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
-        OnDisplayPayload(payload);
+        try
+        {
+            string payload = payloadUtf8 == IntPtr.Zero
+                ? string.Empty
+                : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
+            OnDisplayPayload(payload);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("display", ex);
+        }
     }
 
     /// <summary>Registers the managed display callback with the host; guarded no-op off-device.</summary>

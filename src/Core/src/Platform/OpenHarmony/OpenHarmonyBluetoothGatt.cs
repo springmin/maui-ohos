@@ -838,11 +838,21 @@ public static class OpenHarmonyBluetoothGatt
         }
     }
 
+    // A reverse P/Invoke entry: the pushed events run application handlers (ValueChanged /
+    // ConnectionStateChanged / MtuChanged), so an exception must not unwind into the native
+    // frame (MB-2).
     private static void OnEventNative(IntPtr payloadUtf8)
     {
-        string payload = payloadUtf8 == IntPtr.Zero
-            ? string.Empty
-            : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
-        OnEventPayload(payload);
+        try
+        {
+            string payload = payloadUtf8 == IntPtr.Zero
+                ? string.Empty
+                : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
+            OnEventPayload(payload);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("bluetooth gatt event", ex);
+        }
     }
 }

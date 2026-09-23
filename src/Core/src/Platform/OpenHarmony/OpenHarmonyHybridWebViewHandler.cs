@@ -435,11 +435,22 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         }
     }
 
+    // A reverse P/Invoke entry (host.notifyHybridInvoke): the invocation runs the app's
+    // IHybridWebView.Invoker, so an exception must not unwind into the native frame (MB-2).
+    // The async half already turns every failure into an error payload; the guard covers the
+    // synchronous boundary as well.
     private static void OnHybridInvokeNative(int requestId, IntPtr methodUtf8, IntPtr argsUtf8)
     {
-        string method = methodUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(methodUtf8) ?? string.Empty;
-        string args = argsUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(argsUtf8) ?? string.Empty;
-        _ = CompleteHybridInvokeAsync(requestId, method, args);
+        try
+        {
+            string method = methodUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(methodUtf8) ?? string.Empty;
+            string args = argsUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(argsUtf8) ?? string.Empty;
+            _ = CompleteHybridInvokeAsync(requestId, method, args);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("hybrid invoke", ex);
+        }
     }
 
     /// <summary>

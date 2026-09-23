@@ -66,17 +66,27 @@ internal static class OpenHarmonySensors
         catch (Exception) { _available = false; }
     }
 
+    // The sensor listener itself is the reverse P/Invoke entry: a reading raises the public
+    // ReadingChanged/ShakeDetected events, so an exception must not unwind into the native
+    // frame (MB-2).
     private static void OnReading(int type, float x, float y, float z, float w, long timestamp)
     {
-        if (type == AccelerometerType) OpenHarmonyAccelerometer.Instance.OnReading(x, y, z);
-        else if (type == GyroscopeType) OpenHarmonyGyroscope.Instance.OnReading(x, y, z);
-        else if (type == MagneticFieldType)
+        try
         {
-            OpenHarmonyMagnetometer.Instance.OnReading(x, y, z);
-            OpenHarmonyCompass.Instance.OnReading(x, y, z);
+            if (type == AccelerometerType) OpenHarmonyAccelerometer.Instance.OnReading(x, y, z);
+            else if (type == GyroscopeType) OpenHarmonyGyroscope.Instance.OnReading(x, y, z);
+            else if (type == MagneticFieldType)
+            {
+                OpenHarmonyMagnetometer.Instance.OnReading(x, y, z);
+                OpenHarmonyCompass.Instance.OnReading(x, y, z);
+            }
+            else if (type == BarometerType) OpenHarmonyBarometer.Instance.OnReading(x);
+            else if (type == OrientationType) OpenHarmonyOrientationSensor.Instance.OnReading(x, y, z, w);
         }
-        else if (type == BarometerType) OpenHarmonyBarometer.Instance.OnReading(x);
-        else if (type == OrientationType) OpenHarmonyOrientationSensor.Instance.OnReading(x, y, z, w);
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("sensor reading", ex);
+        }
     }
 
     /// <summary>Installs the sensor implementations as the MAUI Essentials defaults.</summary>

@@ -162,7 +162,19 @@ public static class OpenHarmonyMenus
     /// <summary>Activation route used by the native callback (host.notifyMenuAction).</summary>
     internal static bool OnMenuAction(int index) => Activate(index);
 
-    private static void OnMenuActionNative(int index) => Activate(index);
+    // A reverse P/Invoke entry (host.notifyMenuAction): Activate runs the app's menu
+    // controller/command, so an exception must not unwind into the native frame (MB-2).
+    private static void OnMenuActionNative(int index)
+    {
+        try
+        {
+            Activate(index);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("menu action", ex);
+        }
+    }
 
     /// <summary>
     /// Builds the flat table for a page and hands it to the host when it differs from the

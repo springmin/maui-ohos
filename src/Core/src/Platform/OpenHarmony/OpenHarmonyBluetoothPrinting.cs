@@ -381,12 +381,21 @@ public static class OpenHarmonyBluetooth
         }
     }
 
+    // A reverse P/Invoke entry: raising DeviceFound runs application handlers, so an exception
+    // must not unwind into the native frame (MB-2).
     private static void OnDeviceFoundNative(IntPtr payloadUtf8)
     {
-        string payload = payloadUtf8 == IntPtr.Zero
-            ? string.Empty
-            : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
-        OnDeviceFoundPayload(payload);
+        try
+        {
+            string payload = payloadUtf8 == IntPtr.Zero
+                ? string.Empty
+                : Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty;
+            OnDeviceFoundPayload(payload);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("bluetooth device found", ex);
+        }
     }
 }
 

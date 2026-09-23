@@ -73,7 +73,19 @@ internal static class OpenHarmonyTheme
     }
 
     /// <summary>Native-shaped thunk: the NAPI export delivers 0/1.</summary>
-    private static void OnNativeTheme(int isDark) => OnPlatformThemeChanged(isDark != 0);
+    private static void OnNativeTheme(int isDark)
+    {
+        // A reverse P/Invoke entry: the change runs the app's theme application path, so an
+        // exception must not unwind into the native frame (MB-2).
+        try
+        {
+            OnPlatformThemeChanged(isDark != 0);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("theme change", ex);
+        }
+    }
 
     /// <summary>
     /// Follows the platform mode by setting <see cref="Application.UserAppTheme"/>, but only

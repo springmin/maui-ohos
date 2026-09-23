@@ -271,7 +271,19 @@ internal static class OpenHarmonyClipboardBridge
         completion?.TrySetResult((rc, text));
     }
 
-    private static void OnNativeClipboardChanged() => Changed?.Invoke();
+    // A reverse P/Invoke entry: the push raises the public ClipboardContentChanged event, so an
+    // exception must not unwind into the native frame (MB-2).
+    private static void OnNativeClipboardChanged()
+    {
+        try
+        {
+            Changed?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("clipboard changed", ex);
+        }
+    }
 }
 
 /// <summary>
@@ -336,5 +348,17 @@ internal static class OpenHarmonyConnectivityBridge
         }
     }
 
-    private static void OnNativeNetworkAccess(int level) => Changed?.Invoke(level);
+    // A reverse P/Invoke entry: the push raises the public ConnectivityChanged event, so an
+    // exception must not unwind into the native frame (MB-2).
+    private static void OnNativeNetworkAccess(int level)
+    {
+        try
+        {
+            Changed?.Invoke(level);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("network access", ex);
+        }
+    }
 }

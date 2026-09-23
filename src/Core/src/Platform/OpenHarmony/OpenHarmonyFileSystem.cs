@@ -28,6 +28,7 @@ public sealed class OpenHarmonyFileSystem : IFileSystem
     public Task<Stream> OpenAppPackageFileAsync(string filename)
     {
         ArgumentException.ThrowIfNullOrEmpty(filename);
+        filename = OpenHarmonyPackagePaths.Normalize(filename);
         // Packaged files are the published output the shell extracted from dotnet.zip into the
         // context's AppDir (FilesDir/dotnet); a miss falls back to the HAP's raw resources.
         string path = Path.Combine(OpenHarmonyPaths.AppPackageDirectory, filename);
@@ -41,6 +42,7 @@ public sealed class OpenHarmonyFileSystem : IFileSystem
     public async Task<bool> AppPackageFileExistsAsync(string filename)
     {
         ArgumentException.ThrowIfNullOrEmpty(filename);
+        filename = OpenHarmonyPackagePaths.Normalize(filename);
         if (!await AppPackageFileInPayloadAsync(filename).ConfigureAwait(false))
         {
             // Raw HAP resources: the shell distinguishes "not found" from "bridge unavailable",
@@ -66,6 +68,84 @@ public sealed class OpenHarmonyFileSystem : IFileSystem
             throw new FileNotFoundException($"App package file '{filename}' was not found.", path);
         }
         return new MemoryStream(data, writable: false);
+    }
+}
+
+/// <summary>
+/// The one accepted spelling of an app-package file name (MB-3). The name reaches two places
+/// that must stay inside the package: the extracted payload directory under
+/// <see cref="OpenHarmonyPaths.AppPackageDirectory"/> (Path.Combine) and the shell's
+/// resourceManager rawfile reader over the native bridge. The host header describes the
+/// managed side as normalizing separators and trimming the leading '/', but trimming alone
+/// would still admit ".." traversal and rooted/UNC spellings, so the canonical form defined
+/// here normalizes separators and rejects every rooted, ambiguous or escaping name instead: a
+/// rooted name would silently discard the package prefix in Path.Combine and a ".." segment
+/// would escape it.
+/// </summary>
+internal static class OpenHarmonyPackagePaths
+{
+    /// <summary>Longest name the bridge accepts (mirrors the shell's rawfile 4096-character cap).</summary>
+    public const int MaxNameLength = 4096;
+
+    /// <summary>
+    /// Returns the canonical rawfile-relative name ('/' separators, no leading/trailing
+    /// separator, no "." or ".." segments, no control characters); throws
+    /// <see cref="ArgumentException"/> for anything rooted, ambiguous or escaping.
+    /// </summary>
+    public static string Normalize(string filename)
+    {
+        const string message = "The app package file name must be a relative path inside the package " +
+            "(no root, drive letter, '..' segment or control character).";
+        string name = filename.Replace('\\', '/');
+        if (name.Length == 0 || name.Length > MaxNameLength || name[0] == '/')
+        {
+            throw new ArgumentException(message, nameof(filename));
+        }
+        // "C:/x" and "C:x": rooted on Windows and a drive spelling everywhere else.
+        if (name.Length > 1 && name[1] == ':')
+        {
+            throw new ArgumentException(message, nameof(filename));
+        }
+        var canonical = new System.Text.StringBuilder(name.Length);
+        int start = 0;
+        while (start <= name.Length)
+        {
+            int end = name.IndexOf('/', start, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                end = name.Length;
+            }
+            string segment = name.Substring(start, end - start);
+            if (segment.Length == 0 || segment == "..")
+            {
+                // Empty segments ("a//b", a trailing '/') have no canonical rawfile form;
+                // a ".." segment is traversal and is refused outright.
+                throw new ArgumentException(message, nameof(filename));
+            }
+            if (segment != ".")
+            {
+                if (canonical.Length > 0)
+                {
+                    canonical.Append('/');
+                }
+                canonical.Append(segment);
+            }
+            start = end + 1;
+        }
+        if (canonical.Length == 0)
+        {
+            throw new ArgumentException(message, nameof(filename));
+        }
+        for (int i = 0; i < canonical.Length; i++)
+        {
+            if (char.IsControl(canonical[i]))
+            {
+                // The name crosses the bridge as a NUL-terminated UTF-8 string; control
+                // characters (especially an embedded NUL) have no place in a rawfile name.
+                throw new ArgumentException(message, nameof(filename));
+            }
+        }
+        return canonical.ToString();
     }
 }
 

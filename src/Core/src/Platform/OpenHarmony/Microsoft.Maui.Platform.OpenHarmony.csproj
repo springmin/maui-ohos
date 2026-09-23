@@ -32,6 +32,8 @@
          handlers), CA2255 (the Essentials entry points are [ModuleInitializer]s), and the
          CS8604/CS8766/CS8613 nullability mismatches against the platform-less interfaces. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Fork-only compile vehicle: this whitelist is a local concession for this partial
+         checkout and must never travel upstream with the slice. -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618;CA2255;CS8604;CS8766;CS8613</WarningsNotAsErrors>
     <!-- The darc feeds only serve the vulnerability audit when the network is up; the standalone
          vehicle must also restore/build in partial, offline checkouts. The shipping build keeps

@@ -15,6 +15,7 @@
 // physics on a press/fling) can never deadlock against the frame thread; the redraw request is
 // made after the lock is released.
 using Microsoft.OpenHarmony.Hosting;
+using System.Buffers;
 
 namespace Microsoft.Maui.Platform;
 
@@ -150,8 +151,10 @@ internal static class OpenHarmonyAnimationLoop
         }
         // Snapshot: Step runs outside the loop lock, so an animation that registers or cancels
         // another one (the scroll physics does when a fling starts/stops) can never deadlock
-        // against the frame thread. Registrations made during a tick start on the next one.
+        // against the frame thread. Registrations made during a tick start on the next one. The
+        // snapshot is a pooled copy instead of ToArray(): ticking an animation must not allocate.
         IOpenHarmonyAnimation[] batch;
+        int count;
         lock (s_sync)
         {
             if (s_animations.Count == 0)
@@ -170,30 +173,41 @@ internal static class OpenHarmonyAnimationLoop
             }
             s_lastTickMs = nowMs;
             Ticks++;
-            batch = s_animations.ToArray();
+            count = s_animations.Count;
+            batch = ArrayPool<IOpenHarmonyAnimation>.Shared.Rent(count);
+            s_animations.CopyTo(batch, 0);
         }
         bool requestRedraw = false;
         List<IOpenHarmonyAnimation>? finished = null;
-        foreach (IOpenHarmonyAnimation animation in batch)
+        try
         {
-            bool keep;
-            try
+            for (int i = 0; i < count; i++)
             {
-                keep = animation.Step(nowMs, dtSeconds);
+                IOpenHarmonyAnimation animation = batch[i];
+                bool keep;
+                try
+                {
+                    keep = animation.Step(nowMs, dtSeconds);
+                }
+                catch
+                {
+                    // A broken effect must not take the frame callback down with it.
+                    keep = false;
+                }
+                if (keep)
+                {
+                    requestRedraw |= animation.NeedsRedraw;
+                }
+                else
+                {
+                    (finished ??= new List<IOpenHarmonyAnimation>()).Add(animation);
+                }
             }
-            catch
-            {
-                // A broken effect must not take the frame callback down with it.
-                keep = false;
-            }
-            if (keep)
-            {
-                requestRedraw |= animation.NeedsRedraw;
-            }
-            else
-            {
-                (finished ??= new List<IOpenHarmonyAnimation>()).Add(animation);
-            }
+        }
+        finally
+        {
+            Array.Clear(batch, 0, count);
+            ArrayPool<IOpenHarmonyAnimation>.Shared.Return(batch);
         }
         lock (s_sync)
         {

@@ -86,37 +86,55 @@ public static class OpenHarmonyAccessibility
             _ => Array.Empty<OpenHarmonyAccessibilityAction>(),
         };
 
-    // The shadow tree is published as immutable snapshots: Refresh builds a new frame off to the
-    // side and swaps the reference in once it is complete. An accessibility callback on another
-    // thread (Nodes, TryFindNode, the action listener) can therefore enumerate a frame without ever
-    // observing a list being cleared or appended to, and a node's bounds always belong to one
-    // coherent frame. Old snapshots stay valid for any in-flight enumeration.
-    private static OpenHarmonyAccessibilityNode[] s_nodes = Array.Empty<OpenHarmonyAccessibilityNode>();
-
     /// <summary>
-    /// One immutable frame mapping: node id to the published node and to the view it was built
-    /// from. Both dictionaries are swapped together, so an action callback always routes against
-    /// a single complete frame, never a partially rebuilt one.
+    /// The same action set as <see cref="ActionsFor"/> as a bit mask, without the array (and its
+    /// interface enumerator) the publish loop would otherwise allocate per node per republish.
     /// </summary>
-    private sealed class FrameIndex
+    private static int ActionMask(string role) => role switch
     {
-        public static readonly FrameIndex Empty = new(new(), new());
+        "button" or "text" or "checkBox" or "switch" => (int)OpenHarmonyAccessibilityAction.Click,
+        "textInput" => (int)(OpenHarmonyAccessibilityAction.Click
+            | OpenHarmonyAccessibilityAction.Copy
+            | OpenHarmonyAccessibilityAction.Paste
+            | OpenHarmonyAccessibilityAction.Cut
+            | OpenHarmonyAccessibilityAction.SelectText),
+        "slider" or "scroll" => (int)(OpenHarmonyAccessibilityAction.ScrollForward
+            | OpenHarmonyAccessibilityAction.ScrollBackward),
+        _ => 0,
+    };
 
-        public FrameIndex(Dictionary<int, OpenHarmonyAccessibilityNode> nodes, Dictionary<int, IView> views)
+    // The shadow tree is published as immutable snapshots: Refresh walks the live tree into
+    // reusable build buffers and only swaps the published snapshot in when something actually
+    // moved. An accessibility callback on another thread (Nodes, TryFindNode, the action
+    // listener) can therefore enumerate a frame without ever observing a list being cleared or
+    // appended to, and a node's bounds always belong to one coherent frame. Old snapshots stay
+    // valid for any in-flight enumeration, and a frame whose tree is unchanged publishes no new
+    // objects at all: every node position reuses the previous frame's immutable node record.
+    private sealed class Frame
+    {
+        public static readonly Frame Empty = new(Array.Empty<OpenHarmonyAccessibilityNode>(), Array.Empty<IView>());
+
+        public Frame(OpenHarmonyAccessibilityNode[] nodes, IView[] views)
         {
             Nodes = nodes;
             Views = views;
         }
 
-        public Dictionary<int, OpenHarmonyAccessibilityNode> Nodes { get; }
+        /// <summary>Nodes of the frame, root first, parent before child (id = index + 1).</summary>
+        public OpenHarmonyAccessibilityNode[] Nodes { get; }
 
-        public Dictionary<int, IView> Views { get; }
+        /// <summary>
+        /// Positional view table: <c>Views[i]</c> is the view <c>Nodes[i]</c> was built from. The
+        /// array is swapped together with <see cref="Nodes"/>, so an action callback always routes
+        /// against a single complete frame, never a partially rebuilt one.
+        /// </summary>
+        public IView[] Views { get; }
     }
 
-    private static FrameIndex s_index = FrameIndex.Empty;
+    private static Frame s_frame = Frame.Empty;
 
     /// <summary>Nodes of the last published frame (root first, parents before children).</summary>
-    public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_nodes);
+    public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_frame).Nodes;
 
     private const string HostLibrary = "libopenharmonyhost.so";
     private static bool _available = true;
@@ -370,10 +388,12 @@ public static class OpenHarmonyAccessibility
     {
         // One immutable index snapshot: an action arriving while Refresh rebuilds the tree routes
         // with the last complete frame (never a half-swapped one and never a partially updated
-        // rectangle), so a click cannot be misrouted onto torn bounds.
-        if (Volatile.Read(ref s_index).Nodes.TryGetValue(id, out OpenHarmonyAccessibilityNode? found))
+        // rectangle), so a click cannot be misrouted onto torn bounds. Node ids are the frame's
+        // positional slots (id = index + 1), so the lookup is a direct index into the snapshot.
+        Frame frame = Volatile.Read(ref s_frame);
+        if (id >= 1 && id <= frame.Nodes.Length && frame.Nodes[id - 1].Id == id)
         {
-            node = found;
+            node = frame.Nodes[id - 1];
             return true;
         }
         node = null!;
@@ -386,9 +406,10 @@ public static class OpenHarmonyAccessibility
     /// </summary>
     public static bool TryFindView(int id, out IView view)
     {
-        if (Volatile.Read(ref s_index).Views.TryGetValue(id, out IView? found))
+        Frame frame = Volatile.Read(ref s_frame);
+        if (id >= 1 && id <= frame.Views.Length && frame.Nodes[id - 1].Id == id)
         {
-            view = found;
+            view = frame.Views[id - 1];
             return true;
         }
         view = null!;
@@ -461,17 +482,29 @@ public static class OpenHarmonyAccessibility
         return events;
     }
 
-    /// <summary>Rebuilds the shadow tree for a rendered frame.</summary>
+    /// <summary>Rebuilds the shadow tree for a rendered frame (only when something moved).</summary>
     public static void Refresh(IView root)
     {
-        var nodes = new List<OpenHarmonyAccessibilityNode>();
-        var index = new Dictionary<int, OpenHarmonyAccessibilityNode>();
-        var views = new Dictionary<int, IView>();
-        Visit(root, 0, nodes, index, views);
-        // Publish the completed frame with atomic reference swaps: a callback on the accessibility
-        // thread either sees the previous complete frame or this one, never a partial rebuild.
-        Volatile.Write(ref s_nodes, nodes.ToArray());
-        Volatile.Write(ref s_index, new FrameIndex(index, views));
+        // The build buffers are render-thread state and are reused across frames: an unchanged
+        // frame walks the tree, reuses every previous node and view and swaps nothing, so it
+        // allocates no nodes, no lists and no arrays. A changed frame allocates only the new
+        // snapshot (plus a node record per position that actually moved).
+        lock (s_buildLock)
+        {
+            Frame previous = Volatile.Read(ref s_frame);
+            s_buildNodes.Clear();
+            s_buildViews.Clear();
+            s_buildPending.Clear();
+            bool changed = Visit(root, previous);
+            if (!changed)
+            {
+                return;
+            }
+            // Publish the completed frame with atomic reference swaps: a callback on the
+            // accessibility thread either sees the previous complete frame or this one, never a
+            // partial rebuild, and the arrays themselves are never mutated after publication.
+            Volatile.Write(ref s_frame, new Frame(s_buildNodes.ToArray(), s_buildViews.ToArray()));
+        }
     }
 
     /// <summary>
@@ -480,7 +513,7 @@ public static class OpenHarmonyAccessibility
     /// </summary>
     public static void Publish()
     {
-        OpenHarmonyAccessibilityNode[] nodes = Volatile.Read(ref s_nodes);
+        OpenHarmonyAccessibilityNode[] nodes = Volatile.Read(ref s_frame).Nodes;
         // The event source is managed state, so the diff runs even when the host is unavailable.
         PendingEventCount = DiffFrames(nodes);
         if (!_available || nodes.Length == 0)
@@ -502,13 +535,8 @@ public static class OpenHarmonyAccessibility
             foreach (OpenHarmonyAccessibilityNode node in nodes)
             {
                 int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
-                int actions = 0;
-                foreach (OpenHarmonyAccessibilityAction action in ActionsFor(node.Role))
-                {
-                    actions |= (int)action;
-                }
                 AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description, node.Hint,
-                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, actions,
+                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, ActionMask(node.Role),
                     node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
             }
             AccessibilityCommit();
@@ -528,10 +556,23 @@ public static class OpenHarmonyAccessibility
         }
     }
 
-    private static int BuildNode(IView view, int parentId, List<OpenHarmonyAccessibilityNode> nodes,
-        Dictionary<int, OpenHarmonyAccessibilityNode> index, Dictionary<int, IView> views)
+    // Reused build buffers, guarded by s_buildLock. Only Refresh touches them, and it is driven
+    // from the render thread; the lock keeps a reentrant test/simulated call from corrupting a
+    // walk in progress. They grow to the tree size once and are then reused every frame.
+    private static readonly object s_buildLock = new();
+    private static readonly List<OpenHarmonyAccessibilityNode> s_buildNodes = new();
+    private static readonly List<IView> s_buildViews = new();
+    private static readonly Stack<(IView View, int ParentId)> s_buildPending = new();
+    private static readonly List<IView> s_buildChildren = new();
+
+    /// <summary>
+    /// Builds the node for one position, reusing the previous frame's immutable record when every
+    /// published value (and the view it was built from) is unchanged. Reuse is safe for in-flight
+    /// snapshots: the reused record still holds the same values it was published with.
+    /// </summary>
+    private static OpenHarmonyAccessibilityNode BuildNode(IView view, int id, int parentId,
+        OpenHarmonyAccessibilityNode? previous)
     {
-        int id = nodes.Count + 1;
         RectF bounds = default;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
@@ -576,51 +617,85 @@ public static class OpenHarmonyAccessibility
             ICheckBox checkBox => checkBox.IsChecked ? 1 : 0,
             _ => -1,
         };
-        var node = new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable,
-            rangeMin, rangeMax, rangeCurrent, checkedState);
-        nodes.Add(node);
-        index[id] = node;
-        views[id] = view;
-        return id;
-    }
-    private static void Visit(IView root, int parentId, List<OpenHarmonyAccessibilityNode> nodes,
-        Dictionary<int, OpenHarmonyAccessibilityNode> index, Dictionary<int, IView> views)
-    {
-        var pending = new Stack<(IView View, int ParentId)>();
-        pending.Push((root, parentId));
-        while (pending.Count > 0)
+        if (previous is not null && NodeMatches(previous, id, parentId, role, text, description, hint, bounds,
+            enabled, focusable, rangeMin, rangeMax, rangeCurrent, checkedState))
         {
-            (IView view, int parent) = pending.Pop();
-            int id = BuildNode(view, parent, nodes, index, views);
-            var children = new List<IView>();
-            foreach (IView child in ChildrenOf(view))
-            {
-                children.Add(child);
-            }
-            for (int i = children.Count - 1; i >= 0; i--)
-            {
-                pending.Push((children[i], id));
-            }
+            return previous;
         }
+        return new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable,
+            rangeMin, rangeMax, rangeCurrent, checkedState);
     }
 
-    /// <summary>Layout children plus a content view's presented content (same shape as the renderer).</summary>
-    private static IEnumerable<IView> ChildrenOf(IView view)
+    /// <summary>Value equality of every published field; <c>double.Equals</c> keeps NaN == NaN.</summary>
+    private static bool NodeMatches(OpenHarmonyAccessibilityNode node, int id, int parentId, string role,
+        string? text, string? description, string? hint, RectF bounds, bool enabled, bool focusable,
+        double rangeMin, double rangeMax, double rangeCurrent, int checkedState)
+        => node.Id == id
+            && node.ParentId == parentId
+            && string.Equals(node.Role, role, StringComparison.Ordinal)
+            && string.Equals(node.Text, text, StringComparison.Ordinal)
+            && string.Equals(node.Description, description, StringComparison.Ordinal)
+            && string.Equals(node.Hint, hint, StringComparison.Ordinal)
+            && node.Bounds == bounds
+            && node.IsEnabled == enabled
+            && node.IsFocusable == focusable
+            && node.RangeMin.Equals(rangeMin)
+            && node.RangeMax.Equals(rangeMax)
+            && node.RangeCurrent.Equals(rangeCurrent)
+            && node.Checked == checkedState;
+
+    private static bool Visit(IView root, Frame previous)
     {
+        bool changed = false;
+        s_buildPending.Push((root, 0));
+        while (s_buildPending.Count > 0)
+        {
+            (IView view, int parent) = s_buildPending.Pop();
+            int index = s_buildNodes.Count;
+            int id = index + 1;
+            // A position can be reused only when it is the same view: an identical-looking node
+            // built from a different view must still re-index the frame so TryFindView routes
+            // actions to the view actually being shown.
+            OpenHarmonyAccessibilityNode? previousNode =
+                index < previous.Nodes.Length && ReferenceEquals(previous.Views[index], view)
+                    ? previous.Nodes[index]
+                    : null;
+            OpenHarmonyAccessibilityNode node = BuildNode(view, id, parent, previousNode);
+            s_buildNodes.Add(node);
+            s_buildViews.Add(view);
+            changed |= !ReferenceEquals(node, previousNode);
+            PushChildren(view, id);
+        }
+        // A shorter frame is a change even when every surviving position reused its node.
+        return changed || s_buildNodes.Count != previous.Nodes.Length;
+    }
+
+    /// <summary>
+    /// Pushes a view's children onto the pending stack in traversal order, without the per-node
+    /// list and iterator allocations the previous implementation paid on every frame.
+    /// </summary>
+    private static void PushChildren(IView view, int id)
+    {
+        s_buildChildren.Clear();
         if (view is ILayout layout)
         {
-            foreach (IView child in layout)
+            // Indexed access over IList<IView>: a foreach would allocate the interface enumerator.
+            for (int i = 0; i < layout.Count; i++)
             {
-                yield return child;
+                s_buildChildren.Add(layout[i]);
             }
         }
         if (view is Microsoft.Maui.Controls.NavigationPage navigation && navigation.CurrentPage is IView currentPage)
         {
-            yield return currentPage;
+            s_buildChildren.Add(currentPage);
         }
         if (view is IContentView contentView && contentView.PresentedContent is IView presented && !ReferenceEquals(presented, view))
         {
-            yield return presented;
+            s_buildChildren.Add(presented);
+        }
+        for (int i = s_buildChildren.Count - 1; i >= 0; i--)
+        {
+            s_buildPending.Push((s_buildChildren[i], id));
         }
     }
 

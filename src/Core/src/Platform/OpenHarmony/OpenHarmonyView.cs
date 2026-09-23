@@ -65,16 +65,76 @@ public class OpenHarmonyView
     public double Progress { get; set; }
     public Color ProgressColor { get; set; } = Colors.DodgerBlue;
 
-    // Activity indicator support
-    public bool IsActivityIndicator { get; set; }
-    public bool IsRunning { get; set; }
+    // Activity indicator support. IsActivityIndicator/IsRunning feed a global registration
+    // count so the frame loop can ask "is any spinner running?" in O(1) instead of walking the
+    // whole tree every frame (the tree walk stays as the exact answer once some view is
+    // registered, so hidden spinners behave exactly like before).
+    private bool _isActivityIndicator;
+    private bool _isRunning;
+    private bool _animationRegistered;
+
+    public bool IsActivityIndicator
+    {
+        get => _isActivityIndicator;
+        set
+        {
+            if (_isActivityIndicator == value)
+            {
+                return;
+            }
+            _isActivityIndicator = value;
+            UpdateAnimationRegistration();
+        }
+    }
+
+    public bool IsRunning
+    {
+        get => _isRunning;
+        set
+        {
+            if (_isRunning == value)
+            {
+                return;
+            }
+            _isRunning = value;
+            UpdateAnimationRegistration();
+        }
+    }
+
     public Color IndicatorColor { get; set; } = Colors.White;
 
     /// <summary>Shared rotation (degrees) advanced by the renderer for animated views.</summary>
     public static float AnimationAngle { get; set; }
 
     /// <summary>True when this view keeps redrawing on its own (activity indicators).</summary>
-    public bool NeedsAnimation => IsActivityIndicator && IsRunning;
+    public bool NeedsAnimation => _isActivityIndicator && _isRunning;
+
+    private static int s_animationCount;
+
+    /// <summary>
+    /// Platform views that currently want continuous redraws (their <see cref="NeedsAnimation"/>
+    /// is true). The frame loop reads this to skip the per-frame tree walk when nothing animates;
+    /// the walk still decides whether a running indicator is actually visible.
+    /// </summary>
+    internal static int AnimationCount => Volatile.Read(ref s_animationCount);
+
+    private void UpdateAnimationRegistration()
+    {
+        bool active = _isActivityIndicator && _isRunning;
+        if (active == _animationRegistered)
+        {
+            return;
+        }
+        _animationRegistered = active;
+        if (active)
+        {
+            Interlocked.Increment(ref s_animationCount);
+        }
+        else
+        {
+            Interlocked.Decrement(ref s_animationCount);
+        }
+    }
 
     /// <summary>Raised when image bytes are blitted (tests observe the destination rect).</summary>
     public static Action<RectF>? ImageDrawn;

@@ -347,7 +347,17 @@ public sealed class OpenHarmonyWindowRenderer
     private bool _dragRejected;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
-    public bool HasAnimations(IView? root) => TreeHasAnimations(root);
+    public bool HasAnimations(IView? root)
+    {
+        // Idle frames are the common case: with no spinner registered anywhere the tree cannot
+        // contain a NeedsAnimation view, so skip the recursive walk entirely (it stays the exact
+        // answer - including visibility - whenever something is registered).
+        if (OpenHarmonyView.AnimationCount <= 0)
+        {
+            return false;
+        }
+        return TreeHasAnimations(root);
+    }
 
     /// <summary>Page indicator dots for a carousel.</summary>
     private void DrawCarouselIndicator(OpenHarmonyView carousel)

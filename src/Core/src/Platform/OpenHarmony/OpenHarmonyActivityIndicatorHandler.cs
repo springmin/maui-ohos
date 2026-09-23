@@ -17,6 +17,14 @@ public sealed class OpenHarmonyActivityIndicatorHandler : OpenHarmonyViewHandler
 
     protected override OpenHarmonyView CreatePlatformView() => new() { IsActivityIndicator = true };
 
+    protected override void DisconnectHandler(OpenHarmonyView platformView)
+    {
+        // Retract the animation registration: a spinner whose handler is gone is not part of the
+        // rendered tree any more, and the frame loop asks the registration count before walking.
+        platformView.IsRunning = false;
+        base.DisconnectHandler(platformView);
+    }
+
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
         => new(Math.Min(24, widthConstraint), Math.Min(24, heightConstraint));
 

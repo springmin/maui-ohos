@@ -1,5 +1,8 @@
 # OpenHarmony platform slice (start)
 
+How to obtain and wire the slice (branch, source tarball, csproj snippets):
+[`README-openharmony-slice.md`](../README-openharmony-slice.md).
+
 Status (2026-09-22): implemented and off-device verified. The slice registers 41 view-handler
 entries (pages/controls, WebView/HybridWebView, build-gated BlazorWebView) and draws the whole
 tree through the self-drawn compositor route: one ArkUI `XComponent` surface + canvas, custom

@@ -2,7 +2,7 @@
 
 `main` in this repository mirrors `dotnet/maui` (upstream); it does **not** carry the
 OpenHarmony platform slice. The slice is published from `feature/openharmony` and as the
-source drop `ohos-slice-1.0.0.tar.gz` on the `ohos-slice-1.0.0` release.
+source drop `ohos-slice-1.0.1.tar.gz` on the `ohos-slice-1.0.1` release.
 
 ## Where the slice is
 
@@ -10,7 +10,7 @@ source drop `ohos-slice-1.0.0.tar.gz` on the `ohos-slice-1.0.0` release.
 |---|---|
 | Branch | `feature/openharmony` (tip of the slice work) |
 | Directory | `src/Core/src/Platform/OpenHarmony/` — 107 `.cs` files + `README.md` + standalone `Microsoft.Maui.Platform.OpenHarmony.csproj` |
-| Tag / asset | `ohos-slice-1.0.0` → `ohos-slice-1.0.0.tar.gz` + `.sha256` |
+| Tag / asset | `ohos-slice-1.0.1` → `ohos-slice-1.0.1.tar.gz` + `.sha256` |
 | Standalone project | plain `net11.0`; references `Microsoft.Maui.*` 11.0.0-rc.1.26451.6 and the workload bridge DLLs `Microsoft.OpenHarmony.Hosting` / `Microsoft.OpenHarmony.Maui.Graphics` |
 
 Clone the slice branch (the default branch will not have it):
@@ -20,12 +20,12 @@ git clone --depth 1 --branch feature/openharmony https://github.com/springmin/ma
 test -f maui-ohos/src/Core/src/Platform/OpenHarmony/OpenHarmonyMauiAppHost.cs && echo "slice present"
 ```
 
-Or take the tarball (same tree, prefixed `ohos-slice-1.0.0/`):
+Or take the tarball (same tree, prefixed `ohos-slice-1.0.1/`):
 
 ```sh
-curl -LO https://github.com/springmin/maui-ohos/releases/download/ohos-slice-1.0.0/ohos-slice-1.0.0.tar.gz
-tar xzf ohos-slice-1.0.0.tar.gz
-test -f ohos-slice-1.0.0/src/Core/src/Platform/OpenHarmony/OpenHarmonyMauiAppHost.cs && echo "slice present"
+curl -LO https://github.com/springmin/maui-ohos/releases/download/ohos-slice-1.0.1/ohos-slice-1.0.1.tar.gz
+tar xzf ohos-slice-1.0.1.tar.gz
+test -f ohos-slice-1.0.1/src/Core/src/Platform/OpenHarmony/OpenHarmonyMauiAppHost.cs && echo "slice present"
 ```
 
 ## Type-name map (names referenced by the workload / test harness)
@@ -88,8 +88,10 @@ The slice is compiled into `Microsoft.Maui.Core` only for `net11.0-openharmony*`
 - `src/Workload/Microsoft.NET.Sdk.Maui.Manifest/WorkloadManifest.in.json`: the
   `maui-openharmony` workload extends `["maui-blazor", "openharmony"]`.
 
-Standalone slice build (0 errors; the two DLL paths default to a sibling `ohos-workload`
-checkout, override them for any other layout):
+Standalone slice build (0 errors). The project evaluates in a slice-only checkout (this branch
+or the tarball): when `eng/` is absent the root `Directory.Build.props`/`.targets` are skipped
+instead of failing on the Arcade bootstrap. The two assembly paths default to a sibling
+`ohos-workload` checkout; override them for any other layout:
 
 ```sh
 dotnet build src/Core/src/Platform/OpenHarmony/Microsoft.Maui.Platform.OpenHarmony.csproj \

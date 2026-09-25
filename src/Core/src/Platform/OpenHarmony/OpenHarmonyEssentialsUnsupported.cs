@@ -220,7 +220,7 @@ public sealed class OpenHarmonyPermissions : IPermissions
 /// null means the host library/sink is unavailable or did not answer inside the timeout, and
 /// the caller keeps its documented fallback (Unknown for a check, Denied for a request).
 /// </summary>
-internal static class OpenHarmonyNotificationPermissionBridge
+internal static partial class OpenHarmonyNotificationPermissionBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -233,11 +233,11 @@ internal static class OpenHarmonyNotificationPermissionBridge
     /// <summary>The enable dialog is user-driven, so the timeout only bounds a lost answer.</summary>
     internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_notification_permission_request")]
-    private static extern void RequestNative(int op, int requestId);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_notification_permission_request")]
+    private static partial void RequestNative(int op, int requestId);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_notification_permission_register_result")]
-    private static extern void RegisterResultNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_notification_permission_register_result")]
+    private static partial void RegisterResultNative(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void NotificationPermissionResultCallback(int requestId, int granted);

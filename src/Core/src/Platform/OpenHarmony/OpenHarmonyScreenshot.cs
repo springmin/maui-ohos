@@ -35,13 +35,13 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>The host capture entry point: ohos_host_screenshot(out_path) writes a PNG.</summary>
-internal static class OpenHarmonyScreenshotBridge
+internal static partial class OpenHarmonyScreenshotBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const string EntryPoint = "ohos_host_screenshot";
 
-    [DllImport(HostLibrary, EntryPoint = EntryPoint, CharSet = CharSet.Ansi)]
-    private static extern int ScreenshotNative(string outPath);
+    [LibraryImport(HostLibrary, EntryPoint = EntryPoint, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ScreenshotNative(string outPath);
 
     private static int s_available;   // 0 unknown, 1 exported, -1 missing (cached probe)
 

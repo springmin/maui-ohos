@@ -162,7 +162,7 @@ internal static class OpenHarmonyPackagePaths
 /// false/null - the host rejects an undispatchable request with rc -1 immediately, and a request
 /// that is never answered trips the bounded timeout below.
 /// </summary>
-internal static class OpenHarmonyRawFiles
+internal static partial class OpenHarmonyRawFiles
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -371,17 +371,17 @@ internal static class OpenHarmonyRawFiles
     private static bool s_unavailable;
     private static bool s_unavailableLogged;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_raw_file_request", CharSet = CharSet.Ansi)]
-    private static extern int RawFileRequest(int requestId, int op, string name);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_raw_file_request", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RawFileRequest(int requestId, int op, string name);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_raw_file_register_result")]
-    private static extern void RawFileRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_raw_file_register_result")]
+    private static partial void RawFileRegisterResult(IntPtr callback);
 
     // The byte transport exists in the same host library as the descriptor notify, but keep the
     // registration optional: a host library built before H7 answers EntryPointNotFound here and
     // the base64 callback above still serves every request.
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_raw_file_register_result_bytes")]
-    private static extern void RawFileRegisterResultBytes(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_raw_file_register_result_bytes")]
+    private static partial void RawFileRegisterResultBytes(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void RawFileResultCallback(int requestId, int rc, IntPtr dataBase64Utf8);

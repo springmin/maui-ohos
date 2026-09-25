@@ -32,7 +32,7 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>One geocoding request over the host/ArkTS bridge.</summary>
-internal static class OpenHarmonyGeocodingBridge
+internal static partial class OpenHarmonyGeocodingBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -49,11 +49,11 @@ internal static class OpenHarmonyGeocodingBridge
     /// </summary>
     internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_geocode_request", CharSet = CharSet.Ansi)]
-    private static extern int GeocodeRequestNative(int op, string arg, int requestId);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_geocode_request", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int GeocodeRequestNative(int op, string arg, int requestId);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_register_geocode_result")]
-    private static extern void RegisterGeocodeResultNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_register_geocode_result")]
+    private static partial void RegisterGeocodeResultNative(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void GeocodeResultCallback(int requestId, int rc, IntPtr jsonUtf8);

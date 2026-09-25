@@ -18,13 +18,13 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Plays a vibration through the OpenHarmony NDK export and never throws.</summary>
-internal static class OpenHarmonyHaptics
+internal static partial class OpenHarmonyHaptics
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
     /// <summary>Direct NDK call: OH_Vibrator_PlayVibration(durationMs, default attribute).</summary>
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_vibrate")]
-    private static extern int VibrateNative(int durationMs);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_vibrate")]
+    private static partial int VibrateNative(int durationMs);
 
     private static bool s_available = true;
 

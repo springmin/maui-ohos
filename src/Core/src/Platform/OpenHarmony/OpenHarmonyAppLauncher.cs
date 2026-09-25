@@ -57,7 +57,7 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Forwards ability launches to the ArkTS shell sink; returns whether it was dispatched.</summary>
-internal static class OpenHarmonyAbilityBridge
+internal static partial class OpenHarmonyAbilityBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -76,11 +76,11 @@ internal static class OpenHarmonyAbilityBridge
     /// <summary>ohos_host_ability_start_ex flags: bit 0 = FLAG_AUTH_READ_URI_PERMISSION.</summary>
     private const int FlagReadUriPermission = 0x1;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_ability_start")]
-    private static extern int AbilityStart(int kind, string uri, string text);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_ability_start", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AbilityStart(int kind, string uri, string text);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_ability_start_ex")]
-    private static extern int AbilityStartEx(int kind, string uri, string text, string title, int flags);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_ability_start_ex", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AbilityStartEx(int kind, string uri, string text, string title, int flags);
 
     private static bool s_available = true;
     private static bool s_exAvailable = true;

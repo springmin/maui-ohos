@@ -5,12 +5,12 @@ using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;
 
-public static class OpenHarmonyNotifications
+public static partial class OpenHarmonyNotifications
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_notification_show")]
-    private static extern int NotificationShow(int id, string title, string text);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_notification_show", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int NotificationShow(int id, string title, string text);
 
     private static bool _available = true;
 

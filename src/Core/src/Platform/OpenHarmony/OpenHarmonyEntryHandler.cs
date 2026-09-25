@@ -37,7 +37,7 @@ namespace Microsoft.Maui.Platform;
 /// method NDK path handled the keyboard request and the shell's text-input sink never ran.
 /// Off-device (no host library) and with an older host library every call answers false.
 /// </summary>
-internal static class OpenHarmonyFocusBridge
+internal static partial class OpenHarmonyFocusBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -47,8 +47,8 @@ internal static class OpenHarmonyFocusBridge
     /// <summary>The XComponent the managed content is rendered into.</summary>
     private const string SurfaceId = "ohos_dotnet_surface";
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_request_focus", CharSet = CharSet.Ansi)]
-    private static extern int RequestFocusNative(string targetId);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_request_focus", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int RequestFocusNative(string targetId);
 
     private static bool s_available = true;
 

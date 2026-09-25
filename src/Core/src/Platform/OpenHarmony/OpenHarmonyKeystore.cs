@@ -7,7 +7,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-internal static class OpenHarmonyKeystore
+internal static partial class OpenHarmonyKeystore
 {
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Rc, string Data)>> s_pending = new();
     private static int s_nextId;
@@ -72,6 +72,6 @@ internal static class OpenHarmonyKeystore
         return data;
     }
 
-    [System.Runtime.InteropServices.DllImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_request")]
-    private static extern void RequestNative(int requestId, string op, string alias, string dataBase64);
+    [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_request", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf8)]
+    private static partial void RequestNative(int requestId, string op, string alias, string dataBase64);
 }

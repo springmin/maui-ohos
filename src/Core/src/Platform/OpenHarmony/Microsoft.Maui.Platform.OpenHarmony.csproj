@@ -5,6 +5,10 @@
     <RootNamespace>Microsoft.Maui.Platform</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- FIX-INTEROP P2: the slice's P/Invokes are [LibraryImport]; the source generator emits
+         the string-marshalling helpers as unsafe code, so the compile vehicle must allow it
+         (the full-tree build already sets AllowUnsafeBlocks on the net*-openharmony TFM). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- The platform bridge (Microsoft.OpenHarmony.Hosting) ships in the OpenHarmony platform
          workload packs; point this at a built or installed copy when building outside the
          workload repo. -->

@@ -11,15 +11,15 @@ using System.Runtime.InteropServices;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Writes the "[maui] openharmony build ..." startup line once per process.</summary>
-internal static class OpenHarmonyBuildBanner
+internal static partial class OpenHarmonyBuildBanner
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
     // Same probe OpenHarmonyAccessibility reads for its own "accessibility provider status=N"
     // line; kept local because that slice does not expose the value. 0 = not attached yet,
     // 1 = attached, 2/3/4 = the failure states the native host reports.
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
-    private static extern int ProviderStatusNative();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
+    private static partial int ProviderStatusNative();
 
     private static int s_logged;
 

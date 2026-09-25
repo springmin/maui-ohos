@@ -208,7 +208,7 @@ public sealed class OpenHarmonyClipboard : IClipboard
 /// host library, VPN-only) answers an empty set instead of guessing. Off-device the read fails
 /// and stays <see cref="NetworkAccess.Unknown"/> with no profiles.
 /// </summary>
-public sealed class OpenHarmonyConnectivity : IConnectivity
+public sealed partial class OpenHarmonyConnectivity : IConnectivity
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -219,8 +219,8 @@ public sealed class OpenHarmonyConnectivity : IConnectivity
     private const int BearerEthernet = 1 << 3;
 
     /// <summary>The parsed bearer mask; 0 when unknown (or no host library after the first probe).</summary>
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_network_capabilities")]
-    private static extern int NetworkCapabilitiesNative();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_network_capabilities")]
+    private static partial int NetworkCapabilitiesNative();
 
     private static bool s_capabilitiesAvailable = true;
     private static bool s_capabilitiesProbed;

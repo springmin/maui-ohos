@@ -36,7 +36,7 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Torch control through the host's flashlight sink; never throws.</summary>
-internal static class OpenHarmonyFlashlightBridge
+internal static partial class OpenHarmonyFlashlightBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -49,8 +49,8 @@ internal static class OpenHarmonyFlashlightBridge
     /// <summary>Support probe opcode: the shell runs isTorchSupported only.</summary>
     internal const int ProbeOp = 2;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_flashlight_set")]
-    private static extern int FlashlightSet(int on);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_flashlight_set")]
+    private static partial int FlashlightSet(int on);
 
     private static bool s_available = true;
 

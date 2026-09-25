@@ -27,7 +27,7 @@ namespace Microsoft.Maui.Platform;
 /// One runtime-permission request over the host/ArkTS bridge. The request id is allocated here;
 /// the callback registered with the host completes the matching <see cref="TaskCompletionSource{TResult}"/>.
 /// </summary>
-internal static class OpenHarmonyPermissionBridge
+internal static partial class OpenHarmonyPermissionBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -37,11 +37,11 @@ internal static class OpenHarmonyPermissionBridge
     /// </summary>
     internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_request_permission", CharSet = CharSet.Ansi)]
-    private static extern void RequestPermissionNative(string permission, int requestId);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_request_permission", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void RequestPermissionNative(string permission, int requestId);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_register_permission_result")]
-    private static extern void RegisterPermissionResultNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_register_permission_result")]
+    private static partial void RegisterPermissionResultNative(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void PermissionResultCallback(int requestId, int granted);
@@ -144,7 +144,7 @@ internal static class OpenHarmonyPermissionBridge
 /// 0 has text, 1 get text, 2 set text; the shell answers (rc 0 success / -1 unavailable) with
 /// the value in <c>text</c>.
 /// </summary>
-internal static class OpenHarmonyClipboardBridge
+internal static partial class OpenHarmonyClipboardBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -155,14 +155,14 @@ internal static class OpenHarmonyClipboardBridge
     /// <summary>Bounds a lost pasteboard answer; the shell calls are local and fast.</summary>
     internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_clipboard_request", CharSet = CharSet.Ansi)]
-    private static extern void RequestNative(int requestId, int op, string text);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_clipboard_request", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void RequestNative(int requestId, int op, string text);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_clipboard_register_result")]
-    private static extern void RegisterResultNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_clipboard_register_result")]
+    private static partial void RegisterResultNative(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_clipboard_register_changed")]
-    private static extern void RegisterChangedNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_clipboard_register_changed")]
+    private static partial void RegisterChangedNative(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void ClipboardResultCallback(int requestId, int rc, IntPtr textUtf8);
@@ -290,18 +290,18 @@ internal static class OpenHarmonyClipboardBridge
 /// Network access over the host NDK path plus the shell's network-change push. The value read
 /// here is the host's 0 unknown / 1 none / 2 local / 3 internet encoding.
 /// </summary>
-internal static class OpenHarmonyConnectivityBridge
+internal static partial class OpenHarmonyConnectivityBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
     /// <summary>Returned when the host library or the network getter is unavailable.</summary>
     internal const int Unavailable = -1;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_network_access")]
-    private static extern int NetworkAccessNative();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_network_access")]
+    private static partial int NetworkAccessNative();
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_network_access_register")]
-    private static extern void NetworkAccessRegisterNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_network_access_register")]
+    private static partial void NetworkAccessRegisterNative(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void NetworkAccessCallback(int level);

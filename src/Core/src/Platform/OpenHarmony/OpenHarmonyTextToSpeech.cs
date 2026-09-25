@@ -18,19 +18,19 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyTextToSpeech : ITextToSpeech
+public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
 {
     public static readonly OpenHarmonyTextToSpeech Instance = new();
 
     private const string HostLibrary = "libopenharmonyhost.so";
 
     /// <summary>Forwards the request to the ArkTS sink; returns 0 when it was dispatched.</summary>
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_tts_speak")]
-    private static extern int TtsSpeak(int requestId, string text, string locale);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_tts_speak", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int TtsSpeak(int requestId, string text, string locale);
 
     /// <summary>Registers the callback the host uses to complete a pending request.</summary>
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_tts_register_result")]
-    private static extern void TtsRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_tts_register_result")]
+    private static partial void TtsRegisterResult(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void TtsResultCallback(int requestId, int code);

@@ -13,18 +13,18 @@ namespace Microsoft.Maui.Platform;
 /// Each read is guarded: a desktop build without libopenharmonyhost.so (or an older host
 /// library without the export) reports null and the callers keep their documented fallbacks.
 /// </summary>
-internal static class OpenHarmonyBundleInfoBridge
+internal static partial class OpenHarmonyBundleInfoBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_version")]
-    private static extern IntPtr GetVersionNative();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_version")]
+    private static partial IntPtr GetVersionNative();
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_build")]
-    private static extern IntPtr GetBuildNative();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_build")]
+    private static partial IntPtr GetBuildNative();
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_name")]
-    private static extern IntPtr GetNameNative();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_get_bundle_name")]
+    private static partial IntPtr GetNameNative();
 
     private static bool s_unavailable;
 
@@ -59,7 +59,7 @@ internal static class OpenHarmonyBundleInfoBridge
 /// implicit 'ohos.settings' action; false means neither the host library nor the shell sink
 /// answered, and the caller logs the documented no-op.
 /// </summary>
-internal static class OpenHarmonySettingsBridge
+internal static partial class OpenHarmonySettingsBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -69,8 +69,8 @@ internal static class OpenHarmonySettingsBridge
     private const string SettingsBundle = "com.ohos.settings";
     private const string SettingsAbility = "com.ohos.settings.MainAbility";
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_ability_start", CharSet = CharSet.Ansi)]
-    private static extern int AbilityStart(int kind, string uri, string text);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_ability_start", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AbilityStart(int kind, string uri, string text);
 
     private static bool s_unavailable;
 

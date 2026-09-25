@@ -30,14 +30,14 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-internal static class OpenHarmonySafeArea
+internal static partial class OpenHarmonySafeArea
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
     /// <summary>Keyboard height in pixels; the host clamps negatives, and a missing export (an
     /// older host library or the off-device harness) reports 0 after the first probe.</summary>
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_get_soft_input_area")]
-    private static extern int GetSoftInputAreaNative(out int bottom);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_get_soft_input_area")]
+    private static partial int GetSoftInputAreaNative(out int bottom);
 
     private static bool s_softInputAvailable = true;
     private static bool s_softInputProbed;
@@ -48,8 +48,8 @@ internal static class OpenHarmonySafeArea
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void SoftInputChanged(int bottom);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_register_soft_input_change")]
-    private static extern void RegisterSoftInputChangeNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_register_soft_input_change")]
+    private static partial void RegisterSoftInputChangeNative(IntPtr callback);
 
     /// <summary>Window avoid area in pixels; zero when the shell has no answer.</summary>
     internal static Thickness GetWindowInsets()

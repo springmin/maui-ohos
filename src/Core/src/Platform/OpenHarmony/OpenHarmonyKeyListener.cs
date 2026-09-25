@@ -33,7 +33,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-internal static class OpenHarmonyKeyListener
+internal static partial class OpenHarmonyKeyListener
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -47,8 +47,8 @@ internal static class OpenHarmonyKeyListener
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void KeyEventCallback(int keyCode, int eventType);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_register_key_event")]
-    private static extern void RegisterKeyEventNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_register_key_event")]
+    private static partial void RegisterKeyEventNative(IntPtr callback);
 
     private static bool s_installed;
     private static bool s_registered;

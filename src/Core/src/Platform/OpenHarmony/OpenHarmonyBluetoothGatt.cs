@@ -10,6 +10,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -227,8 +228,8 @@ public static partial class OpenHarmonyBluetoothGatt
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Payload)>> s_pending = new();
     private static readonly char[] s_fieldSeparators = { '\t', '\n', '\r' };
 
-    private static GattResultCallback? s_callback;
-    private static GattEventCallback? s_eventCallback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnResultNative;
+    private static unsafe IntPtr s_eventCallback = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&OnEventNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_eventRegistered;
@@ -745,8 +746,7 @@ public static partial class OpenHarmonyBluetoothGatt
         }
         try
         {
-            s_callback = OnResultNative;
-            BluetoothGattRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            BluetoothGattRegisterResult(s_callback);
             s_registered = true;
             EnsureEventRegistered();
         }
@@ -767,8 +767,7 @@ public static partial class OpenHarmonyBluetoothGatt
         }
         try
         {
-            s_eventCallback = OnEventNative;
-            BluetoothGattRegisterEvent(Marshal.GetFunctionPointerForDelegate(s_eventCallback));
+            BluetoothGattRegisterEvent(s_eventCallback);
             s_eventRegistered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -778,6 +777,7 @@ public static partial class OpenHarmonyBluetoothGatt
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int code, IntPtr payloadUtf8)
     {
         string payload = payloadUtf8 == IntPtr.Zero
@@ -792,6 +792,7 @@ public static partial class OpenHarmonyBluetoothGatt
     // A reverse P/Invoke entry: the pushed events run application handlers (ValueChanged /
     // ConnectionStateChanged / MtuChanged), so an exception must not unwind into the native
     // frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnEventNative(IntPtr payloadUtf8)
     {
         try

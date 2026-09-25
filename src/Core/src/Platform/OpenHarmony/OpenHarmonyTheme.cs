@@ -31,7 +31,7 @@ internal static partial class OpenHarmonyTheme
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void ThemeCallback(int isDark);
 
-    private static ThemeCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, void>)&OnNativeTheme;
     private static bool s_registered;
     private static bool s_available = true;
     private static bool? s_lastTheme;
@@ -52,8 +52,7 @@ internal static partial class OpenHarmonyTheme
         s_registered = true;
         try
         {
-            s_callback = OnNativeTheme;
-            ThemeSetListener(Marshal.GetFunctionPointerForDelegate(s_callback));
+            ThemeSetListener(s_callback);
         }
         catch (DllNotFoundException)
         {
@@ -73,6 +72,7 @@ internal static partial class OpenHarmonyTheme
     }
 
     /// <summary>Native-shaped thunk: the NAPI export delivers 0/1.</summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativeTheme(int isDark)
     {
         // A reverse P/Invoke entry: the change runs the app's theme application path, so an

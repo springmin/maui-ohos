@@ -22,6 +22,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -107,7 +108,7 @@ public static partial class OpenHarmonyPush
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(60);
 
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Token)>> s_pending = new();
-    private static PushResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, int, IntPtr, void>)&OnResultNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -241,8 +242,7 @@ public static partial class OpenHarmonyPush
         }
         try
         {
-            s_callback = OnResultNative;
-            PushRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            PushRegisterResult(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -252,6 +252,7 @@ public static partial class OpenHarmonyPush
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int op, int code, IntPtr tokenUtf8)
     {
         if (!s_pending.TryRemove(requestId, out TaskCompletionSource<(int Code, string Token)>? source))

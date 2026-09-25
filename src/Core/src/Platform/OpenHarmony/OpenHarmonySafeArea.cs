@@ -27,6 +27,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -42,7 +43,7 @@ internal static partial class OpenHarmonySafeArea
     private static bool s_softInputAvailable = true;
     private static bool s_softInputProbed;
     private static bool s_softInputCallbackRegistered;
-    private static SoftInputChanged? s_softInputChangedThunk;
+    private static unsafe IntPtr s_softInputChangedThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, void>)&OnSoftInputChangedNative;
 
     /// <summary>Managed form of the host's soft-input change callback: void (*)(int bottom).</summary>
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -74,10 +75,9 @@ internal static partial class OpenHarmonySafeArea
             return;
         }
         s_softInputCallbackRegistered = true;
-        s_softInputChangedThunk = OnSoftInputChangedNative;
         try
         {
-            RegisterSoftInputChangeNative(Marshal.GetFunctionPointerForDelegate(s_softInputChangedThunk));
+            RegisterSoftInputChangeNative(s_softInputChangedThunk);
         }
         catch (Exception)
         {
@@ -85,6 +85,7 @@ internal static partial class OpenHarmonySafeArea
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnSoftInputChangedNative(int bottom)
     {
         // The keyboard height changed: a redraw re-runs Measure/Arrange, which reads the new

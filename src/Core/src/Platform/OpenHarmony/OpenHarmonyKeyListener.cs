@@ -30,6 +30,7 @@
 // a future surface (or a slice handler) subscribe without native code changes.
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -54,7 +55,7 @@ internal static partial class OpenHarmonyKeyListener
     private static bool s_registered;
     private static bool s_gapLogged;
     private static string s_lastEventTypeName = "none";
-    private static KeyEventCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnKeyEventNative;
 
     /// <summary>Raw hardware key events (keyCode, eventType; KeyTypeDown/KeyTypeUp).</summary>
     internal static event Action<int, int>? KeyEvent;
@@ -97,10 +98,9 @@ internal static partial class OpenHarmonyKeyListener
             return;
         }
         s_installed = true;
-        s_callback = OnKeyEventNative;
         try
         {
-            RegisterKeyEventNative(Marshal.GetFunctionPointerForDelegate(s_callback));
+            RegisterKeyEventNative(s_callback);
             s_registered = true;
             LogInternalSurfaceOnce();
         }
@@ -146,6 +146,7 @@ internal static partial class OpenHarmonyKeyListener
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnKeyEventNative(int keyCode, int eventType) => Dispatch(keyCode, eventType);
 
     private static void LogInternalSurfaceOnce()

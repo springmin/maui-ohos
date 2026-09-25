@@ -33,6 +33,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -126,7 +127,7 @@ public static partial class OpenHarmonyAccount
     private static readonly TimeSpan s_timeout = TimeSpan.FromMinutes(5);
 
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Payload)>> s_pending = new();
-    private static AccountResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, int, IntPtr, void>)&OnResultNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -266,8 +267,7 @@ public static partial class OpenHarmonyAccount
         }
         try
         {
-            s_callback = OnResultNative;
-            AccountRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            AccountRegisterResult(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -277,6 +277,7 @@ public static partial class OpenHarmonyAccount
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int op, int code, IntPtr payloadUtf8)
     {
         if (!s_pending.TryRemove(requestId, out TaskCompletionSource<(int Code, string Payload)>? source))

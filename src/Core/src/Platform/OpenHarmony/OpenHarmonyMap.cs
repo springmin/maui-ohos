@@ -28,6 +28,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -63,7 +64,7 @@ public static partial class OpenHarmonyMap
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
 
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<int>> s_pending = new();
-    private static MapResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnResultNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -167,8 +168,7 @@ public static partial class OpenHarmonyMap
         }
         try
         {
-            s_callback = OnResultNative;
-            MapRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            MapRegisterResult(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -178,6 +178,7 @@ public static partial class OpenHarmonyMap
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int flags)
     {
         if (s_pending.TryRemove(requestId, out TaskCompletionSource<int>? source))

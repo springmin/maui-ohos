@@ -36,7 +36,7 @@ public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
     private delegate void TtsResultCallback(int requestId, int code);
 
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<bool>> s_pending = new();
-    private static TtsResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&Complete;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -48,6 +48,7 @@ public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
     internal static bool IsUnavailable => s_unavailable;
 
     /// <summary>The shell reports results through the host into this method.</summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     internal static void Complete(int requestId, int code)
     {
         if (s_pending.TryRemove(requestId, out TaskCompletionSource<bool>? source))
@@ -138,8 +139,7 @@ public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
             return;
         }
         s_registered = true;
-        s_callback = Complete;
-        TtsRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+        TtsRegisterResult(s_callback);
     }
 
     /// <summary>Installs this implementation as the MAUI Essentials TextToSpeech default.</summary>

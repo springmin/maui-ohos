@@ -53,6 +53,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -74,8 +75,8 @@ public static partial class OpenHarmonyBluetooth
     // Addresses already reported for the current/last discovery (the DeviceFound dedupe key).
     // Addresses are case-insensitive; the set is cleared when a new discovery actually starts.
     private static readonly ConcurrentDictionary<string, byte> s_foundAddresses = new(StringComparer.OrdinalIgnoreCase);
-    private static BluetoothResultCallback? s_callback;
-    private static BluetoothDeviceCallback? s_deviceCallback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnResultNative;
+    private static unsafe IntPtr s_deviceCallback = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&OnDeviceFoundNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_deviceRegistered;
@@ -337,8 +338,7 @@ public static partial class OpenHarmonyBluetooth
         }
         try
         {
-            s_callback = OnResultNative;
-            BluetoothRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            BluetoothRegisterResult(s_callback);
             s_registered = true;
             EnsureDeviceRegistered();
         }
@@ -359,8 +359,7 @@ public static partial class OpenHarmonyBluetooth
         }
         try
         {
-            s_deviceCallback = OnDeviceFoundNative;
-            BluetoothRegisterDeviceFound(Marshal.GetFunctionPointerForDelegate(s_deviceCallback));
+            BluetoothRegisterDeviceFound(s_deviceCallback);
             s_deviceRegistered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -370,6 +369,7 @@ public static partial class OpenHarmonyBluetooth
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int code, IntPtr payloadUtf8)
     {
         string payload = payloadUtf8 == IntPtr.Zero
@@ -383,6 +383,7 @@ public static partial class OpenHarmonyBluetooth
 
     // A reverse P/Invoke entry: raising DeviceFound runs application handlers, so an exception
     // must not unwind into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnDeviceFoundNative(IntPtr payloadUtf8)
     {
         try
@@ -414,7 +415,7 @@ public static partial class OpenHarmonyPrinting
 
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Message)>> s_pending = new();
-    private static PrintResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnResultNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -713,8 +714,7 @@ public static partial class OpenHarmonyPrinting
         }
         try
         {
-            s_callback = OnResultNative;
-            PrintRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            PrintRegisterResult(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -724,6 +724,7 @@ public static partial class OpenHarmonyPrinting
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int code, IntPtr messageUtf8)
     {
         string message = messageUtf8 == IntPtr.Zero

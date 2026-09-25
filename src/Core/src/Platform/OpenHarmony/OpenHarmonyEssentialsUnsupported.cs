@@ -244,7 +244,7 @@ internal static partial class OpenHarmonyNotificationPermissionBridge
 
     private static readonly object s_sync = new();
     private static readonly Dictionary<int, TaskCompletionSource<bool>> s_pending = new();
-    private static NotificationPermissionResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnNativeNotificationPermissionResult;
     private static bool s_registered;
     private static bool s_unavailable;
     private static int s_nextRequestId;
@@ -261,8 +261,7 @@ internal static partial class OpenHarmonyNotificationPermissionBridge
         }
         try
         {
-            s_callback = OnNativeNotificationPermissionResult;
-            RegisterResultNative(Marshal.GetFunctionPointerForDelegate(s_callback));
+            RegisterResultNative(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -321,6 +320,7 @@ internal static partial class OpenHarmonyNotificationPermissionBridge
         return await completion.Task.ConfigureAwait(false);
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativeNotificationPermissionResult(int requestId, int granted)
     {
         TaskCompletionSource<bool>? completion;

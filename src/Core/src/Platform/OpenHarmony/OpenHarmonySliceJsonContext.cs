@@ -18,9 +18,13 @@ namespace Microsoft.Maui.Platform;
 
 [JsonSerializable(typeof(OpenHarmonyHybridWebViewHandler.HybridAssetsConfig))]
 [JsonSerializable(typeof(OpenHarmonyHybridWebViewHandler.DotNetInvokeResult))]
-[JsonSerializable(typeof(OpenHarmonyBlazorWebViewHandler.BlazorAssetsConfig))]
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(string))]
+#if OPENHARMONY_BLAZOR_WEBVIEW
+// The BlazorWebView handler (and therefore its wire type) only compiles in vehicles that
+// define OPENHARMONY_BLAZOR_WEBVIEW; the harness compiles the slice sources without it.
+[JsonSerializable(typeof(OpenHarmonyBlazorWebViewHandler.BlazorAssetsConfig))]
+#endif
 internal sealed partial class OpenHarmonySliceJsonContext : JsonSerializerContext
 {
 }

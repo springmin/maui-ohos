@@ -32,12 +32,12 @@ namespace Microsoft.Maui.Platform;
 /// Share Kit sink is not registered (the OpenHarmony SDK shell, or an HMS runtime without the
 /// kit); <see cref="OpenHarmonyShare"/> then keeps its documented degradation.
 /// </summary>
-internal static class OpenHarmonyShareKitBridge
+internal static partial class OpenHarmonyShareKitBridge
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_share_kit_share", CharSet = CharSet.Ansi)]
-    private static extern int ShareKitShare(string uris, string title);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_share_kit_share", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ShareKitShare(string uris, string title);
 
     private static bool s_unavailable;
 
@@ -70,7 +70,7 @@ internal static class OpenHarmonyShareKitBridge
 /// the sink; <see cref="ScanAsync"/> opens the system scan UI and completes with the decoded
 /// value, null on cancel/unavailable. All members degrade without throwing off-device.
 /// </summary>
-public static class OpenHarmonyScan
+public static partial class OpenHarmonyScan
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -90,14 +90,14 @@ public static class OpenHarmonyScan
     private static bool s_registered;
     private static bool s_unavailable;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_scan_available", CharSet = CharSet.Ansi)]
-    private static extern int ScanAvailable();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_scan_available", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ScanAvailable();
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_scan_request", CharSet = CharSet.Ansi)]
-    private static extern int ScanRequest(int requestId);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_scan_request", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ScanRequest(int requestId);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_scan_register_result", CharSet = CharSet.Ansi)]
-    private static extern void ScanRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_scan_register_result", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void ScanRegisterResult(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void ScanResultCallback(int requestId, int code, IntPtr valueUtf8);

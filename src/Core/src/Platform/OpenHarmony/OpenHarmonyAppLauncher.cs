@@ -10,7 +10,7 @@
 // (host.registerAbilitySink) imports @ohos.app.ability.common plus @ohos.app.ability.Want and
 // calls UIAbilityContext.startAbility.
 //
-// The five-argument host export (ohos_host_ability_start_ex, reached through the same DllImport
+// The five-argument host export (ohos_host_ability_start_ex, reached through the same P/Invoke
 // pair as the three-argument form) carries the optional content title and the Want flags:
 // - Title: ShareTextRequest.Title/Subject and ShareFileRequest.Title (and OpenFileRequest.Title)
 //   travel under wantConstant.Params.CONTENT_TITLE_KEY ('ohos.extra.param.key.contentTitle'),

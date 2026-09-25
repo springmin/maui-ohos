@@ -200,7 +200,7 @@ public sealed class OpenHarmonyGattMtuChangedEventArgs : EventArgs
 /// library) they answer <see cref="OpenHarmonyGattStatus.Unavailable"/> / empty results and
 /// never throw; <see cref="IsSupported"/> reports whether the platform path is available.
 /// </summary>
-public static class OpenHarmonyBluetoothGatt
+public static partial class OpenHarmonyBluetoothGatt
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;
@@ -235,14 +235,14 @@ public static class OpenHarmonyBluetoothGatt
     private static bool s_eventUnavailable;
     private static bool s_unavailable;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_gatt_request", CharSet = CharSet.Ansi)]
-    private static extern int BluetoothGattRequest(int requestId, int op, string payload);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_gatt_request", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int BluetoothGattRequest(int requestId, int op, string payload);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_gatt_register_result")]
-    private static extern void BluetoothGattRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_gatt_register_result")]
+    private static partial void BluetoothGattRegisterResult(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_gatt_register_event")]
-    private static extern void BluetoothGattRegisterEvent(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_gatt_register_event")]
+    private static partial void BluetoothGattRegisterEvent(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void GattResultCallback(int requestId, int code, IntPtr payloadUtf8);

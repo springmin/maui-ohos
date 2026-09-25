@@ -24,10 +24,10 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-internal static class OpenHarmonyPickerClient
+internal static partial class OpenHarmonyPickerClient
 {
-    [System.Runtime.InteropServices.DllImport("libopenharmonyhost.so", EntryPoint = "ohos_host_get_app_context")]
-    private static extern IntPtr HostProbe();
+    [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_get_app_context")]
+    private static partial IntPtr HostProbe();
 
     private static bool? _deviceAvailable;
 

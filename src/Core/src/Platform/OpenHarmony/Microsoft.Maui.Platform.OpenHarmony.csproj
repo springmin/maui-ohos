@@ -50,6 +50,14 @@
     <IsAotCompatible>true</IsAotCompatible>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <!-- FIX-INTEROP P2: [assembly: DisableRuntimeMarshalling] stays off for now. Every P/Invoke
+         in this slice is [LibraryImport], but the 29 callback registrations pass
+         Marshal.GetFunctionPointerForDelegate thunks, which runtime marshalling disabled
+         refuses. Converting them to [UnmanagedCallersOnly] + delegate* unmanaged is blocked by
+         the interaction harness, which invokes the thunks directly from managed code (clipboard/
+         theme/sensor/... callback probes); managed invocation of an UnmanagedCallersOnly
+         method is invalid. The switch becomes available once the callbacks no longer need
+         managed invocation. -->
     <!-- The darc feeds only serve the vulnerability audit when the network is up; the standalone
          vehicle must also restore/build in partial, offline checkouts. The shipping build keeps
          the audit (NU1900 would otherwise be promoted by TreatWarningsAsErrors). -->

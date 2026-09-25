@@ -46,7 +46,7 @@ public readonly record struct OpenHarmonyContact(string Name, string Phone);
 public readonly record struct OpenHarmonyCalendarEvent(string Title, DateTimeOffset Start, DateTimeOffset End);
 
 /// <summary>Contact lookup over the OpenHarmony Contacts Kit (platform extra).</summary>
-public static class OpenHarmonyContacts
+public static partial class OpenHarmonyContacts
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -57,11 +57,11 @@ public static class OpenHarmonyContacts
     private static bool s_registered;
     private static bool s_unavailable;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_contacts_query", CharSet = CharSet.Ansi)]
-    private static extern int ContactsQuery(int requestId, string namePrefix, int limit);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_contacts_query", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ContactsQuery(int requestId, string namePrefix, int limit);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_contacts_register_result")]
-    private static extern void ContactsRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_contacts_register_result")]
+    private static partial void ContactsRegisterResult(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void ContactsResultCallback(int requestId, int code, IntPtr payloadUtf8);
@@ -198,7 +198,7 @@ public static class OpenHarmonyContacts
 }
 
 /// <summary>Calendar list/add over the OpenHarmony Calendar Kit (platform extra).</summary>
-public static class OpenHarmonyCalendar
+public static partial class OpenHarmonyCalendar
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -209,14 +209,14 @@ public static class OpenHarmonyCalendar
     private static bool s_registered;
     private static bool s_unavailable;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_calendar_list", CharSet = CharSet.Ansi)]
-    private static extern int CalendarList(int requestId, int days);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_calendar_list", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int CalendarList(int requestId, int days);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_calendar_add", CharSet = CharSet.Ansi)]
-    private static extern int CalendarAdd(int requestId, string title, string startIso, string endIso);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_calendar_add", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int CalendarAdd(int requestId, string title, string startIso, string endIso);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_calendar_register_result")]
-    private static extern void CalendarRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_calendar_register_result")]
+    private static partial void CalendarRegisterResult(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void CalendarResultCallback(int requestId, int code, IntPtr payloadUtf8);

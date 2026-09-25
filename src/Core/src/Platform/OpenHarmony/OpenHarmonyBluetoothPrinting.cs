@@ -60,7 +60,7 @@ namespace Microsoft.Maui.Platform;
 public readonly record struct OpenHarmonyBluetoothDevice(string Name, string Address);
 
 /// <summary>Bluetooth adapter state and paired devices over the OpenHarmony Connectivity Kit (platform extra).</summary>
-public static class OpenHarmonyBluetooth
+public static partial class OpenHarmonyBluetooth
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;
@@ -84,14 +84,14 @@ public static class OpenHarmonyBluetooth
 
     // op 0 = adapter state, 1 = paired devices, 2 = start discovery, 3 = stop discovery,
     // 4 = the devices found by the current/last discovery (same "name\taddress" table).
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_query", CharSet = CharSet.Ansi)]
-    private static extern int BluetoothQuery(int requestId, int op);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_query", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int BluetoothQuery(int requestId, int op);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_register_result")]
-    private static extern void BluetoothRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_register_result")]
+    private static partial void BluetoothRegisterResult(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_register_device_found")]
-    private static extern void BluetoothRegisterDeviceFound(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_bluetooth_register_device_found")]
+    private static partial void BluetoothRegisterDeviceFound(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void BluetoothResultCallback(int requestId, int code, IntPtr payloadUtf8);
@@ -400,7 +400,7 @@ public static class OpenHarmonyBluetooth
 }
 
 /// <summary>Printing over the OpenHarmony print framework (platform extra).</summary>
-public static class OpenHarmonyPrinting
+public static partial class OpenHarmonyPrinting
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;
@@ -419,11 +419,11 @@ public static class OpenHarmonyPrinting
     private static bool s_registered;
     private static bool s_unavailable;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_print_file", CharSet = CharSet.Ansi)]
-    private static extern int PrintFile(int requestId, string path);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_print_file", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int PrintFile(int requestId, string path);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_print_register_result")]
-    private static extern void PrintRegisterResult(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_print_register_result")]
+    private static partial void PrintRegisterResult(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void PrintResultCallback(int requestId, int code, IntPtr messageUtf8);

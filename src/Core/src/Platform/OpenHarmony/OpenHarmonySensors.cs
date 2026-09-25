@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;
 
-internal static class OpenHarmonySensors
+internal static partial class OpenHarmonySensors
 {
     internal const int AccelerometerType = 1; // Sensor_Type: SENSOR_TYPE_ACCELEROMETER
     internal const int GyroscopeType = 2;     // SENSOR_TYPE_GYROSCOPE
@@ -24,17 +24,17 @@ internal static class OpenHarmonySensors
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void SensorCallback(int type, float x, float y, float z, float w, long timestamp);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_sensor_set_listener")]
-    private static extern void SensorSetListener(IntPtr listener);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sensor_set_listener")]
+    private static partial void SensorSetListener(IntPtr listener);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_sensor_is_supported")]
-    private static extern int SensorIsSupported(int type);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sensor_is_supported")]
+    private static partial int SensorIsSupported(int type);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_sensor_start")]
-    private static extern int SensorStart(int type, int intervalMs);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sensor_start")]
+    private static partial int SensorStart(int type, int intervalMs);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_sensor_stop")]
-    private static extern void SensorStop();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sensor_stop")]
+    private static partial void SensorStop();
 
     private static SensorCallback? _callback;
     private static bool _available = true;

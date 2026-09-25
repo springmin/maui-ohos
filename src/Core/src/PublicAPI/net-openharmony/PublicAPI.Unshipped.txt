@@ -469,6 +469,9 @@ Microsoft.Maui.Platform.OpenHarmonyRadioButtonHandler
 Microsoft.Maui.Platform.OpenHarmonyRadioButtonHandler.OpenHarmonyRadioButtonHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyRefreshViewHandler
 Microsoft.Maui.Platform.OpenHarmonyRefreshViewHandler.OpenHarmonyRefreshViewHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyScan
+Microsoft.Maui.Platform.OpenHarmonyScan.IsSupported.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyScan.ScanAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
 Microsoft.Maui.Platform.OpenHarmonyScreenshot
 Microsoft.Maui.Platform.OpenHarmonyScreenshot.CaptureAsync() -> System.Threading.Tasks.Task<Microsoft.Maui.Media.IScreenshotResult!>!
 Microsoft.Maui.Platform.OpenHarmonyScreenshot.IsCaptureSupported.get -> bool

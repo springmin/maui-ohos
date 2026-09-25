@@ -34,9 +34,10 @@
 //   which does not exist in this slice, and the in-app-only knobs (TitleMode, the toolbar and
 //   control colors, the launch flags) have no Want representation; such a request is still
 //   dispatched to the external handler and noted once.
-// - Sharing more than one file has no carrier (the bridge sends one uri per Want and this SDK
-//   has no Share Kit systemShare), so ShareMultipleFilesRequest stays a documented no-op
-//   reported once instead of per request.
+// - Sharing more than one file has no Want carrier (one uri per Want), so ShareMultipleFilesRequest
+//   goes through the Share Kit (systemShare) host bridge when the shell registered the sink (an
+//   HMS runtime with @kit.ShareKit; KIT-IMPL 2026-09-25); otherwise it stays the documented
+//   no-op reported once per process.
 // - CanOpenAsync reports whether the ability bridge is available, not whether an installed
 //   ability matches the URI (OpenHarmony has no synchronous URI-handler query here).
 // - File sharing (kind 3) goes through an implicit sendData Want because this SDK has no Share
@@ -191,7 +192,7 @@ internal static class OpenHarmonyAbilityLog
             "[maui] browser: the requested BrowserLaunchOptions were not applied (SystemPreferred in-app mode, title mode, colors and launch flags have no Want representation); the external system handler opens instead");
     }
 
-    /// <summary>More than one shared file cannot ride the single-uri sendData Want.</summary>
+    /// <summary>More than one shared file needs the Share Kit sink; the note is once per process.</summary>
     public static void MultipleFilesDroppedOnce()
     {
         if (s_multipleFilesDropped)
@@ -200,7 +201,8 @@ internal static class OpenHarmonyAbilityLog
         }
         s_multipleFilesDropped = true;
         OpenHarmonyBridge.WriteStatus(
-            "[maui] share multiple files request needs Share Kit (systemShare) to carry more than one uri; the request stays a no-op");
+            "[maui] share multiple files request needs the Share Kit (systemShare) sink; " +
+            "the shell registers it only when the device runtime provides @kit.ShareKit, so this request stays a no-op");
     }
 }
 
@@ -358,9 +360,24 @@ public sealed class OpenHarmonyShare : IShare
         }
         if (files.Count > 1)
         {
-            // One Want carries one uri and this SDK has no Share Kit (systemShare) to carry a
-            // set, so the multi-file request stays a documented no-op instead of silently
-            // sharing only the first file; the note is once per process, not per request.
+            // The Share Kit (systemShare) sink carries the whole set when the shell registered it
+            // (an HMS runtime with @kit.ShareKit; KIT-IMPL 2026-09-25). The default OpenHarmony
+            // shell registers no sink, the bridge answers false and the request keeps the
+            // documented no-op note instead of silently sharing only the first file; the note is
+            // once per process, not per request.
+            var uris = new List<string>(files.Count);
+            foreach (var file in files)
+            {
+                string? sharedPath = file?.FullPath;
+                if (!string.IsNullOrEmpty(sharedPath))
+                {
+                    uris.Add(FileUriForPath(sharedPath!));
+                }
+            }
+            if (uris.Count == files.Count && OpenHarmonyShareKitBridge.TryShare(uris, request!.Title))
+            {
+                return Task.CompletedTask;
+            }
             OpenHarmonyAbilityLog.MultipleFilesDroppedOnce();
             return Task.CompletedTask;
         }

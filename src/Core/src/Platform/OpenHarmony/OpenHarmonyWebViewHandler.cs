@@ -11,7 +11,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
+public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -52,14 +52,14 @@ public sealed class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
     private static bool s_messageUnavailable;
     private static int s_nextRequestId;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_web_eval", CharSet = CharSet.Ansi)]
-    private static extern int WebEvalNative(string script, int requestId);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_web_eval", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int WebEvalNative(string script, int requestId);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_web_js_register_result")]
-    private static extern void WebRegisterResultNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_web_js_register_result")]
+    private static partial void WebRegisterResultNative(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_web_js_register_message")]
-    private static extern void WebRegisterMessageNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_web_js_register_message")]
+    private static partial void WebRegisterMessageNative(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void WebEvalResultCallback(int requestId, IntPtr resultUtf8, int error);

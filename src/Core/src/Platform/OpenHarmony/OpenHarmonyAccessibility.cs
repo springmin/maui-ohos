@@ -49,7 +49,7 @@ public enum OpenHarmonyAccessibilityAction
     SetCursorPosition = 0x00100000,
 }
 
-public static class OpenHarmonyAccessibility
+public static partial class OpenHarmonyAccessibility
 {
     /// <summary>Actions a node with the given role can perform (published to the provider).</summary>
     /// <remarks>
@@ -139,15 +139,15 @@ public static class OpenHarmonyAccessibility
     private const string HostLibrary = "libopenharmonyhost.so";
     private static bool _available = true;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
-    private static extern int AccessibilityBegin(int count);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
+    private static partial int AccessibilityBegin(int count);
 
     // The argument order is the publish contract shared with openharmony_host.h /
     // openharmony_host.c; the interaction harness reflects this method and compares the
     // parameter names/types against the C definition, so an arity or order change fails
     // off-device instead of shifting arguments on device (see the audit doc, section 30).
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node")]
-    private static extern int AccessibilityNode(int id, int parentId,
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityNode(int id, int parentId,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
@@ -155,28 +155,28 @@ public static class OpenHarmonyAccessibility
         float x, float y, float width, float height, int flags, int actions,
         double rangeMin, double rangeMax, double rangeCurrent, int @checked);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
-    private static extern int AccessibilityCommit();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
+    private static partial int AccessibilityCommit();
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void ActionListener(int nodeId, int action);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_set_action_listener")]
-    private static extern void SetActionListener(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_set_action_listener")]
+    private static partial void SetActionListener(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event")]
-    private static extern int SendEvent(int eventType);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event")]
+    private static partial int SendEvent(int eventType);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
-    private static extern int ProviderStatus();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
+    private static partial int ProviderStatus();
 
     // The dedicated text-carrying announcement export (host_napi.cpp): it builds an
     // ANNOUNCE_FOR_ACCESSIBILITY event, sets the announced text on it and sends it through the
     // attached provider. A host library built before this export only has
     // ohos_host_accessibility_send_event, which carries the event kind alone; Announce keeps
     // that as its fallback path.
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_accessibility_announce", CharSet = CharSet.Ansi)]
-    private static extern int AccessibilityAnnounce([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_announce", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityAnnounce([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
 
     private static int s_announceExport;   // 0 unknown, 1 exported, -1 missing (cached probe)
 

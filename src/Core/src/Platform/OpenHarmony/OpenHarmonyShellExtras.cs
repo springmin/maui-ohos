@@ -39,7 +39,7 @@ public sealed record OpenHarmonyShellSearchState(
     string? PageTitle);
 
 /// <summary>Managed snapshot of the shell extras and the host bridge that publishes them.</summary>
-public static class OpenHarmonyShellExtras
+public static partial class OpenHarmonyShellExtras
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const string SearchSetEntryPoint = "ohos_host_shell_search_set";
@@ -47,8 +47,8 @@ public static class OpenHarmonyShellExtras
     private const string FlyoutHeaderEntryPoint = "ohos_host_shell_flyout_header";
     private const string FlyoutFooterEntryPoint = "ohos_host_shell_flyout_footer";
 
-    [DllImport(HostLibrary, EntryPoint = SearchSetEntryPoint, CharSet = CharSet.Ansi)]
-    private static extern int ShellSearchSetNative(
+    [LibraryImport(HostLibrary, EntryPoint = SearchSetEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ShellSearchSetNative(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? query,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string? placeholder,
         int visible, int enabled);
@@ -56,14 +56,14 @@ public static class OpenHarmonyShellExtras
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void SearchInteractionCallback(int op, IntPtr text);
 
-    [DllImport(HostLibrary, EntryPoint = SearchListenerEntryPoint)]
-    private static extern void ShellSearchSetListenerNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = SearchListenerEntryPoint)]
+    private static partial void ShellSearchSetListenerNative(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = FlyoutHeaderEntryPoint, CharSet = CharSet.Ansi)]
-    private static extern int ShellFlyoutHeaderNative([MarshalAs(UnmanagedType.LPUTF8Str)] string? text);
+    [LibraryImport(HostLibrary, EntryPoint = FlyoutHeaderEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ShellFlyoutHeaderNative([MarshalAs(UnmanagedType.LPUTF8Str)] string? text);
 
-    [DllImport(HostLibrary, EntryPoint = FlyoutFooterEntryPoint, CharSet = CharSet.Ansi)]
-    private static extern int ShellFlyoutFooterNative([MarshalAs(UnmanagedType.LPUTF8Str)] string? text);
+    [LibraryImport(HostLibrary, EntryPoint = FlyoutFooterEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ShellFlyoutFooterNative([MarshalAs(UnmanagedType.LPUTF8Str)] string? text);
 
     // 0 unknown, 1 exported, -1 missing (cached probes; see the header).
     private static int s_searchSetExport;

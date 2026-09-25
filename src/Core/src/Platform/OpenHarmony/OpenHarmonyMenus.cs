@@ -41,7 +41,7 @@ namespace Microsoft.Maui.Platform;
 /// <param name="Item">The MAUI item activated when the row is tapped.</param>
 public sealed record OpenHarmonyMenuEntry(int Index, string Text, bool IsEnabled, int Depth, MenuItem Item);
 
-public static class OpenHarmonyMenus
+public static partial class OpenHarmonyMenus
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -60,17 +60,17 @@ public static class OpenHarmonyMenus
     /// <summary>Refreshes skipped because the table did not change.</summary>
     public static int RefreshesSkipped { get; private set; }
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_menu_begin")]
-    private static extern int MenuBegin(int count);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_menu_begin")]
+    private static partial int MenuBegin(int count);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_menu_item")]
-    private static extern int MenuItemNative(int index, [MarshalAs(UnmanagedType.LPUTF8Str)] string text, int enabled);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_menu_item", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MenuItemNative(int index, [MarshalAs(UnmanagedType.LPUTF8Str)] string text, int enabled);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_menu_commit")]
-    private static extern int MenuCommit();
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_menu_commit")]
+    private static partial int MenuCommit();
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_menu_set_listener")]
-    private static extern void MenuSetListener(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_menu_set_listener")]
+    private static partial void MenuSetListener(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void MenuActionCallback(int index);

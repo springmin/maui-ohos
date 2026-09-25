@@ -54,7 +54,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHybridWebView>
+public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHybridWebView>
 {
     /// <summary>Message prefix the stock HybridWebView JavaScript uses for raw messages.</summary>
     internal const string RawMessagePrefix = "__RawMessage|";
@@ -169,11 +169,11 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     private static bool s_invokeUnavailable;
     private static OpenHarmonyHybridWebViewHandler? s_activeInvokeHandler;
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_hwv_register_invoke")]
-    private static extern void RegisterInvokeNative(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_hwv_register_invoke")]
+    private static partial void RegisterInvokeNative(IntPtr callback);
 
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_hwv_invoke_result", CharSet = CharSet.Ansi)]
-    private static extern int InvokeResultNative(int requestId, string payloadJson);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_hwv_invoke_result", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int InvokeResultNative(int requestId, string payloadJson);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void HybridInvokeCallback(int requestId, IntPtr methodUtf8, IntPtr argsUtf8);

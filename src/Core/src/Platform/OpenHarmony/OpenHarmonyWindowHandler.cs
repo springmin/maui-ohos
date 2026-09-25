@@ -17,7 +17,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyWindowHandler : ElementHandler<IWindow, OpenHarmonyView>
+public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, OpenHarmonyView>
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const string TitleEntryPoint = "ohos_host_set_window_title";
@@ -39,11 +39,11 @@ public sealed class OpenHarmonyWindowHandler : ElementHandler<IWindow, OpenHarmo
 
     public OpenHarmonyWindowHandler() : base(Mapper) { }
 
-    [DllImport(HostLibrary, EntryPoint = TitleEntryPoint, CharSet = CharSet.Ansi)]
-    private static extern int SetWindowTitleNative([MarshalAs(UnmanagedType.LPUTF8Str)] string title);
+    [LibraryImport(HostLibrary, EntryPoint = TitleEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int SetWindowTitleNative([MarshalAs(UnmanagedType.LPUTF8Str)] string title);
 
-    [DllImport(HostLibrary, EntryPoint = RectEntryPoint)]
-    private static extern int SetWindowRectNative(int x, int y, int w, int h);
+    [LibraryImport(HostLibrary, EntryPoint = RectEntryPoint)]
+    private static partial int SetWindowRectNative(int x, int y, int w, int h);
 
     // 0 unknown, 1 exported, -1 missing (cached probes; see the header).
     private static int s_titleExport;

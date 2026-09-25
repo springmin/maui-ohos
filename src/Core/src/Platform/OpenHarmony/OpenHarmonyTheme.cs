@@ -20,13 +20,13 @@ using Microsoft.Maui.Controls;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Follows the device light/dark mode by updating the managed application theme.</summary>
-internal static class OpenHarmonyTheme
+internal static partial class OpenHarmonyTheme
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
     /// <summary>Registers the managed callback the host invokes for notifyTheme.</summary>
-    [DllImport(HostLibrary, EntryPoint = "ohos_host_theme_set_listener")]
-    private static extern void ThemeSetListener(IntPtr callback);
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_theme_set_listener")]
+    private static partial void ThemeSetListener(IntPtr callback);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void ThemeCallback(int isDark);

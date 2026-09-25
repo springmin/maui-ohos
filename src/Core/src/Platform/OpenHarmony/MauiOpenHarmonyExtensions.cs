@@ -11,55 +11,59 @@ public static class MauiOpenHarmonyExtensions
     /// Handler registry for the platform slice. It is explicit because MAUI registers its own
     /// platform-partial handlers for several of the same types (pages in particular), and the
     /// slice's platform-less handlers must win in <see cref="OpenHarmonyMauiAppHost"/>.
+    /// Values are <see cref="SliceHandlerRegistration"/> rather than a bare Type so the trim/AOT
+    /// analyzers can follow the constructor contract through AddHandler and the connector's
+    /// factory (FIX-INTEROP #5/#6; a Dictionary&lt;Type, Type&gt; erased it and produced
+    /// IL2072/IL2067).
     /// </summary>
-    internal static readonly Dictionary<Type, Type> SliceHandlers = new()
+    internal static readonly Dictionary<Type, SliceHandlerRegistration> SliceHandlers = new()
     {
         // The application handler is registered here as well as attached directly by
         // OpenHarmonyMauiAppHost.Run (which must set Application.Handler before the first window
         // exists); the registration keeps it resolvable through the standard MAUI handler
         // collection and through OpenHarmonyHandlerConnector's interface walk.
-        [typeof(IApplication)] = typeof(OpenHarmonyApplicationHandler),
-        [typeof(ILabel)] = typeof(OpenHarmonyLabelHandler),
-        [typeof(IButton)] = typeof(OpenHarmonyButtonHandler),
-        [typeof(ILayout)] = typeof(OpenHarmonyLayoutHandler),
-        [typeof(IWindow)] = typeof(OpenHarmonyWindowHandler),
-        [typeof(IEntry)] = typeof(OpenHarmonyEntryHandler),
-        [typeof(Microsoft.Maui.IImage)] = typeof(OpenHarmonyImageHandler),
-        [typeof(IScrollView)] = typeof(OpenHarmonyScrollViewHandler),
-        [typeof(ICheckBox)] = typeof(OpenHarmonyCheckBoxHandler),
-        [typeof(ISwitch)] = typeof(OpenHarmonySwitchHandler),
-        [typeof(ISlider)] = typeof(OpenHarmonySliderHandler),
-        [typeof(IProgress)] = typeof(OpenHarmonyProgressBarHandler),
-        [typeof(IActivityIndicator)] = typeof(OpenHarmonyActivityIndicatorHandler),
-        [typeof(Microsoft.Maui.Controls.NavigationPage)] = typeof(OpenHarmonyNavigationPageHandler),
-        [typeof(Microsoft.Maui.Controls.Page)] = typeof(OpenHarmonyPageHandler),
-        [typeof(Microsoft.Maui.Controls.CollectionView)] = typeof(OpenHarmonyCollectionViewHandler),
-        [typeof(IShapeView)] = typeof(OpenHarmonyShapeHandler),
-        [typeof(IBorderView)] = typeof(OpenHarmonyBorderHandler),
-        [typeof(IStepper)] = typeof(OpenHarmonyStepperHandler),
-        [typeof(IRadioButton)] = typeof(OpenHarmonyRadioButtonHandler),
-        [typeof(ISearchBar)] = typeof(OpenHarmonySearchBarHandler),
-        [typeof(IPicker)] = typeof(OpenHarmonyPickerHandler),
-        [typeof(IDatePicker)] = typeof(OpenHarmonyDatePickerHandler),
-        [typeof(ITimePicker)] = typeof(OpenHarmonyTimePickerHandler),
-        [typeof(Microsoft.Maui.Controls.TabbedPage)] = typeof(OpenHarmonyTabbedPageHandler),
-        [typeof(Microsoft.Maui.Controls.FlyoutPage)] = typeof(OpenHarmonyFlyoutPageHandler),
-        [typeof(Microsoft.Maui.Controls.Shell)] = typeof(OpenHarmonyShellHandler),
-        [typeof(Microsoft.Maui.Controls.ListView)] = typeof(OpenHarmonyListViewHandler),
-        [typeof(Microsoft.Maui.Controls.SwipeView)] = typeof(OpenHarmonySwipeViewHandler),
-        [typeof(Microsoft.Maui.Controls.RefreshView)] = typeof(OpenHarmonyRefreshViewHandler),
-        [typeof(Microsoft.Maui.Controls.CarouselView)] = typeof(OpenHarmonyCarouselViewHandler),
-        [typeof(Microsoft.Maui.Controls.BoxView)] = typeof(OpenHarmonyBoxViewHandler),
-        [typeof(Microsoft.Maui.Controls.ImageButton)] = typeof(OpenHarmonyImageButtonHandler),
-        [typeof(IIndicatorView)] = typeof(OpenHarmonyIndicatorViewHandler),
-        [typeof(Microsoft.Maui.Controls.Frame)] = typeof(OpenHarmonyFrameHandler),
-        [typeof(Microsoft.Maui.Controls.Editor)] = typeof(OpenHarmonyEditorHandler),
-        [typeof(IGraphicsView)] = typeof(OpenHarmonyGraphicsViewHandler),
-        [typeof(Microsoft.Maui.Controls.TemplatedView)] = typeof(OpenHarmonyContentViewHandler),
-        [typeof(IWebView)] = typeof(OpenHarmonyWebViewHandler),
-        [typeof(IHybridWebView)] = typeof(OpenHarmonyHybridWebViewHandler),
+        [typeof(IApplication)] = new(typeof(OpenHarmonyApplicationHandler)),
+        [typeof(ILabel)] = new(typeof(OpenHarmonyLabelHandler)),
+        [typeof(IButton)] = new(typeof(OpenHarmonyButtonHandler)),
+        [typeof(ILayout)] = new(typeof(OpenHarmonyLayoutHandler)),
+        [typeof(IWindow)] = new(typeof(OpenHarmonyWindowHandler)),
+        [typeof(IEntry)] = new(typeof(OpenHarmonyEntryHandler)),
+        [typeof(Microsoft.Maui.IImage)] = new(typeof(OpenHarmonyImageHandler)),
+        [typeof(IScrollView)] = new(typeof(OpenHarmonyScrollViewHandler)),
+        [typeof(ICheckBox)] = new(typeof(OpenHarmonyCheckBoxHandler)),
+        [typeof(ISwitch)] = new(typeof(OpenHarmonySwitchHandler)),
+        [typeof(ISlider)] = new(typeof(OpenHarmonySliderHandler)),
+        [typeof(IProgress)] = new(typeof(OpenHarmonyProgressBarHandler)),
+        [typeof(IActivityIndicator)] = new(typeof(OpenHarmonyActivityIndicatorHandler)),
+        [typeof(Microsoft.Maui.Controls.NavigationPage)] = new(typeof(OpenHarmonyNavigationPageHandler)),
+        [typeof(Microsoft.Maui.Controls.Page)] = new(typeof(OpenHarmonyPageHandler)),
+        [typeof(Microsoft.Maui.Controls.CollectionView)] = new(typeof(OpenHarmonyCollectionViewHandler)),
+        [typeof(IShapeView)] = new(typeof(OpenHarmonyShapeHandler)),
+        [typeof(IBorderView)] = new(typeof(OpenHarmonyBorderHandler)),
+        [typeof(IStepper)] = new(typeof(OpenHarmonyStepperHandler)),
+        [typeof(IRadioButton)] = new(typeof(OpenHarmonyRadioButtonHandler)),
+        [typeof(ISearchBar)] = new(typeof(OpenHarmonySearchBarHandler)),
+        [typeof(IPicker)] = new(typeof(OpenHarmonyPickerHandler)),
+        [typeof(IDatePicker)] = new(typeof(OpenHarmonyDatePickerHandler)),
+        [typeof(ITimePicker)] = new(typeof(OpenHarmonyTimePickerHandler)),
+        [typeof(Microsoft.Maui.Controls.TabbedPage)] = new(typeof(OpenHarmonyTabbedPageHandler)),
+        [typeof(Microsoft.Maui.Controls.FlyoutPage)] = new(typeof(OpenHarmonyFlyoutPageHandler)),
+        [typeof(Microsoft.Maui.Controls.Shell)] = new(typeof(OpenHarmonyShellHandler)),
+        [typeof(Microsoft.Maui.Controls.ListView)] = new(typeof(OpenHarmonyListViewHandler)),
+        [typeof(Microsoft.Maui.Controls.SwipeView)] = new(typeof(OpenHarmonySwipeViewHandler)),
+        [typeof(Microsoft.Maui.Controls.RefreshView)] = new(typeof(OpenHarmonyRefreshViewHandler)),
+        [typeof(Microsoft.Maui.Controls.CarouselView)] = new(typeof(OpenHarmonyCarouselViewHandler)),
+        [typeof(Microsoft.Maui.Controls.BoxView)] = new(typeof(OpenHarmonyBoxViewHandler)),
+        [typeof(Microsoft.Maui.Controls.ImageButton)] = new(typeof(OpenHarmonyImageButtonHandler)),
+        [typeof(IIndicatorView)] = new(typeof(OpenHarmonyIndicatorViewHandler)),
+        [typeof(Microsoft.Maui.Controls.Frame)] = new(typeof(OpenHarmonyFrameHandler)),
+        [typeof(Microsoft.Maui.Controls.Editor)] = new(typeof(OpenHarmonyEditorHandler)),
+        [typeof(IGraphicsView)] = new(typeof(OpenHarmonyGraphicsViewHandler)),
+        [typeof(Microsoft.Maui.Controls.TemplatedView)] = new(typeof(OpenHarmonyContentViewHandler)),
+        [typeof(IWebView)] = new(typeof(OpenHarmonyWebViewHandler)),
+        [typeof(IHybridWebView)] = new(typeof(OpenHarmonyHybridWebViewHandler)),
 #if OPENHARMONY_BLAZOR_WEBVIEW
-        [typeof(Microsoft.AspNetCore.Components.WebView.Maui.IBlazorWebView)] = typeof(OpenHarmonyBlazorWebViewHandler),
+        [typeof(Microsoft.AspNetCore.Components.WebView.Maui.IBlazorWebView)] = new(typeof(OpenHarmonyBlazorWebViewHandler)),
 #endif
     };
 
@@ -163,9 +167,11 @@ public static class MauiOpenHarmonyExtensions
         builder.Services.AddSingleton<Microsoft.Maui.Hosting.IMauiInitializeService, OpenHarmonyMauiApplicationInitializer>();
         builder.ConfigureMauiHandlers(handlers =>
         {
-            foreach (KeyValuePair<Type, Type> entry in SliceHandlers)
+            foreach (KeyValuePair<Type, SliceHandlerRegistration> entry in SliceHandlers)
             {
-                handlers.AddHandler(entry.Key, entry.Value);
+                // entry.Value.HandlerType carries the DynamicallyAccessedMembers contract, so
+                // AddHandler's own requirement is satisfied without a warning.
+                handlers.AddHandler(entry.Key, entry.Value.HandlerType);
             }
         });
         return builder;

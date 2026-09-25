@@ -6,6 +6,7 @@
 // invokes as a click; the key-name/code subset, the modifier mapping and the changes a public
 // rc.1 surface would need are documented in docs/openharmony-slice-notes.md
 // ("Keyboard accelerators").
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -338,7 +339,9 @@ internal static class OpenHarmonyKeyboardAcceleratorManager
 
     /// <summary>MenuFlyoutItem activation: the rc.1 IMenuItemController.Activate() is internal and
     /// runs the item's Command and raises Clicked (verified); reached through the slice's usual
-    /// guarded reflection.</summary>
+    /// guarded reflection. The DynamicDependency keeps the explicit interface implementation on
+    /// the trimmed/AOT binary, the analyzer cannot see it through GetMethod (FIX-INTEROP #7).</summary>
+    [DynamicDependency("Microsoft.Maui.Controls.IMenuItemController.Activate", typeof(MenuItem))]
     private static bool ActivateMenuItem(MenuFlyoutItem menuItem)
     {
         if (!s_activateResolved)
@@ -363,18 +366,39 @@ internal static class OpenHarmonyKeyboardAcceleratorManager
         }
     }
 
-    /// <summary>Generic public Command/CommandParameter fallback for elements that are not
-    /// Buttons/MenuFlyoutItems.</summary>
+    /// <summary>
+    /// Generic Command/CommandParameter fallback for elements that are not Buttons/
+    /// MenuFlyoutItems. FIX-INTEROP #7: rc.1 has no public duck-typed Command surface (the
+    /// Controls.Internals.ICommandElement interface is internal - a probe compile against
+    /// Microsoft.Maui.Controls 11.0.0-rc.1 fails with CS0122), so instead of reflecting on the
+    /// runtime type the slice matches the public controls that carry the two properties:
+    /// MenuItem (its SwipeItem/MenuFlyoutItem subclasses included as their base),
+    /// ImageButton/Button (normally reached through IButton.Clicked above) and
+    /// TapGestureRecognizer. Custom BindableObjects with their own Command property are no
+    /// longer auto-invoked; the key surface documents that (see the file header).
+    /// </summary>
     private static bool TryExecuteCommand(BindableObject element)
     {
-        PropertyInfo? commandProperty = element.GetType().GetProperty("Command", BindingFlags.Public | BindingFlags.Instance);
-        if (commandProperty?.GetValue(element) is not ICommand command)
+        ICommand? command = element switch
+        {
+            MenuItem menuItem => menuItem.Command,
+            ImageButton imageButton => imageButton.Command,
+            Button button => button.Command,
+            TapGestureRecognizer tapGesture => tapGesture.Command,
+            _ => null,
+        };
+        if (command is null)
         {
             return false;
         }
-        object? parameter = element.GetType()
-            .GetProperty("CommandParameter", BindingFlags.Public | BindingFlags.Instance)?
-            .GetValue(element);
+        object? parameter = element switch
+        {
+            MenuItem menuItem => menuItem.CommandParameter,
+            ImageButton imageButton => imageButton.CommandParameter,
+            Button button => button.CommandParameter,
+            TapGestureRecognizer tapGesture => tapGesture.CommandParameter,
+            _ => null,
+        };
         if (!command.CanExecute(parameter))
         {
             return false;

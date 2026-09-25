@@ -45,6 +45,7 @@
 // - Plain-text sharing through ohos.want.action.sendData has no wantConstant key for the body
 //   in this SDK; the shell sends the text under 'ohos.extra.param.key.content', the key used by
 //   the OpenHarmony ecosystem samples that predate Share Kit.
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -465,7 +466,9 @@ internal static class OpenHarmonyAppLauncher
         InstallDefault(typeof(Share), OpenHarmonyShare.Instance);
     }
 
-    private static void InstallDefault(Type entry, object implementation)
+    private static void InstallDefault(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)]
+        Type entry, object implementation)
     {
         try
         {

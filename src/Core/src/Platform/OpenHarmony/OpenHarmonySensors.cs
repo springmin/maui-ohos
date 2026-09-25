@@ -4,6 +4,7 @@
 // Compass/Barometer/OrientationSensor expose them through the MAUI Essentials interfaces
 // (accelerometer values are converted to G units, compass headings to degrees and barometer
 // pressure to hectopascals).
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;
@@ -100,7 +101,9 @@ internal static class OpenHarmonySensors
         InstallDefault(typeof(Microsoft.Maui.Devices.Sensors.OrientationSensor), OpenHarmonyOrientationSensor.Instance);
     }
 
-    private static void InstallDefault(Type entry, object implementation)
+    private static void InstallDefault(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)]
+        Type entry, object implementation)
     {
         try
         {

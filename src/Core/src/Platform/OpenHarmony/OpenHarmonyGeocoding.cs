@@ -217,7 +217,7 @@ internal sealed class OpenHarmonyGeocoding : IGeocoding
     /// the shell parses.
     /// </summary>
     internal static string BuildForwardArg(string? address)
-        => "{\"description\":" + JsonSerializer.Serialize(address ?? string.Empty) + "}";
+        => "{\"description\":" + JsonSerializer.Serialize(address ?? string.Empty, OpenHarmonySliceJsonContext.Default.String) + "}";
 
     /// <summary>Parses a reverse-geocode answer into placemarks (malformed items are skipped).</summary>
     internal static IReadOnlyList<Placemark> ParsePlacemarks(string? json)

@@ -298,7 +298,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             Root = root,
             DefaultFile = defaultFile,
             Id = _pageId,
-        }));
+        }, OpenHarmonySliceJsonContext.Default.HybridAssetsConfig));
         HybridAssetsRegistered?.Invoke(payloadDir, root, defaultFile);
     }
 
@@ -502,7 +502,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             try
             {
-                paramValues = JsonSerializer.Deserialize<string[]>(argsJson);
+                paramValues = JsonSerializer.Deserialize(argsJson, OpenHarmonySliceJsonContext.Default.StringArray);
             }
             catch (JsonException ex)
             {
@@ -554,7 +554,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             Result = jsonResult,
             IsJson = jsonResult is not null,
-        });
+        }, OpenHarmonySliceJsonContext.Default.DotNetInvokeResult);
 
     private static string ErrorPayload(Exception ex)
         => JsonSerializer.Serialize(new DotNetInvokeResult
@@ -563,9 +563,9 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             ErrorMessage = ex.Message,
             ErrorType = ex.GetType().Name,
             ErrorStackTrace = ex.StackTrace,
-        });
+        }, OpenHarmonySliceJsonContext.Default.DotNetInvokeResult);
 
-    private sealed class DotNetInvokeResult
+    internal sealed class DotNetInvokeResult
     {
         [JsonPropertyName("Result")]
         public string? Result { get; init; }
@@ -587,7 +587,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
     }
 
     /// <summary>Payload descriptor the shell consumes from the "hybrid" web command.</summary>
-    private sealed class HybridAssetsConfig
+    internal sealed class HybridAssetsConfig
     {
         [JsonPropertyName("base")]
         public string Base { get; init; } = string.Empty;
@@ -645,7 +645,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         {
             return;
         }
-        _ = SendRawMessageCoreAsync(JsonSerializer.Serialize(rawMessage));
+        _ = SendRawMessageCoreAsync(JsonSerializer.Serialize(rawMessage, OpenHarmonySliceJsonContext.Default.String));
     }
 
     /// <summary>
@@ -663,7 +663,7 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
             "{window.external.receiveMessage(m);}" +
             "else{window.dispatchEvent(new CustomEvent('HybridWebViewMessageReceived',{detail:{message:m}}));}" +
             "return 'ok';})(" +
-            JsonSerializer.Serialize(_pageId) + "," + json + ")").ConfigureAwait(false);
+            JsonSerializer.Serialize(_pageId, OpenHarmonySliceJsonContext.Default.String) + "," + json + ")").ConfigureAwait(false);
         if (result is not null && result.Trim().Trim('"') == "skip")
         {
             OpenHarmonyBridge.WriteStatus(
@@ -859,8 +859,8 @@ public sealed class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHy
         var source = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         s_invokeRequests[taskId] = new PendingInvoke(source, this);
         _ = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
-            $"window.HybridWebView.__InvokeJavaScript({JsonSerializer.Serialize(taskId)}, " +
-            $"{JsonSerializer.Serialize(request.MethodName)}, [{argList}])").ConfigureAwait(false);
+            $"window.HybridWebView.__InvokeJavaScript({JsonSerializer.Serialize(taskId, OpenHarmonySliceJsonContext.Default.String)}, " +
+            $"{JsonSerializer.Serialize(request.MethodName, OpenHarmonySliceJsonContext.Default.String)}, [{argList}])").ConfigureAwait(false);
         if (!OpenHarmonyWebViewHandler.IsJavaScriptBridgeAvailable)
         {
             // No host library: the page never received the kickoff, so do not wait for a reply.

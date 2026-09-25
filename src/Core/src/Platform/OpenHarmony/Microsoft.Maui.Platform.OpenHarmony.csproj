@@ -35,6 +35,17 @@
     <!-- Fork-only compile vehicle: this whitelist is a local concession for this partial
          checkout and must never travel upstream with the slice. -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618;CA2255;CS8604;CS8766;CS8613</WarningsNotAsErrors>
+    <!-- FIX-INTEROP #10: the slice is AOT/trim-analyzed on every build. The full MAUI tree's
+         targets force the trim analyzer off when PublishAot != true, which can hide IL2026/
+         IL3050 in the slice; this standalone vehicle sets the switches explicitly and CI
+         promotes the two IDs to errors:
+           dotnet build Microsoft.Maui.Platform.OpenHarmony.csproj -c Release \
+             -p:IsAotCompatible=true -p:EnableTrimAnalyzer=true -warnaserror:IL2026,IL3050
+         A full-tree build that dropped them can re-enable them the same way on the command
+         line (the properties are not conditioned here). -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
     <!-- The darc feeds only serve the vulnerability audit when the network is up; the standalone
          vehicle must also restore/build in partial, offline checkouts. The shipping build keeps
          the audit (NU1900 would otherwise be promoted by TreatWarningsAsErrors). -->

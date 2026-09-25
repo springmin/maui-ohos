@@ -286,7 +286,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             ContentRoot = contentRootDir,
             HostFile = Path.GetFileName(hostPage),
             Id = _pageId,
-        }));
+        }, OpenHarmonySliceJsonContext.Default.BlazorAssetsConfig));
         // The shell command arms origin interception and loads the host page (origin root), so
         // the manager created after this registration must not send the same load again.
         _shellStartedHostPageLoad = true;
@@ -428,7 +428,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     }
 
     /// <summary>Payload descriptor the shell consumes from the "blazor" web command.</summary>
-    private sealed class BlazorAssetsConfig
+    internal sealed class BlazorAssetsConfig
     {
         [JsonPropertyName("origin")]
         public string Origin { get; init; } = string.Empty;
@@ -530,7 +530,7 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             "else if(window.external&&typeof window.external.receiveMessage==='function')" +
             "{window.external.receiveMessage(m);}" +
             "return 'ok';})(" +
-            JsonSerializer.Serialize(_pageDocumentId) + "," + JsonSerializer.Serialize(message) + ")").ConfigureAwait(false);
+            JsonSerializer.Serialize(_pageDocumentId, OpenHarmonySliceJsonContext.Default.String) + "," + JsonSerializer.Serialize(message, OpenHarmonySliceJsonContext.Default.String) + ")").ConfigureAwait(false);
         if (result is not null && result.Trim().Trim('"') == "skip")
         {
             OpenHarmonyBridge.WriteStatus(

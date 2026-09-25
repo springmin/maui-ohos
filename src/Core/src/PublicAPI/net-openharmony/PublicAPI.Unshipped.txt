@@ -54,6 +54,28 @@ Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.Role.get -> string!
 Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.Role.init -> void
 Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.Text.get -> string?
 Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.Text.init -> void
+Microsoft.Maui.Platform.OpenHarmonyAccount
+Microsoft.Maui.Platform.OpenHarmonyAccount.AuthorizeAsync(System.Collections.Generic.IReadOnlyList<string!>! scopes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyAccountResult>!
+Microsoft.Maui.Platform.OpenHarmonyAccount.GetQuickLoginAnonymousPhoneAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyAccountResult>!
+Microsoft.Maui.Platform.OpenHarmonyAccount.IsSupported.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyAccountResult
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Payload.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Status.get -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Success.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.Cancelled = -3 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.FingerprintMismatch = 1001500001 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.InternalError = 1001502009 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.InvalidParameter = 1001502003 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.NetworkError = 1001502005 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.NotLoggedIn = 1001502001 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.RepeatedRequest = 1001500002 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.ScopeNotApproved = 1001502014 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.ScopeUnsupported = 1001500003 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.TimedOut = -2 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.UserCancelled = 1001502012 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
 Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler
 Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler.OpenHarmonyActivityIndicatorHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyAlertManager
@@ -383,6 +405,13 @@ Microsoft.Maui.Platform.OpenHarmonyMagnetometer.OpenHarmonyMagnetometer() -> voi
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.ReadingChanged -> System.EventHandler<Microsoft.Maui.Devices.Sensors.MagnetometerChangedEventArgs!>?
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.Start(Microsoft.Maui.Devices.Sensors.SensorSpeed sensorSpeed) -> void
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.Stop() -> void
+Microsoft.Maui.Platform.OpenHarmonyMap
+Microsoft.Maui.Platform.OpenHarmonyMap.IsSupported.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyMap.QueryCapabilitiesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMapCapability?>!
+Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapComponentOverlay = 2 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapKitImportable = 1 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapCapability.None = 0 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Arrange(int width, int height) -> void
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Describe() -> string!
@@ -465,6 +494,27 @@ Microsoft.Maui.Platform.OpenHarmonyPreferences.Set<T>(string! key, T value, stri
 Microsoft.Maui.Platform.OpenHarmonyPrinting
 Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler
 Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.OpenHarmonyProgressBarHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyPush
+Microsoft.Maui.Platform.OpenHarmonyPush.DeleteTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyPushStatus>!
+Microsoft.Maui.Platform.OpenHarmonyPush.GetTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyPushToken>!
+Microsoft.Maui.Platform.OpenHarmonyPush.IsSupported.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.AppAuthFailed = 1000900010 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.Cancelled = -3 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.DeviceUnsupported = 1000900014 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.InternalError = 1000900001 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.NetworkUnavailable = 1000900011 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.PushServiceError = 1000900009 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.RegionMismatch = 1000900013 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.ServiceConnectionFailed = 1000900008 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.ServiceNotEnabled = 1000900012 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.TimedOut = -2 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushToken
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Status.get -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Success.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Token.get -> string?
 Microsoft.Maui.Platform.OpenHarmonyRadioButtonHandler
 Microsoft.Maui.Platform.OpenHarmonyRadioButtonHandler.OpenHarmonyRadioButtonHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyRefreshViewHandler

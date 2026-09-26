@@ -335,9 +335,11 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
         }
         bool multiple = collectionView.SelectionMode == SelectionMode.Multiple;
         bool none = collectionView.SelectionMode == SelectionMode.None;
-        foreach (View child in materializer.MaterializedItems)
+        foreach (View? child in materializer.MaterializedItems)
         {
-            if (child.Handler?.PlatformView is not OpenHarmonyView itemPlatform)
+            // Defensive: a snapshot row can be null/handler-less if a source swap lands between
+            // the materializer's snapshot and this walk (see MaterializedItems).
+            if (child is null || child.Handler?.PlatformView is not OpenHarmonyView itemPlatform)
             {
                 continue;
             }

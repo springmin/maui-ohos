@@ -407,12 +407,46 @@ Microsoft.Maui.Platform.OpenHarmonyMagnetometer.ReadingChanged -> System.EventHa
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.Start(Microsoft.Maui.Devices.Sensors.SensorSpeed sensorSpeed) -> void
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.Stop() -> void
 Microsoft.Maui.Platform.OpenHarmonyMap
+Microsoft.Maui.Platform.OpenHarmonyMap.AddMarkerAsync(Microsoft.Maui.Platform.OpenHarmonyMapMarker! marker, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Maui.Platform.OpenHarmonyMap.CloseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Maui.Platform.OpenHarmonyMap.HideAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Maui.Platform.OpenHarmonyMap.IsOverlayAvailable.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyMap.IsSupported.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyMap.QueryCapabilitiesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMapCapability?>!
+Microsoft.Maui.Platform.OpenHarmonyMap.SetRegionAsync(Microsoft.Maui.Platform.OpenHarmonyMapRegion region, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Maui.Platform.OpenHarmonyMap.ShowAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapComponentOverlay = 2 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapKitImportable = 1 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.None = 0 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapMarker
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.<Clone>$() -> Microsoft.Maui.Platform.OpenHarmonyMapMarker!
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Deconstruct(out string! Id, out double Latitude, out double Longitude, out string! Title) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Equals(Microsoft.Maui.Platform.OpenHarmonyMapMarker? other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Id.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Id.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Latitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Latitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Longitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Longitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.OpenHarmonyMapMarker(string! Id, double Latitude, double Longitude, string! Title) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Title.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Title.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarkerClickEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMapMarkerClickEventArgs.MarkerId.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMapRegion
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Deconstruct(out double Latitude, out double Longitude, out double Zoom) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Equals(Microsoft.Maui.Platform.OpenHarmonyMapRegion other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Latitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Latitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Longitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Longitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.OpenHarmonyMapRegion() -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.OpenHarmonyMapRegion(double Latitude, double Longitude, double Zoom) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Zoom.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Zoom.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs.Region.get -> Microsoft.Maui.Platform.OpenHarmonyMapRegion
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Arrange(int width, int height) -> void
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Describe() -> string!
@@ -1059,6 +1093,12 @@ override Microsoft.Maui.Platform.OpenHarmonyLayoutHandler.GetDesiredSize(double 
 override Microsoft.Maui.Platform.OpenHarmonyLayoutHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
 override Microsoft.Maui.Platform.OpenHarmonyListViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyListViewHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
+override Microsoft.Maui.Platform.OpenHarmonyMapMarker.Equals(object? obj) -> bool
+override Microsoft.Maui.Platform.OpenHarmonyMapMarker.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyMapMarker.ToString() -> string!
+~override Microsoft.Maui.Platform.OpenHarmonyMapRegion.Equals(object obj) -> bool
+override Microsoft.Maui.Platform.OpenHarmonyMapRegion.GetHashCode() -> int
+~override Microsoft.Maui.Platform.OpenHarmonyMapRegion.ToString() -> string
 override Microsoft.Maui.Platform.OpenHarmonyMenuEntry.Equals(object? obj) -> bool
 override Microsoft.Maui.Platform.OpenHarmonyMenuEntry.GetHashCode() -> int
 override Microsoft.Maui.Platform.OpenHarmonyMenuEntry.ToString() -> string!
@@ -1262,6 +1302,13 @@ static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapTextDecorations(Micros
 static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapVerticalTextAlignment(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void
 static Microsoft.Maui.Platform.OpenHarmonyListViewHandler.MapItemTemplate(Microsoft.Maui.Platform.OpenHarmonyListViewHandler! handler, Microsoft.Maui.Controls.ListView! listView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyListViewHandler.MapItemsSource(Microsoft.Maui.Platform.OpenHarmonyListViewHandler! handler, Microsoft.Maui.Controls.ListView! listView) -> void
+static Microsoft.Maui.Platform.OpenHarmonyMap.CameraIdle -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMap.MarkerClick -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMapMarkerClickEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMap.Ready -> System.EventHandler?
+static Microsoft.Maui.Platform.OpenHarmonyMapMarker.operator !=(Microsoft.Maui.Platform.OpenHarmonyMapMarker? left, Microsoft.Maui.Platform.OpenHarmonyMapMarker? right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMapMarker.operator ==(Microsoft.Maui.Platform.OpenHarmonyMapMarker? left, Microsoft.Maui.Platform.OpenHarmonyMapMarker? right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMapRegion.operator !=(Microsoft.Maui.Platform.OpenHarmonyMapRegion left, Microsoft.Maui.Platform.OpenHarmonyMapRegion right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMapRegion.operator ==(Microsoft.Maui.Platform.OpenHarmonyMapRegion left, Microsoft.Maui.Platform.OpenHarmonyMapRegion right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyMauiApplication.Instance.get -> Microsoft.Maui.Platform.OpenHarmonyMauiApplication?
 static Microsoft.Maui.Platform.OpenHarmonyMenuEntry.operator !=(Microsoft.Maui.Platform.OpenHarmonyMenuEntry? left, Microsoft.Maui.Platform.OpenHarmonyMenuEntry? right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyMenuEntry.operator ==(Microsoft.Maui.Platform.OpenHarmonyMenuEntry? left, Microsoft.Maui.Platform.OpenHarmonyMenuEntry? right) -> bool

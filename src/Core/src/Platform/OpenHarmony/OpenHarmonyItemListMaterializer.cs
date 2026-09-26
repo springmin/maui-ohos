@@ -26,6 +26,12 @@ internal sealed class OpenHarmonyItemListMaterializer
     private readonly List<(int HeaderRow, int FirstItemRow, int ItemCount)> _groups = new();
     private int _windowFirst = -1;
     private int _windowLast = -1;
+    // The source the current window was built from. SetItems re-runs on every arrange (it is the
+    // path that notices source changes that never raise a mapper call), so an unchanged source
+    // must not drop the pooled rows and rematerialise the whole visible window once per frame.
+    private System.Collections.IEnumerable? _source;
+    private bool _sourceGrouped;
+    private Func<object?, string>? _sourceHeaderText;
     private View? _headerView;
     private View? _footerView;
     private View? _emptyView;
@@ -119,6 +125,15 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// <summary>Replaces the data behind the list (grouped sources become header rows).</summary>
     public void SetItems(System.Collections.IEnumerable? source, bool grouped = false, Func<object?, string>? headerText = null)
     {
+        // An unchanged plain source cannot notify the platform, so rebuilding it on the next
+        // arrange would only discard the pool and rematerialise every visible row. Observable
+        // sources keep the rebuild: their content can change without a reference swap, and this
+        // slice has no collection-changed adapter to hear about it earlier.
+        if (ReferenceEquals(source, _source) && grouped == _sourceGrouped && headerText == _sourceHeaderText &&
+            source is not System.Collections.Specialized.INotifyCollectionChanged)
+        {
+            return;
+        }
         // A data change invalidates the momentum (the content height may have shrunk under it).
         OpenHarmonyScrollPhysics.Cancel(_platformView);
         // The rebuild and the resulting window reset are one atomic step for the arrange thread
@@ -153,6 +168,11 @@ internal sealed class OpenHarmonyItemListMaterializer
                 }
             }
             Reset();
+            // Recorded under the same gate as the data: a concurrent source swap must not leave
+            // the memo pointing at a source the window was not actually built from.
+            _source = source;
+            _sourceGrouped = grouped;
+            _sourceHeaderText = headerText;
         }
     }
 

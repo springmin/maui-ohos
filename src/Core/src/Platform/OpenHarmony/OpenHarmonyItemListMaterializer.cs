@@ -20,6 +20,9 @@ internal sealed class OpenHarmonyItemListMaterializer
     private readonly HashSet<int> _headerRows = new();
     private readonly Dictionary<int, View> _materialized = new();
     private readonly List<View> _pool = new();
+    // Serializes materialized-window reads/writes: the source can be replaced from a dispatcher
+    // (frame/timer) thread while the arrange thread is filling or refreshing the window.
+    private readonly object _gate = new();
     private readonly List<(int HeaderRow, int FirstItemRow, int ItemCount)> _groups = new();
     private int _windowFirst = -1;
     private int _windowLast = -1;
@@ -80,7 +83,22 @@ internal sealed class OpenHarmonyItemListMaterializer
     public double EmptyHeight => _emptyHeight;
 
     /// <summary>Item views currently materialized (selected-state highlighting walks these).</summary>
-    public IReadOnlyCollection<View> MaterializedItems => _materialized.Values;
+    /// <remarks>
+    /// The copy is taken under the materializer gate: the first arrange of an asynchronously
+    /// loaded source can overlap a SetItems/Update on another thread (the OpenHarmony dispatcher
+    /// drains on frame/timer threads), and enumerating the live dictionary mid-write returned a
+    /// null row, which crashed the CollectionView's RefreshSelection with a NullReferenceException.
+    /// </remarks>
+    public IReadOnlyCollection<View> MaterializedItems
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _materialized.Values.ToArray();
+            }
+        }
+    }
 
     /// <summary>Index of the last visible data item (-1 when none is visible).</summary>
     public int LastVisibleItemIndex
@@ -103,34 +121,39 @@ internal sealed class OpenHarmonyItemListMaterializer
     {
         // A data change invalidates the momentum (the content height may have shrunk under it).
         OpenHarmonyScrollPhysics.Cancel(_platformView);
-        _data.Clear();
-        _headerRows.Clear();
-        _groups.Clear();
-        if (source is not null)
+        // The rebuild and the resulting window reset are one atomic step for the arrange thread
+        // (which may be reading _data/_materialized while the source is swapped).
+        lock (_gate)
         {
-            foreach (object? item in source)
+            _data.Clear();
+            _headerRows.Clear();
+            _groups.Clear();
+            if (source is not null)
             {
-                if (grouped && item is System.Collections.IEnumerable group and not string)
+                foreach (object? item in source)
                 {
-                    int headerRow = _data.Count;
-                    _data.Add(item);
-                    _headerRows.Add(headerRow);
-                    int firstItemRow = _data.Count;
-                    int count = 0;
-                    foreach (object? child in group)
+                    if (grouped && item is System.Collections.IEnumerable group and not string)
                     {
-                        _data.Add(child);
-                        count++;
+                        int headerRow = _data.Count;
+                        _data.Add(item);
+                        _headerRows.Add(headerRow);
+                        int firstItemRow = _data.Count;
+                        int count = 0;
+                        foreach (object? child in group)
+                        {
+                            _data.Add(child);
+                            count++;
+                        }
+                        _groups.Add((headerRow, firstItemRow, count));
                     }
-                    _groups.Add((headerRow, firstItemRow, count));
-                }
-                else
-                {
-                    _data.Add(item);
+                    else
+                    {
+                        _data.Add(item);
+                    }
                 }
             }
+            Reset();
         }
-        Reset();
     }
 
     /// <summary>True when the row at the index is a group header.</summary>
@@ -158,10 +181,13 @@ internal sealed class OpenHarmonyItemListMaterializer
     public void Reset()
     {
         OpenHarmonyScrollPhysics.Cancel(_platformView);
-        _pool.Clear();
-        _materialized.Clear();
-        _windowFirst = -1;
-        _windowLast = -1;
+        lock (_gate)
+        {
+            _pool.Clear();
+            _materialized.Clear();
+            _windowFirst = -1;
+            _windowLast = -1;
+        }
         Update(force: true);
     }
 
@@ -202,27 +228,34 @@ internal sealed class OpenHarmonyItemListMaterializer
         _windowFirst = first;
         _windowLast = last;
 
-        var stale = new List<int>();
-        foreach (int index in _materialized.Keys)
+        // The window update is serialized with the source swap and with the MaterializedItems
+        // snapshot, so a row can never be observed while it is being added or removed.
+        List<View> ordered;
+        lock (_gate)
         {
-            if (index < first || index > last)
+            var stale = new List<int>();
+            foreach (int index in _materialized.Keys)
             {
-                stale.Add(index);
+                if (index < first || index > last)
+                {
+                    stale.Add(index);
+                }
             }
-        }
-        foreach (int index in stale)
-        {
-            View view = _materialized[index];
-            view.Handler?.DisconnectHandler();
-            _materialized.Remove(index);
-            _pool.Add(view);
-        }
-        for (int index = first; index <= last; index++)
-        {
-            if (!_materialized.ContainsKey(index))
+            foreach (int index in stale)
             {
-                _materialized[index] = Materialize(index);
+                View view = _materialized[index];
+                view.Handler?.DisconnectHandler();
+                _materialized.Remove(index);
+                _pool.Add(view);
             }
+            for (int index = first; index <= last; index++)
+            {
+                if (!_materialized.ContainsKey(index))
+                {
+                    _materialized[index] = Materialize(index);
+                }
+            }
+            ordered = _materialized.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToList();
         }
         ArrangeExtras(width);
         _platformView.ViewChildren.Clear();
@@ -230,9 +263,9 @@ internal sealed class OpenHarmonyItemListMaterializer
         {
             _platformView.ViewChildren.Add(_headerView);
         }
-        foreach (KeyValuePair<int, View> entry in _materialized.OrderBy(pair => pair.Key))
+        foreach (View child in ordered)
         {
-            _platformView.ViewChildren.Add(entry.Value);
+            _platformView.ViewChildren.Add(child);
         }
         if (_footerView is not null)
         {
@@ -262,7 +295,12 @@ internal sealed class OpenHarmonyItemListMaterializer
         // alignment maths: End means the item's bottom sits on the viewport bottom). A row that
         // is already materialized reports its measured height (group headers differ from items).
         double extent = Math.Max(1, ItemHeight);
-        if (_materialized.TryGetValue(row, out View? materialized) && materialized.DesiredSize.Height > 0)
+        View? materialized;
+        lock (_gate)
+        {
+            _materialized.TryGetValue(row, out materialized);
+        }
+        if (materialized is not null && materialized.DesiredSize.Height > 0)
         {
             extent = materialized.DesiredSize.Height;
         }

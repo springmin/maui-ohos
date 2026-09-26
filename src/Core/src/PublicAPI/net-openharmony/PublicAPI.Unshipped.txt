@@ -399,6 +399,51 @@ Microsoft.Maui.Platform.OpenHarmonyLayoutHandler.Update(int index, Microsoft.Mau
 Microsoft.Maui.Platform.OpenHarmonyLayoutHandler.UpdateZIndex(Microsoft.Maui.IView! child) -> void
 Microsoft.Maui.Platform.OpenHarmonyListViewHandler
 Microsoft.Maui.Platform.OpenHarmonyListViewHandler.OpenHarmonyListViewHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveView
+Microsoft.Maui.Platform.OpenHarmonyLiveView.IsSupported.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyLiveView.StartAsync(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate update, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus>!
+Microsoft.Maui.Platform.OpenHarmonyLiveView.StopAsync(int id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus>!
+Microsoft.Maui.Platform.OpenHarmonyLiveView.UpdateAsync(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate update, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus>!
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.AlertTimeTooFar = 1003500014 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.AlreadyExists = 1003500006 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.AlreadyFinished = 1003500010 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.CallFailed = -2 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Cancelled = -101 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Disabled = -3 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.InvalidArgument = 401 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.InvalidEvent = 1003500013 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.NetworkUnreachable = 1003500007 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.NoActiveView = -4 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.NotFound = 1003500009 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.RateLimited = 1003500008 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.RightsNotEnabled = 1003500005 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SequenceIncorrect = 1003500011 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SerializationFailed = 1003500002 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.ServiceConnectionFailed = 1003500003 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SubscriptionFailed = 1003500015 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SubscriptionLimitExceeded = 1003500012 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SubscriptionRateLimited = 1003500016 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SwitchOff = 1003500004 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SystemError = 1003500001 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.TimedOut = -100 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Deconstruct(out int Id, out string! Title, out string! Text, out double Progress, out long TimeMilliseconds) -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Equals(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Id.get -> int
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Id.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.OpenHarmonyLiveViewUpdate() -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.OpenHarmonyLiveViewUpdate(int Id, string! Title, string! Text, double Progress = 0, long TimeMilliseconds = 0) -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Progress.get -> double
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Progress.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Text.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Text.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.TimeMilliseconds.get -> long
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.TimeMilliseconds.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Title.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Title.init -> void
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.IsMonitoring.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyMagnetometer.IsSupported.get -> bool

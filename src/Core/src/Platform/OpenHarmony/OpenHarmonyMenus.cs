@@ -77,7 +77,7 @@ public static partial class OpenHarmonyMenus
 
     private static readonly List<OpenHarmonyMenuEntry> s_items = new();
     private static readonly List<OpenHarmonyMenuEntry> s_next = new();
-    private static MenuActionCallback? s_actionThunk;
+    private static unsafe IntPtr s_actionThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, void>)&OnMenuActionNative;
     private static bool s_available = true;
     private static bool s_listenerRegistered;
     private static Page? s_lastHostPage;
@@ -164,6 +164,7 @@ public static partial class OpenHarmonyMenus
 
     // A reverse P/Invoke entry (host.notifyMenuAction): Activate runs the app's menu
     // controller/command, so an exception must not unwind into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnMenuActionNative(int index)
     {
         try
@@ -227,8 +228,7 @@ public static partial class OpenHarmonyMenus
             return;
         }
         s_listenerRegistered = true;
-        s_actionThunk = OnMenuActionNative;
-        MenuSetListener(Marshal.GetFunctionPointerForDelegate(s_actionThunk));
+        MenuSetListener(s_actionThunk);
     }
 
     private static Page? ResolveHostPage()

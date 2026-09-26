@@ -6,6 +6,7 @@
 // pressure to hectopascals).
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -36,7 +37,7 @@ internal static partial class OpenHarmonySensors
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sensor_stop")]
     private static partial void SensorStop();
 
-    private static SensorCallback? _callback;
+    private static unsafe IntPtr _callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, float, float, float, float, long, void>)&OnReading;
     private static bool _available = true;
 
     public static bool IsSupported(int type)
@@ -52,8 +53,7 @@ internal static partial class OpenHarmonySensors
         if (!_available) return false;
         try
         {
-            _callback ??= OnReading;
-            SensorSetListener(Marshal.GetFunctionPointerForDelegate(_callback));
+            SensorSetListener(_callback);
             return SensorStart(type, intervalMs) == 0;
         }
         catch (DllNotFoundException) { _available = false; return false; }
@@ -70,6 +70,7 @@ internal static partial class OpenHarmonySensors
     // The sensor listener itself is the reverse P/Invoke entry: a reading raises the public
     // ReadingChanged/ShakeDetected events, so an exception must not unwind into the native
     // frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnReading(int type, float x, float y, float z, float w, long timestamp)
     {
         try

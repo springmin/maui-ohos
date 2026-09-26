@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -44,8 +45,8 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<string?>> s_evalRequests = new();
     private static readonly object s_navSync = new();
     private static readonly Dictionary<string, long> s_approvedNavigations = new();
-    private static WebEvalResultCallback? s_evalResultCallback;
-    private static WebJsMessageCallback? s_jsMessageCallback;
+    private static unsafe IntPtr s_evalResultCallback = (IntPtr)(delegate* unmanaged[Cdecl]<int, IntPtr, int, void>)&OnEvalResultNative;
+    private static unsafe IntPtr s_jsMessageCallback = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&OnJsMessageNative;
     private static bool s_evalRegistered;
     private static bool s_evalUnavailable;
     private static bool s_messageRegistered;
@@ -504,6 +505,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         return flattened is null ? trimmed : new string(flattened);
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnEvalResultNative(int requestId, IntPtr resultUtf8, int error)
     {
         string result = resultUtf8 == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUTF8(resultUtf8) ?? string.Empty;
@@ -514,6 +516,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     // fans out to application code (JsMessage subscribers, HybridWebView.RawMessageReceived and
     // the WebView.Navigating raised for a "__OHNAV" decision), so an exception must never unwind
     // into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnJsMessageNative(IntPtr payloadUtf8)
     {
         try
@@ -535,8 +538,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         }
         try
         {
-            s_evalResultCallback = OnEvalResultNative;
-            WebRegisterResultNative(Marshal.GetFunctionPointerForDelegate(s_evalResultCallback));
+            WebRegisterResultNative(s_evalResultCallback);
             s_evalRegistered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -554,8 +556,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         }
         try
         {
-            s_jsMessageCallback = OnJsMessageNative;
-            WebRegisterMessageNative(Marshal.GetFunctionPointerForDelegate(s_jsMessageCallback));
+            WebRegisterMessageNative(s_jsMessageCallback);
             s_messageRegistered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)

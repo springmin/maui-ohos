@@ -65,7 +65,7 @@ public sealed partial class OpenHarmonyBattery : IBattery
 
     private static OpenHarmonyBatterySnapshot s_snapshot =
         new(0, BatteryState.Unknown, BatteryPowerSource.Unknown, EnergySaverStatus.Unknown);
-    private static BatteryListener? s_batteryCallback;
+    private static unsafe IntPtr s_batteryCallback = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&OnBatteryNative;
     private static bool s_registered;
     private static bool s_unavailable;
 
@@ -169,6 +169,7 @@ public sealed partial class OpenHarmonyBattery : IBattery
 
     // A reverse P/Invoke entry: applying the snapshot raises BatteryInfoChanged /
     // EnergySaverStatusChanged, so an exception must not unwind into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnBatteryNative(IntPtr payloadUtf8)
     {
         try
@@ -193,8 +194,7 @@ public sealed partial class OpenHarmonyBattery : IBattery
         }
         try
         {
-            s_batteryCallback = OnBatteryNative;
-            BatterySetListener(Marshal.GetFunctionPointerForDelegate(s_batteryCallback));
+            BatterySetListener(s_batteryCallback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -247,7 +247,7 @@ public sealed partial class OpenHarmonyDeviceDisplay : IDeviceDisplay
 
     private static DisplayInfo s_info =
         new(0, 0, 1, DisplayOrientation.Unknown, DisplayRotation.Unknown, 0);
-    private static DisplayListener? s_displayCallback;
+    private static unsafe IntPtr s_displayCallback = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&OnDisplayNative;
     private static bool s_registered;
     private static bool s_unavailable;
     // KeepScreenOn: the last value the host accepted (queued through the shell sink). Off-device
@@ -371,6 +371,7 @@ public sealed partial class OpenHarmonyDeviceDisplay : IDeviceDisplay
 
     // A reverse P/Invoke entry: applying the snapshot raises MainDisplayInfoChanged, so an
     // exception must not unwind into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnDisplayNative(IntPtr payloadUtf8)
     {
         try
@@ -395,8 +396,7 @@ public sealed partial class OpenHarmonyDeviceDisplay : IDeviceDisplay
         }
         try
         {
-            s_displayCallback = OnDisplayNative;
-            DisplaySetListener(Marshal.GetFunctionPointerForDelegate(s_displayCallback));
+            DisplaySetListener(s_displayCallback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)

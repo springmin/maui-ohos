@@ -19,6 +19,7 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Storage;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -364,8 +365,8 @@ internal static partial class OpenHarmonyRawFiles
         return true;
     }
 
-    private static RawFileResultCallback? s_callback;
-    private static RawFileBytesCallback? s_bytesCallback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnRawFileResult;
+    private static unsafe IntPtr s_bytesCallback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, UIntPtr, void>)&OnRawFileBytesResult;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -442,18 +443,16 @@ internal static partial class OpenHarmonyRawFiles
             {
                 return;
             }
-            s_callback = OnRawFileResult;
-            RawFileRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            RawFileRegisterResult(s_callback);
             try
             {
-                s_bytesCallback = OnRawFileBytesResult;
-                RawFileRegisterResultBytes(Marshal.GetFunctionPointerForDelegate(s_bytesCallback));
+                RawFileRegisterResultBytes(s_bytesCallback);
             }
             catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
             {
                 // An older host library has no byte transport; the base64 callback stays the
                 // only one and the shell's descriptor notify (also absent there) never runs.
-                s_bytesCallback = null;
+                s_bytesCallback = IntPtr.Zero;
             }
             s_registered = true;
         }
@@ -461,6 +460,7 @@ internal static partial class OpenHarmonyRawFiles
 
     // Runs on the shell's thread when the host answered a rawfile descriptor read; the host's
     // buffer is only valid for this call, so the bytes are copied out before it returns.
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnRawFileBytesResult(int requestId, int rc, IntPtr data, UIntPtr length)
     {
         if (!s_pending.TryRemove(requestId, out TaskCompletionSource<(int Rc, byte[]? Data)>? source))
@@ -489,6 +489,7 @@ internal static partial class OpenHarmonyRawFiles
     }
 
     // Runs on the shell's thread when the ArkTS sink answers; completes the matching request.
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnRawFileResult(int requestId, int rc, IntPtr dataBase64Utf8)
     {
         if (!s_pending.TryRemove(requestId, out TaskCompletionSource<(int Rc, byte[]? Data)>? source))

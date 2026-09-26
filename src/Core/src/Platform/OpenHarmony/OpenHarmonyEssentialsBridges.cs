@@ -48,7 +48,7 @@ internal static partial class OpenHarmonyPermissionBridge
 
     private static readonly object s_sync = new();
     private static readonly Dictionary<int, TaskCompletionSource<bool>> s_pending = new();
-    private static PermissionResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnNativePermissionResult;
     private static bool s_registered;
     private static bool s_unavailable;
     private static int s_nextRequestId;
@@ -65,8 +65,7 @@ internal static partial class OpenHarmonyPermissionBridge
         }
         try
         {
-            s_callback = OnNativePermissionResult;
-            RegisterPermissionResultNative(Marshal.GetFunctionPointerForDelegate(s_callback));
+            RegisterPermissionResultNative(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -125,6 +124,7 @@ internal static partial class OpenHarmonyPermissionBridge
         return await completion.Task.ConfigureAwait(false);
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativePermissionResult(int requestId, int granted)
     {
         TaskCompletionSource<bool>? completion;
@@ -172,8 +172,8 @@ internal static partial class OpenHarmonyClipboardBridge
 
     private static readonly object s_sync = new();
     private static readonly Dictionary<int, TaskCompletionSource<(int Rc, string Text)>> s_pending = new();
-    private static ClipboardResultCallback? s_resultCallback;
-    private static ClipboardChangedCallback? s_changedCallback;
+    private static unsafe IntPtr s_resultCallback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnNativeClipboardResult;
+    private static unsafe IntPtr s_changedCallback = (IntPtr)(delegate* unmanaged[Cdecl]<void>)&OnNativeClipboardChanged;
     private static bool s_registered;
     private static bool s_unavailable;
     private static int s_nextRequestId;
@@ -193,10 +193,8 @@ internal static partial class OpenHarmonyClipboardBridge
         }
         try
         {
-            s_resultCallback = OnNativeClipboardResult;
-            RegisterResultNative(Marshal.GetFunctionPointerForDelegate(s_resultCallback));
-            s_changedCallback = OnNativeClipboardChanged;
-            RegisterChangedNative(Marshal.GetFunctionPointerForDelegate(s_changedCallback));
+            RegisterResultNative(s_resultCallback);
+            RegisterChangedNative(s_changedCallback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -255,6 +253,7 @@ internal static partial class OpenHarmonyClipboardBridge
         return await completion.Task.ConfigureAwait(false);
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativeClipboardResult(int requestId, int rc, IntPtr textUtf8)
     {
         TaskCompletionSource<(int Rc, string Text)>? completion;
@@ -273,6 +272,7 @@ internal static partial class OpenHarmonyClipboardBridge
 
     // A reverse P/Invoke entry: the push raises the public ClipboardContentChanged event, so an
     // exception must not unwind into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativeClipboardChanged()
     {
         try
@@ -306,7 +306,7 @@ internal static partial class OpenHarmonyConnectivityBridge
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void NetworkAccessCallback(int level);
 
-    private static NetworkAccessCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, void>)&OnNativeNetworkAccess;
     private static bool s_registered;
     private static bool s_unavailable;
 
@@ -325,8 +325,7 @@ internal static partial class OpenHarmonyConnectivityBridge
         }
         try
         {
-            s_callback = OnNativeNetworkAccess;
-            NetworkAccessRegisterNative(Marshal.GetFunctionPointerForDelegate(s_callback));
+            NetworkAccessRegisterNative(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -350,6 +349,7 @@ internal static partial class OpenHarmonyConnectivityBridge
 
     // A reverse P/Invoke entry: the push raises the public ConnectivityChanged event, so an
     // exception must not unwind into the native frame (MB-2).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativeNetworkAccess(int level)
     {
         try

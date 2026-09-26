@@ -36,6 +36,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -52,7 +53,7 @@ public static partial class OpenHarmonyContacts
 
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Payload)>> s_pending = new();
-    private static ContactsResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnResultNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -174,8 +175,7 @@ public static partial class OpenHarmonyContacts
         }
         try
         {
-            s_callback = OnResultNative;
-            ContactsRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            ContactsRegisterResult(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -185,6 +185,7 @@ public static partial class OpenHarmonyContacts
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int code, IntPtr payloadUtf8)
     {
         string payload = payloadUtf8 == IntPtr.Zero
@@ -204,7 +205,7 @@ public static partial class OpenHarmonyCalendar
 
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Code, string Payload)>> s_pending = new();
-    private static CalendarResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnResultNative;
     private static int s_nextId;
     private static bool s_registered;
     private static bool s_unavailable;
@@ -363,8 +364,7 @@ public static partial class OpenHarmonyCalendar
         }
         try
         {
-            s_callback = OnResultNative;
-            CalendarRegisterResult(Marshal.GetFunctionPointerForDelegate(s_callback));
+            CalendarRegisterResult(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -374,6 +374,7 @@ public static partial class OpenHarmonyCalendar
         }
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnResultNative(int requestId, int code, IntPtr payloadUtf8)
     {
         string payload = payloadUtf8 == IntPtr.Zero

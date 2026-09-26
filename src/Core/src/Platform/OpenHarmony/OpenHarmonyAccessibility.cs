@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Maui;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -205,7 +206,7 @@ public static partial class OpenHarmonyAccessibility
         }
     }
 
-    private static ActionListener? _actionThunk;
+    private static unsafe IntPtr _actionThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnAction;
     private static Action<int, int>? _actionHandler;
 
     /// <summary>Receives accessibility actions (CLICK, SET_TEXT, SCROLL...) from the framework.</summary>
@@ -218,8 +219,7 @@ public static partial class OpenHarmonyAccessibility
         }
         try
         {
-            _actionThunk ??= OnAction;
-            SetActionListener(Marshal.GetFunctionPointerForDelegate(_actionThunk));
+            SetActionListener(_actionThunk);
         }
         catch (Exception)
         {
@@ -252,6 +252,7 @@ public static partial class OpenHarmonyAccessibility
             $"[maui] accessibility provider status={status} (1=attached, 2=frame node, 3=node content)");
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnAction(int nodeId, int action)
     {
         // The host calls this from the accessibility thread (host_napi.cpp A11yExecuteAction), so

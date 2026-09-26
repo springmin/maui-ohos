@@ -24,6 +24,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Dispatching;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -74,7 +75,7 @@ public static partial class OpenHarmonyShellExtras
     private static bool s_flyoutHeaderMissingLogged;
     private static bool s_flyoutFooterMissingLogged;
 
-    private static SearchInteractionCallback? s_searchInteractionThunk;
+    private static unsafe IntPtr s_searchInteractionThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, IntPtr, void>)&OnSearchInteraction;
     private static bool s_searchListenerRegistered;
     private static SearchHandler? s_searchHandler;
     private static (string? Query, string? Placeholder, bool Visible, bool Enabled) s_lastSearchPayload;
@@ -225,8 +226,7 @@ public static partial class OpenHarmonyShellExtras
         }
         try
         {
-            s_searchInteractionThunk = OnSearchInteraction;
-            ShellSearchSetListenerNative(Marshal.GetFunctionPointerForDelegate(s_searchInteractionThunk));
+            ShellSearchSetListenerNative(s_searchInteractionThunk);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
@@ -244,6 +244,7 @@ public static partial class OpenHarmonyShellExtras
     /// ArkTS/NAPI thread, so the handler is only touched on the MAUI dispatcher (a reverse
     /// P/Invoke boundary: nothing may escape into native code).
     /// </summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnSearchInteraction(int op, IntPtr text)
     {
         try

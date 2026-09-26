@@ -51,6 +51,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
+using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
@@ -164,7 +165,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     // The shell forwards __hwvInvokeDotNet invocations to ohos_host_hwv_register_invoke's
     // callback; the handler that last registered its assets with the shell is the page a
     // request belongs to (the shell serves one hybrid origin at a time).
-    private static HybridInvokeCallback? s_hybridInvokeCallback;
+    private static unsafe IntPtr s_hybridInvokeCallback = (IntPtr)(delegate* unmanaged[Cdecl]<int, IntPtr, IntPtr, void>)&OnHybridInvokeNative;
     private static bool s_invokeRegistered;
     private static bool s_invokeUnavailable;
     private static OpenHarmonyHybridWebViewHandler? s_activeInvokeHandler;
@@ -424,8 +425,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         {
             // Keep the delegate alive for the process lifetime: the host stores the raw
             // function pointer and calls it on an arbitrary thread.
-            s_hybridInvokeCallback = OnHybridInvokeNative;
-            RegisterInvokeNative(Marshal.GetFunctionPointerForDelegate(s_hybridInvokeCallback));
+            RegisterInvokeNative(s_hybridInvokeCallback);
             s_invokeRegistered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -439,6 +439,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     // IHybridWebView.Invoker, so an exception must not unwind into the native frame (MB-2).
     // The async half already turns every failure into an error payload; the guard covers the
     // synchronous boundary as well.
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnHybridInvokeNative(int requestId, IntPtr methodUtf8, IntPtr argsUtf8)
     {
         try

@@ -60,7 +60,7 @@ internal static partial class OpenHarmonyGeocodingBridge
 
     private static readonly object s_sync = new();
     private static readonly Dictionary<int, TaskCompletionSource<string?>> s_pending = new();
-    private static GeocodeResultCallback? s_callback;
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, IntPtr, void>)&OnNativeGeocodeResult;
     private static bool s_registered;
     private static bool s_unavailable;
     private static int s_nextRequestId;
@@ -77,8 +77,7 @@ internal static partial class OpenHarmonyGeocodingBridge
         }
         try
         {
-            s_callback = OnNativeGeocodeResult;
-            RegisterGeocodeResultNative(Marshal.GetFunctionPointerForDelegate(s_callback));
+            RegisterGeocodeResultNative(s_callback);
             s_registered = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -140,6 +139,7 @@ internal static partial class OpenHarmonyGeocodingBridge
         return await completion.Task.ConfigureAwait(false);
     }
 
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnNativeGeocodeResult(int requestId, int rc, IntPtr jsonUtf8)
     {
         TaskCompletionSource<string?>? completion;

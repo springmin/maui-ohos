@@ -46,7 +46,24 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
     }
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
-        => new(Math.Min(widthConstraint, widthConstraint), Math.Min(48, heightConstraint));
+    {
+        // HorizontalStackLayout measures children with +∞ width. Never echo a non-finite
+        // constraint back as the desired size: the arranged frame then becomes ∞/NaN and the
+        // compositor/rasterizer spins. Prefer an explicit WidthRequest (like the BoxView,
+        // RefreshView and SwipeView handlers do); otherwise fall back to a finite default.
+        var element = VirtualView as Microsoft.Maui.Controls.VisualElement;
+        double requestedWidth = element?.WidthRequest ?? double.NaN;
+        double width = requestedWidth > 0 && double.IsFinite(requestedWidth)
+            ? requestedWidth
+            : (double.IsFinite(widthConstraint) ? widthConstraint : DefaultWidth);
+
+        // Same guard for height: Math.Min(48, NaN) would propagate NaN.
+        double height = double.IsFinite(heightConstraint) ? Math.Min(48, heightConstraint) : 48;
+        return new(width, height);
+    }
+
+    // Fallback for pickers that set no WidthRequest and are measured with a non-finite constraint.
+    const double DefaultWidth = 160;
 
     public static void MapItems(OpenHarmonyPickerHandler handler, IPicker picker)
     {

@@ -597,7 +597,7 @@ public sealed class OpenHarmonyWindowRenderer
         float delta = _dragLastY - y;
         _dragLastY = y;
         float maxOffset = Math.Max(0f, scroll.ScrollContentHeight - scroll.Frame.Height);
-        scroll.ScrollOffsetY = Math.Clamp(scroll.ScrollOffsetY + delta, 0f, maxOffset);
+        scroll.ScrollOffsetY = OpenHarmonyScrollPhysics.DragOffset(scroll, scroll.ScrollOffsetY, delta, maxOffset);
         // Keep the virtual view in sync so apps can observe the scroll position.
         if (scroll.VirtualView is IScrollView virtualScroll)
         {

@@ -53,11 +53,29 @@ internal static class OpenHarmonyScrollPhysics
     /// <summary>Hard cap on one fling's duration (runaway guard).</summary>
     internal const long MaxFlingMs = 4000;
 
+    /// <summary>Largest drag/fling excursion past an edge (the spring returns to the edge).</summary>
+    internal const float MaxOverscroll = 64f;
+
+    /// <summary>Share of the raw drag distance that shows past an edge (rubber band).</summary>
+    internal const float RubberBandFactor = 0.45f;
+
+    /// <summary>Edge-return spring stiffness (omega^2, omega = 18 rad/s).</summary>
+    internal const float SpringStiffness = 324f;
+
+    /// <summary>Edge-return damping (2 * zeta * omega, zeta = 0.75).</summary>
+    internal const float SpringDamping = 27f;
+
     // Weight of the newest instantaneous velocity in the exponential moving average.
     private const float VelocitySmoothing = 0.4f;
 
     [ThreadStatic]
     private static bool t_applying;
+
+    // Count of programmatic offset writes in flight (ScrollTo jumps and their animation steps):
+    // these must not be sampled as drag velocity, or a long jump would look like a fling-speed
+    // sample and the stalled-sample fallback could start a momentum nobody asked for.
+    [ThreadStatic]
+    private static int t_programmatic;
 
     private sealed class Tracked : IOpenHarmonyAnimation
     {
@@ -73,9 +91,13 @@ internal static class OpenHarmonyScrollPhysics
         public bool Flinging;
         public float FlingVelocity;
         public long FlingStartMs;
+        public bool Bouncing;
+        public float BounceEdge;
+        public float BounceValue;
+        public float BounceVelocity;
         public bool Registered;
 
-        public bool NeedsRedraw => Flinging;
+        public bool NeedsRedraw => Flinging || Bouncing;
 
         public bool Step(long nowMs, float dtSeconds)
         {
@@ -90,6 +112,10 @@ internal static class OpenHarmonyScrollPhysics
                 if (Flinging)
                 {
                     return Fling(nowMs, dtSeconds);
+                }
+                if (Bouncing)
+                {
+                    return Spring(dtSeconds);
                 }
                 // No momentum is in flight, so the only frame work left is the stalled-sample
                 // release fallback. Keep asking for frames exactly while that fallback can still
@@ -142,13 +168,50 @@ internal static class OpenHarmonyScrollPhysics
                     break;
                 }
             }
-            FlingVelocity = hitEdge || Math.Abs(velocity) < StopVelocity ? 0f : velocity;
+            if (hitEdge)
+            {
+                if (OpenHarmonyMotion.ReduceMotion)
+                {
+                    // Reduced motion: the content stops at the edge, no return excursion.
+                    FlingVelocity = 0f;
+                    ApplyOffset(this, value);
+                    StopFling(this);
+                    return false;
+                }
+                // The remaining speed carries the content past the edge and the spring returns
+                // it; the amplitude is bounded so a very fast fling cannot fly off-screen.
+                OpenHarmonyScrollPhysics.StartBounce(this, value, value <= 0f ? 0f : max, velocity);
+                return true;
+            }
+            FlingVelocity = Math.Abs(velocity) < StopVelocity ? 0f : velocity;
             ApplyOffset(this, value);
             if (FlingVelocity == 0f || !Flinging)
             {
                 StopFling(this);
                 return false;
             }
+            return true;
+        }
+
+        private bool Spring(float dtSeconds)
+        {
+            float remaining = Math.Min(dtSeconds, MaxStepSeconds * 2f);
+            while (remaining > 0f)
+            {
+                float step = Math.Min(remaining, MaxStepSeconds);
+                remaining -= step;
+                BounceVelocity += (-SpringStiffness * (BounceValue - BounceEdge) - SpringDamping * BounceVelocity) * step;
+                BounceValue += BounceVelocity * step;
+                BounceValue = Math.Clamp(BounceValue, BounceEdge - OpenHarmonyScrollPhysics.MaxOverscroll,
+                    BounceEdge + OpenHarmonyScrollPhysics.MaxOverscroll);
+            }
+            if (Math.Abs(BounceValue - BounceEdge) < 0.5f && Math.Abs(BounceVelocity) < StopVelocity)
+            {
+                OpenHarmonyScrollPhysics.ApplyOffset(this, BounceEdge);
+                OpenHarmonyScrollPhysics.StopBounce(this);
+                return false;
+            }
+            OpenHarmonyScrollPhysics.ApplyOffset(this, BounceValue);
             return true;
         }
     }
@@ -206,7 +269,7 @@ internal static class OpenHarmonyScrollPhysics
     /// </summary>
     internal static void OnOffsetChanged(OpenHarmonyView view, bool horizontal, float oldValue, float newValue)
     {
-        if (!Enabled || t_applying || newValue == oldValue)
+        if (!Enabled || t_applying || t_programmatic > 0 || newValue == oldValue)
         {
             return;
         }
@@ -264,7 +327,7 @@ internal static class OpenHarmonyScrollPhysics
         }
         lock (s_flinging)
         {
-            if (tracked.Flinging || tracked.Samples < MinSamples)
+            if (tracked.Flinging || tracked.Bouncing || tracked.Samples < MinSamples)
             {
                 return false;
             }
@@ -302,10 +365,18 @@ internal static class OpenHarmonyScrollPhysics
         }
         lock (s_flinging)
         {
+            bool wasBouncing = tracked.Bouncing;
             StopFling(tracked);
+            StopBounce(tracked);
             tracked.Samples = 0;
             tracked.Velocity = 0f;
             Unregister(tracked);
+            if (wasBouncing)
+            {
+                // Never leave the content parked past an edge: the new owner (press, data change,
+                // ScrollTo) starts from the clamped offset.
+                ClampToEdge(tracked);
+            }
         }
         if (s_lastScrolled is { } reference &&
             reference.TryGetTarget(out OpenHarmonyView? last) && ReferenceEquals(last, view))
@@ -335,11 +406,108 @@ internal static class OpenHarmonyScrollPhysics
             active = new List<Tracked>(s_flinging);
             foreach (Tracked tracked in active)
             {
+                bool wasBouncing = tracked.Bouncing;
                 StopFling(tracked);
+                StopBounce(tracked);
                 tracked.Samples = 0;
                 tracked.Velocity = 0f;
                 Unregister(tracked);
+                if (wasBouncing)
+                {
+                    ClampToEdge(tracked);
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Offset the drag at <paramref name="current"/> + <paramref name="delta"/> should land on.
+    /// Inside the content it is the raw sum; past an edge the movement is rubber-banded to at
+    /// most <see cref="MaxOverscroll"/> so the edge resists the drag. Reduce-motion clamps hard.
+    /// </summary>
+    internal static float DragOffset(OpenHarmonyView view, float current, float delta, float maxOffset)
+    {
+        float target = current + delta;
+        if (!Enabled || OpenHarmonyMotion.ReduceMotion)
+        {
+            return Math.Clamp(target, 0f, maxOffset);
+        }
+        if (target < 0f)
+        {
+            return RubberBand(target, 0f);
+        }
+        if (target > maxOffset)
+        {
+            return RubberBand(target, maxOffset);
+        }
+        return target;
+    }
+
+    /// <summary>True while past an edge (a release starts the return spring).</summary>
+    internal static bool IsOverscrolled(OpenHarmonyView view)
+    {
+        if (!s_tracked.TryGetValue(view, out Tracked? tracked))
+        {
+            return false;
+        }
+        float max = MaxOffsetFor(tracked);
+        float value = tracked.Horizontal ? view.ScrollOffsetX : view.ScrollOffsetY;
+        return value < 0f || value > max;
+    }
+
+    /// <summary>True while the edge-return spring is moving <paramref name="view"/>.</summary>
+    internal static bool IsBouncing(OpenHarmonyView view)
+        => s_tracked.TryGetValue(view, out Tracked? tracked) && tracked.Bouncing;
+
+    /// <summary>
+    /// Starts the edge-return spring when the drag left the content past an edge. Returns true
+    /// when a spring was started; reduced motion snaps to the edge and returns false.
+    /// </summary>
+    internal static bool TryReturnToEdge(OpenHarmonyView view)
+    {
+        if (!Enabled || view is null || !s_tracked.TryGetValue(view, out Tracked? tracked))
+        {
+            return false;
+        }
+        lock (s_flinging)
+        {
+            float max = MaxOffsetFor(tracked);
+            float value = tracked.Horizontal ? view.ScrollOffsetX : view.ScrollOffsetY;
+            float edge = value < 0f ? 0f : (value > max ? max : float.NaN);
+            if (float.IsNaN(edge))
+            {
+                return false;
+            }
+            if (OpenHarmonyMotion.ReduceMotion)
+            {
+                ApplyOffset(tracked, edge);
+                return false;
+            }
+            if (!tracked.Bouncing)
+            {
+                tracked.BounceEdge = edge;
+                tracked.BounceValue = value;
+                tracked.BounceVelocity = 0f;
+                tracked.Bouncing = true;
+                if (!s_flinging.Contains(tracked))
+                {
+                    s_flinging.Add(tracked);
+                }
+                EnsureRegistered(tracked);
+            }
+            return true;
+        }
+    }
+
+    /// <summary>Marks an offset write as programmatic (no drag sampling).</summary>
+    internal static void BeginProgrammatic() => t_programmatic++;
+
+    /// <summary>Ends a programmatic offset write.</summary>
+    internal static void EndProgrammatic()
+    {
+        if (t_programmatic > 0)
+        {
+            t_programmatic--;
         }
     }
 
@@ -361,6 +529,7 @@ internal static class OpenHarmonyScrollPhysics
         }
         s_tracked = new ConditionalWeakTable<OpenHarmonyView, Tracked>();
         s_lastScrolled = null;
+        t_programmatic = 0;
     }
 
     /// <summary>Pointer state + release hint from the platform touch stream.</summary>
@@ -375,6 +544,7 @@ internal static class OpenHarmonyScrollPhysics
             s_pointerDown = true;
             // A fresh press grabs whichever scroller was still moving.
             CancelAll();
+            OpenHarmonyScrollAnimation.CancelAll();
             return;
         }
         if (args.Action == OpenHarmonyTouchAction.Cancel)
@@ -382,6 +552,7 @@ internal static class OpenHarmonyScrollPhysics
             s_pointerDown = false;
             s_suppressReleaseFling = false;
             CancelAll();
+            OpenHarmonyScrollAnimation.CancelAll();
             return;
         }
         if (args.Action != OpenHarmonyTouchAction.Up)
@@ -402,7 +573,11 @@ internal static class OpenHarmonyScrollPhysics
         {
             return;
         }
-        TryStartFling(view);
+        if (!TryStartFling(view))
+        {
+            // A drag that ended past an edge has no momentum to start, but still springs back.
+            TryReturnToEdge(view);
+        }
     }
 
     private static void HookTouch()
@@ -447,6 +622,55 @@ internal static class OpenHarmonyScrollPhysics
         tracked.Flinging = false;
         tracked.FlingVelocity = 0f;
         s_flinging.Remove(tracked);
+    }
+
+    /// <summary>Hands a fling that hit an edge to the return spring (bounded excursion).</summary>
+    private static void StartBounce(Tracked tracked, float value, float edge, float velocity)
+    {
+        tracked.Flinging = false;
+        tracked.FlingVelocity = 0f;
+        tracked.Bouncing = true;
+        tracked.BounceEdge = edge;
+        tracked.BounceValue = value;
+        tracked.BounceVelocity = velocity;
+        if (!s_flinging.Contains(tracked))
+        {
+            s_flinging.Add(tracked);
+        }
+        EnsureRegistered(tracked);
+    }
+
+    private static void StopBounce(Tracked tracked)
+    {
+        if (!tracked.Bouncing)
+        {
+            return;
+        }
+        tracked.Bouncing = false;
+        tracked.BounceValue = tracked.BounceEdge;
+        tracked.BounceVelocity = 0f;
+        s_flinging.Remove(tracked);
+    }
+
+    private static void ClampToEdge(Tracked tracked)
+    {
+        float max = MaxOffsetFor(tracked);
+        float value = tracked.Horizontal ? tracked.View.ScrollOffsetX : tracked.View.ScrollOffsetY;
+        float clamped = Math.Clamp(value, 0f, max);
+        if (clamped != value)
+        {
+            ApplyOffset(tracked, clamped);
+        }
+    }
+
+    private static float RubberBand(float target, float edge)
+    {
+        float overshoot = MathF.Abs(target - edge) * RubberBandFactor;
+        if (overshoot > MaxOverscroll)
+        {
+            overshoot = MaxOverscroll;
+        }
+        return edge + MathF.CopySign(overshoot, target - edge);
     }
 
     private static float MaxOffsetFor(Tracked tracked)

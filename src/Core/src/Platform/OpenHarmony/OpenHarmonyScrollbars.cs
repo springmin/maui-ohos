@@ -11,7 +11,9 @@
 // FadeMs through the shared OpenHarmonyAnimationLoop (the loop unsubscribes when the fade
 // ends, so an idle scroller draws no bar and causes no frame ticks). The one final repaint
 // when the fade completes is requested explicitly, otherwise the last faint frame would stay
-// on screen.
+// on screen. HoldMs/FadeMs/ThumbOpacity are settable so hosts and tests can tune the bar; the
+// device "reduce animations" setting skips the fade entirely (the bar hides on the frame the
+// hold expires) and keeps the same geometry.
 //
 // Opt-out: OpenHarmonyScrollbars.Enabled = false keeps the previous draw output (no bar).
 using System.Runtime.CompilerServices;
@@ -35,17 +37,23 @@ internal static class OpenHarmonyScrollbars
     /// <summary>The thumb never shrinks below this length.</summary>
     internal const float MinThumbLength = 24f;
 
-    /// <summary>Full opacity after the last scroll for this long.</summary>
-    internal const long HoldMs = 900;
+    /// <summary>Full opacity after the last scroll for this long (settable for hosts/tests).</summary>
+    internal static long HoldMs { get; set; } = DefaultHoldMs;
 
-    /// <summary>Fade-out duration.</summary>
-    internal const long FadeMs = 250;
+    /// <summary>Fade-out duration (settable for hosts/tests).</summary>
+    internal static long FadeMs { get; set; } = DefaultFadeMs;
+
+    /// <summary>Documented default hold time.</summary>
+    internal const long DefaultHoldMs = 900;
+
+    /// <summary>Documented default fade duration.</summary>
+    internal const long DefaultFadeMs = 250;
 
     /// <summary>Thumb colour; the opacity is scaled by the fade.</summary>
     internal static Color ThumbColor { get; set; } = Colors.White;
 
     /// <summary>Maximum thumb opacity while fully visible.</summary>
-    internal const float ThumbOpacity = 0.35f;
+    internal static float ThumbOpacity { get; set; } = 0.35f;
 
     /// <summary>Below this the bar is not drawn at all.</summary>
     private const float VisibleOpacity = 0.01f;
@@ -71,12 +79,24 @@ internal static class OpenHarmonyScrollbars
             {
                 return true;
             }
+            if (OpenHarmonyMotion.ReduceMotion)
+            {
+                // The device asks for reduced animation: the bar disappears on the frame the
+                // hold expires instead of fading across ~250 ms of intermediate paints.
+                Opacity = 0f;
+                Registered = false;
+                OpenHarmonyBridge.RequestRedraw();
+                return false;
+            }
             Opacity -= dtSeconds * (1000f / FadeMs);
             if (Opacity > VisibleOpacity)
             {
                 return true;
             }
             Opacity = 0f;
+            // The next scroll must be able to start a new fade: the loop dropped this animation
+            // when the step returned false, so the registration flag has to drop with it.
+            Registered = false;
             // The fade's last frame is already painted with a faint bar; repaint once more so
             // the settled state (no bar) is what stays on screen.
             OpenHarmonyBridge.RequestRedraw();
@@ -180,6 +200,10 @@ internal static class OpenHarmonyScrollbars
             s_states = new ConditionalWeakTable<OpenHarmonyView, BarState>();
             s_tintSource = null;
             Draws = 0;
+            HoldMs = DefaultHoldMs;
+            FadeMs = DefaultFadeMs;
+            ThumbOpacity = 0.35f;
+            ThumbColor = Colors.White;
         }
     }
 }

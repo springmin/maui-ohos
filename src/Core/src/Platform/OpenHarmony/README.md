@@ -13,6 +13,7 @@ that ships in the `microsoft.net.sdk.openharmony` workload
 | `OpenHarmonyWindowRenderer` | measures/arranges the MAUI tree, draws it through the MauiGraphics canvas and routes touches (deepest interactive view first) |
 | `OpenHarmonyLabelHandler` / `OpenHarmonyButtonHandler` / `OpenHarmonyLayoutHandler` | handlers for `ILabel`/`IButton`/`ILayout` (also an `ILayoutHandler`), including `GetDesiredSize` from platform text metrics and cross-platform measure/arrange |
 | `OpenHarmonyMauiAppHost` | creates the window through `IApplication.CreateWindow`, connects this slice's handlers to the visual tree, arranges it for the surface and drives render/touch from the platform contract |
+| `OpenHarmonyAppLinks` | dispatches the shell's deep-link activations (cold-start want and `onNewWant`) onto Shell/`NavigationPage` through the `Navigating` approval chain; https links require the host's allow-list |
 | `MauiOpenHarmonyExtensions.UseOpenHarmony()` | registers the services, the host and the handlers with `MauiAppBuilder` |
 
 Build:

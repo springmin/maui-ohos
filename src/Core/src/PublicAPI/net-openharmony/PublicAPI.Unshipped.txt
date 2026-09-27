@@ -105,6 +105,9 @@ Microsoft.Maui.Platform.OpenHarmonyAppInfo.ShowSettingsUI() -> void
 Microsoft.Maui.Platform.OpenHarmonyAppInfo.ShowSettingsUI(string! page) -> void
 Microsoft.Maui.Platform.OpenHarmonyAppInfo.Version.get -> System.Version!
 Microsoft.Maui.Platform.OpenHarmonyAppInfo.VersionString.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyAppLinks
+static Microsoft.Maui.Platform.OpenHarmonyAppLinks.Activate(string! uri) -> void
+static Microsoft.Maui.Platform.OpenHarmonyAppLinks.AllowedHttpsHosts.get -> System.Collections.Generic.IList<string!>!
 Microsoft.Maui.Platform.OpenHarmonyApplicationHandler
 Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.LastOpenWindowResult.get -> Microsoft.Maui.Platform.OpenHarmonyOpenWindowResult
 Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.OpenHarmonyApplicationHandler() -> void

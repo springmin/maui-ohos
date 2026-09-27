@@ -25,6 +25,10 @@ public sealed class OpenHarmonyMauiAppHost
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
         _context = new MauiContext(services);
+        // Deep links: subscribe to the shell's activation transport (cold-start want and
+        // onNewWant) before any window exists, so an activation that arrives early is queued
+        // and applied as soon as Run/lifecycle provides a Shell or NavigationPage target.
+        OpenHarmonyAppLinks.Install(services);
         // Keystore results arrive from the ArkTS sink through the bridge.
         OpenHarmonyBridge.KeystoreResult += (requestId, rc, data) => OpenHarmonyKeystore.Complete(requestId, rc, data);
         OpenHarmonyBridge.PickerResult += (requestId, rc, name, data) => OpenHarmonyPickerClient.Complete(requestId, rc, name, data);
@@ -97,9 +101,11 @@ public sealed class OpenHarmonyMauiAppHost
                         _createReceived = true;
                         EnsureWindowCreated();
                         EnsureWindowActivated();
+                        OpenHarmonyAppLinks.OnHostReady();
                         break;
                     case OpenHarmonyLifecycleEvent.Foreground:
                         _window?.Resumed();
+                        OpenHarmonyAppLinks.OnHostReady();
                         break;
                     case OpenHarmonyLifecycleEvent.Background:
                         _window?.Stopped();
@@ -162,6 +168,9 @@ public sealed class OpenHarmonyMauiAppHost
         {
             EnsureWindowActivated();
         }
+        // A cold-start deep link was queued while no navigation target existed; the window (and
+        // its Shell/NavigationPage) now exists, so retry it.
+        OpenHarmonyAppLinks.OnHostReady();
     }
 
     /// <summary>
@@ -248,6 +257,8 @@ public sealed class OpenHarmonyMauiAppHost
             Arrange(_width, _height);
         }
         _dirty = true;
+        // The adopted window may be the first navigation target a queued deep link can use.
+        OpenHarmonyAppLinks.OnHostReady();
         return true;
     }
 

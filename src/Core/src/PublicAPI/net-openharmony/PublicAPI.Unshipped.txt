@@ -181,6 +181,7 @@ Microsoft.Maui.Platform.OpenHarmonyClipboard.HasText.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyClipboard.OpenHarmonyClipboard() -> void
 Microsoft.Maui.Platform.OpenHarmonyClipboard.SetDataPackageAsync(Microsoft.Maui.Controls.DataPackage! package) -> System.Threading.Tasks.Task!
 Microsoft.Maui.Platform.OpenHarmonyClipboard.SetTextAsync(string? text) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyCollectionViewExtensions
 Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler
 Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.OpenHarmonyCollectionViewHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyCompass
@@ -1276,10 +1277,16 @@ static Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.MapItems(Microsoft
 static Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.MapPosition(Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler! handler, Microsoft.Maui.Controls.CarouselView! carousel) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.MapForeground(Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler! handler, Microsoft.Maui.ICheckBox! checkBox) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.MapIsChecked(Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler! handler, Microsoft.Maui.ICheckBox! checkBox) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCollectionViewExtensions.IsGroupCollapsed(this Microsoft.Maui.Controls.CollectionView! collectionView, object! group) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyCollectionViewExtensions.SetGroupCollapsed(this Microsoft.Maui.Controls.CollectionView! collectionView, object! group, bool collapsed) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyCollectionViewExtensions.SetGroupHeaderTogglesCollapse(this Microsoft.Maui.Controls.CollectionView! collectionView, bool enabled) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCollectionViewExtensions.ToggleGroupCollapsed(this Microsoft.Maui.Controls.CollectionView! collectionView, object! group) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapEmptyView(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapGroupFooter(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapHeaderFooter(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapItemTemplate(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapItemsSource(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapItemsUpdatingScrollMode(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapRemainingItemsThreshold(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapSelectedItem(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler.MapSelectedItems(Microsoft.Maui.Platform.OpenHarmonyCollectionViewHandler! handler, Microsoft.Maui.Controls.CollectionView! collectionView) -> void

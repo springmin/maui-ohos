@@ -671,8 +671,10 @@ Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler
 Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler.OpenHarmonyTabbedPageHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.GetLocalesAsync() -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Microsoft.Maui.Media.Locale!>!>!
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.IsSupported.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.OpenHarmonyTextToSpeech() -> void
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.SpeakAsync(string! text, Microsoft.Maui.Media.SpeechOptions? options = null, System.Threading.CancellationToken cancelToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.Stop() -> void
 Microsoft.Maui.Platform.OpenHarmonyTextView
 Microsoft.Maui.Platform.OpenHarmonyTextView.BackgroundPaint.get -> Microsoft.Maui.Graphics.Paint?
 Microsoft.Maui.Platform.OpenHarmonyTextView.BackgroundPaint.set -> void

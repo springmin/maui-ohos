@@ -10,7 +10,26 @@ public class OpenHarmonyView
 {
     public IView? VirtualView { get; set; }
 
-    public string? Text { get; set; }
+    private string? _text;
+
+    /// <summary>
+    /// Text drawn by this view. A change restarts the caret blink so typing never lands on the
+    /// hidden phase of the blink (the caret is the only text state that animates).
+    /// </summary>
+    public string? Text
+    {
+        get => _text;
+        set
+        {
+            if (string.Equals(_text, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+            _text = value;
+            ResetCaretBlink();
+        }
+    }
+
     public float FontSize { get; set; } = 14f;
 
     private Color _textColor = Colors.White;
@@ -71,13 +90,147 @@ public class OpenHarmonyView
     public bool Pressed { get; set; }
 
     // Entry support
-    public bool IsTextEntry { get; set; }
+    private bool _isTextEntry;
+
+    /// <summary>Marks this platform view as a text entry (Entry/Editor/SearchBar).</summary>
+    public bool IsTextEntry
+    {
+        get => _isTextEntry;
+        set
+        {
+            if (_isTextEntry == value)
+            {
+                return;
+            }
+            _isTextEntry = value;
+            UpdateAnimationRegistration();
+        }
+    }
+
     public string? Placeholder { get; set; }
-    public bool IsFocused { get; set; }
-    public int CursorPosition { get; set; } = -1;
-    public int SelectionLength { get; set; }
+
+    private bool _isFocused;
+
+    /// <summary>
+    /// Focus state of the entry. Focus drives the caret blink: a focused entry keeps asking for
+    /// frames (see <see cref="NeedsAnimation"/>) so the caret can toggle, an unfocused one is
+    /// static and never draws a caret.
+    /// </summary>
+    public bool IsFocused
+    {
+        get => _isFocused;
+        set
+        {
+            if (_isFocused == value)
+            {
+                return;
+            }
+            _isFocused = value;
+            if (!value)
+            {
+                CompositionText = null;
+            }
+            ResetCaretBlink();
+            UpdateAnimationRegistration();
+        }
+    }
+
+    private int _cursorPosition = -1;
+
+    /// <summary>Caret index (-1 draws at the end of the text).</summary>
+    public int CursorPosition
+    {
+        get => _cursorPosition;
+        set
+        {
+            if (_cursorPosition == value)
+            {
+                return;
+            }
+            _cursorPosition = value;
+            ResetCaretBlink();
+        }
+    }
+
+    private int _selectionLength;
+
+    /// <summary>Selection length; the selected range ends at <see cref="CursorPosition"/>.</summary>
+    public int SelectionLength
+    {
+        get => _selectionLength;
+        set
+        {
+            if (_selectionLength == value)
+            {
+                return;
+            }
+            _selectionLength = value;
+            ResetCaretBlink();
+        }
+    }
+
     /// <summary>Anchor of an in-progress selection drag (-1 when none).</summary>
     public int TextAnchor { get; set; } = -1;
+
+    // IME preedit (composition): the shell's input delivers the input method's preview text
+    // (PreviewText.value/offset) while a composition is in flight; it is drawn at the caret with
+    // an underline/highlight and replaced by the committed text the shell sends through TextInput.
+    private string? _compositionText;
+
+    /// <summary>Composing (preedit) string, null/empty when no composition is in flight.</summary>
+    internal string? CompositionText
+    {
+        get => _compositionText;
+        set
+        {
+            // Normalize "no composition" to null so IsComposing and the commit path agree.
+            string? normalized = string.IsNullOrEmpty(value) ? null : value;
+            if (string.Equals(_compositionText, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+            _compositionText = normalized;
+            ResetCaretBlink();
+        }
+    }
+
+    /// <summary>Insertion offset of the composing string in the text (UTF-16 units).</summary>
+    internal int CompositionOffset { get; set; }
+
+    internal bool IsComposing => !string.IsNullOrEmpty(_compositionText);
+
+    // Caret blink: 500 ms visible / 500 ms hidden, the platform text-caret cadence. The phase is
+    // anchored at the last caret-affecting change (focus, cursor, selection, text, composition),
+    // so the caret is visible for the first half period after every interaction.
+    internal const int CaretBlinkHalfPeriodMs = 500;
+
+    /// <summary>Test/diagnostic clock override (null = <see cref="Environment.TickCount64"/>).</summary>
+    internal static Func<long>? CaretClock { get; set; }
+
+    private long _caretBlinkEpochMs = long.MinValue;
+
+    private static long CaretNowMs => CaretClock?.Invoke() ?? Environment.TickCount64;
+
+    private void ResetCaretBlink() => _caretBlinkEpochMs = CaretNowMs;
+
+    /// <summary>True when the caret is in its visible half of the blink period.</summary>
+    internal bool CaretVisible
+    {
+        get
+        {
+            if (!IsFocused)
+            {
+                return false;
+            }
+            long now = CaretNowMs;
+            if (_caretBlinkEpochMs == long.MinValue)
+            {
+                _caretBlinkEpochMs = now;
+                return true;
+            }
+            return (now - _caretBlinkEpochMs) % (2L * CaretBlinkHalfPeriodMs) < CaretBlinkHalfPeriodMs;
+        }
+    }
 
     // Image support
     public byte[]? ImageBytes { get; set; }
@@ -155,21 +308,24 @@ public class OpenHarmonyView
     /// <summary>Shared rotation (degrees) advanced by the renderer for animated views.</summary>
     public static float AnimationAngle { get; set; }
 
-    /// <summary>True when this view keeps redrawing on its own (activity indicators).</summary>
-    public bool NeedsAnimation => _isActivityIndicator && _isRunning;
+    /// <summary>
+    /// True when this view keeps redrawing on its own: a running activity indicator (spinner
+    /// angle) or a focused text entry (caret blink).
+    /// </summary>
+    public bool NeedsAnimation => _isActivityIndicator && _isRunning || _isTextEntry && _isFocused;
 
     private static int s_animationCount;
 
     /// <summary>
     /// Platform views that currently want continuous redraws (their <see cref="NeedsAnimation"/>
     /// is true). The frame loop reads this to skip the per-frame tree walk when nothing animates;
-    /// the walk still decides whether a running indicator is actually visible.
+    /// the walk still decides whether a running indicator or a focused entry is actually visible.
     /// </summary>
     internal static int AnimationCount => Volatile.Read(ref s_animationCount);
 
     private void UpdateAnimationRegistration()
     {
-        bool active = _isActivityIndicator && _isRunning;
+        bool active = _isActivityIndicator && _isRunning || _isTextEntry && _isFocused;
         if (active == _animationRegistered)
         {
             return;
@@ -771,6 +927,7 @@ public class OpenHarmonyView
                 HorizontalAlignment.Left, VerticalAlignment.Center);
             if (IsFocused)
             {
+                DrawComposition(canvas, frame, string.Empty);
                 DrawCaret(canvas, frame, string.Empty);
             }
             return;
@@ -783,10 +940,18 @@ public class OpenHarmonyView
             if (IsTextEntry && IsFocused)
             {
                 DrawSelection(canvas, frame, text);
-                DrawCaret(canvas, frame, text);
             }
             canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
+            if (IsTextEntry && IsFocused)
+            {
+                // Composition and caret sit on top of the text (the preedit overlays the range it
+                // will replace); the selection handles are the topmost layer so a drag never
+                // hides them under a glyph.
+                DrawComposition(canvas, frame, text);
+                DrawCaret(canvas, frame, text);
+                DrawSelectionHandles(canvas, frame, text);
+            }
         }
         if (IsScrollView)
         {
@@ -861,40 +1026,44 @@ public class OpenHarmonyView
         return text.Length;
     }
 
-    /// <summary>Draws the caret at the entry's cursor position (falls back to the text end).</summary>
-    private void DrawCaret(MauiCanvas canvas, RectF frame, string text)
-    {
-        int caretIndex = CursorPosition >= 0 && CursorPosition <= text.Length ? CursorPosition : text.Length;
-        float caretWidth = CaretWidth(text, caretIndex);
-        canvas.FillColor = Colors.White;
-        canvas.FillRectangle(frame.X + 12 + caretWidth, frame.Y + 8, 2, frame.Height - 16);
-    }
-
     /// <summary>
-    /// Width of the text before the caret from the cached per-character widths - the same array
-    /// caret hit-testing uses, so the drawn caret and <see cref="CursorIndexFromX"/> always agree.
-    /// <see cref="CharWidths"/> stores each glyph as the difference of two prefix measurements
-    /// (and the estimate fallback is a per-character constant), so summing the prefix is exactly
-    /// the whole-prefix measurement the previous implementation took per frame, without the
-    /// substring allocation and the native call.
+    /// X coordinate of the caret slot at <paramref name="index"/> (clamped to the text bounds).
+    /// The same cached per-character prefix the hit test uses, so the drawn caret, the selection
+    /// highlight, the handles and <see cref="CursorIndexFromX"/> always agree.
     /// </summary>
-    private float CaretWidth(string text, int caretIndex)
+    internal float TextPositionX(string text, int index)
     {
-        if (caretIndex <= 0)
+        float left = Frame.X + 12;
+        if (index <= 0)
         {
-            return 0;
+            return left;
         }
-        if (caretIndex > text.Length)
+        if (index > text.Length)
         {
-            caretIndex = text.Length;
+            index = text.Length;
         }
         float[] widths = CharWidths(text);
         float width = 0;
-        for (int i = 0; i < caretIndex && i < widths.Length; i++)
+        for (int i = 0; i < index && i < widths.Length; i++)
         {
             width += widths[i];
         }
-        return width;
+        return left + width;
+    }
+
+    /// <summary>Draws the caret at the cursor (or the composition end), when the blink is on.</summary>
+    private void DrawCaret(MauiCanvas canvas, RectF frame, string text)
+    {
+        if (!CaretVisible)
+        {
+            return;
+        }
+        int caretIndex = IsComposing
+            ? CompositionOffset + (_compositionText?.Length ?? 0)
+            : (CursorPosition >= 0 ? CursorPosition : text.Length);
+        float caretX = TextPositionX(text, caretIndex);
+        canvas.FillColor = Colors.White;
+        canvas.FillRectangle(caretX, frame.Y + 8, 2, frame.Height - 16);
     }
 
     private void DrawSelection(MauiCanvas canvas, RectF frame, string text)
@@ -903,12 +1072,10 @@ public class OpenHarmonyView
         {
             return;
         }
-        int start = Math.Clamp(Math.Min(CursorPosition, CursorPosition - SelectionLength), 0, text.Length);
-        int end = Math.Clamp(Math.Max(CursorPosition, CursorPosition - SelectionLength), 0, text.Length);
-        float left = frame.X + 12;
-        float right = left + CaretWidth(text, text.Length);
-        float startX = left + (text.Length > 0 ? (right - left) * start / text.Length : 0);
-        float endX = left + (text.Length > 0 ? (right - left) * end / text.Length : 0);
+        int caret = SelectionEnd;
+        int start = SelectionStart;
+        float startX = TextPositionX(text, start);
+        float endX = TextPositionX(text, caret);
         if (endX > startX)
         {
             canvas.FillColor = s_selectionFill;
@@ -918,6 +1085,125 @@ public class OpenHarmonyView
 
     /// <summary>Selection highlight: one shared colour, not a new Color per drawn frame.</summary>
     private static readonly Color s_selectionFill = Colors.DodgerBlue.WithAlpha(0.4f);
+
+    // Selection handles: the platform's round handles below the text line. The visual circle is
+    // SelectionHandleRadius (18 px diameter), the touch target adds a 24 px slop so a fingertip
+    // grabs one without pixel precision.
+    internal const float SelectionHandleRadius = 9f;
+    internal const float SelectionHandleTouchRadius = 24f;
+
+    /// <summary>Selection start index (selection ends at <see cref="CursorPosition"/>).</summary>
+    internal int SelectionStart
+    {
+        get
+        {
+            string text = Text ?? string.Empty;
+            int caret = SelectionEnd;
+            return Math.Clamp(caret - Math.Max(0, SelectionLength), 0, text.Length);
+        }
+    }
+
+    /// <summary>Selection end index (= caret), clamped to the text.</summary>
+    internal int SelectionEnd
+    {
+        get
+        {
+            string text = Text ?? string.Empty;
+            return Math.Clamp(CursorPosition < 0 ? text.Length : CursorPosition, 0, text.Length);
+        }
+    }
+
+    internal bool HasSelectionHandles => IsFocused && SelectionLength > 0;
+
+    private static float SelectionHandleY(RectF frame) => frame.Y + frame.Height - SelectionHandleRadius - 2f;
+
+    /// <summary>0 = none, 1 = selection start handle, 2 = selection end handle.</summary>
+    internal int SelectionHandleHit(float x, float y)
+    {
+        if (!HasSelectionHandles)
+        {
+            return 0;
+        }
+        string text = Text ?? string.Empty;
+        float handleY = SelectionHandleY(Frame);
+        float hitSquared = SelectionHandleTouchRadius * SelectionHandleTouchRadius;
+        float dx = x - TextPositionX(text, SelectionStart);
+        if (dx * dx + (y - handleY) * (y - handleY) <= hitSquared)
+        {
+            return 1;
+        }
+        dx = x - TextPositionX(text, SelectionEnd);
+        return dx * dx + (y - handleY) * (y - handleY) <= hitSquared ? 2 : 0;
+    }
+
+    private void DrawSelectionHandles(MauiCanvas canvas, RectF frame, string text)
+    {
+        if (!HasSelectionHandles)
+        {
+            return;
+        }
+        float y = SelectionHandleY(frame);
+        DrawSelectionHandle(canvas, TextPositionX(text, SelectionStart), y);
+        DrawSelectionHandle(canvas, TextPositionX(text, SelectionEnd), y);
+    }
+
+    private static void DrawSelectionHandle(MauiCanvas canvas, float x, float y)
+    {
+        canvas.FillColor = s_selectionHandleFill;
+        canvas.FillCircle(x, y, SelectionHandleRadius);
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+        canvas.DrawCircle(x, y, SelectionHandleRadius);
+    }
+
+    /// <summary>Handle fill: one shared colour, not a new Color per drawn frame.</summary>
+    private static readonly Color s_selectionHandleFill = Colors.DodgerBlue;
+
+    /// <summary>Composition highlight behind the preedit (inverse-video style).</summary>
+    private static readonly Color s_compositionFill = Colors.DodgerBlue.WithAlpha(0.35f);
+
+    /// <summary>
+    /// Draws the IME preedit (composition) over the range it will replace: a highlight, the
+    /// composing string and the platform's underline, with the caret sitting after it. The
+    /// committed text arrives through <see cref="Text"/> (the shell's TextInput event), which
+    /// clears <see cref="CompositionText"/> and replaces the range.
+    /// </summary>
+    private void DrawComposition(MauiCanvas canvas, RectF frame, string text)
+    {
+        if (!IsComposing)
+        {
+            return;
+        }
+        string composition = _compositionText!;
+        int start = Math.Clamp(CompositionOffset, 0, text.Length);
+        int end = Math.Clamp(CompositionOffset + composition.Length, 0, text.Length);
+        float startX = TextPositionX(text, start);
+        float endX = end > start ? TextPositionX(text, end) : startX;
+        if (endX > startX)
+        {
+            canvas.FillColor = s_compositionFill;
+            canvas.FillRectangle(startX, frame.Y + 6, endX - startX, frame.Height - 12);
+        }
+        float available = Math.Max(8f, frame.X + frame.Width - 12 - startX);
+        canvas.FontColor = TextColorForDraw;
+        canvas.FontSize = FontSize;
+        canvas.DrawString(composition, startX, frame.Y, available, frame.Height,
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+        canvas.StrokeColor = Colors.DodgerBlue;
+        canvas.StrokeSize = 2;
+        float underlineWidth = Math.Min(available, Math.Max(8f, MeasureTextWidth(composition)));
+        float underlineY = frame.Y + frame.Height / 2f + FontSize * 0.55f;
+        canvas.DrawLine(startX, underlineY, startX + underlineWidth, underlineY);
+    }
+
+    private float MeasureTextWidth(string value)
+    {
+        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(value, FontSize, out int measured, out int _) && measured > 0)
+        {
+            return measured;
+        }
+        return value.Length * FontSize * 0.55f;
+    }
 
     private void DrawImage(MauiCanvas canvas, RectF frame)
     {

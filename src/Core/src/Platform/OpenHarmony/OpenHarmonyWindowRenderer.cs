@@ -427,7 +427,13 @@ public sealed class OpenHarmonyWindowRenderer
     private OpenHarmonyView? _flyoutPanelView;
     private readonly List<OpenHarmonyView> _carouselViews = new();
     private OpenHarmonyView? _textDragTarget;
-    private int _textDragAnchor;
+    /// <summary>Active selection-handle drag: 0 none, 1 start handle, 2 end handle.</summary>
+    private int _textHandleSide;
+    /// <summary>Content-space minus screen-space X at press (entry inside a scrolled view).</summary>
+    private float _textDragOffsetX;
+
+    /// <summary>Active selection-handle drag (0 none, 1 start, 2 end) - diagnostics/tests.</summary>
+    internal int TextHandleDrag => _textHandleSide;
     private OpenHarmonyDragAndDrop.Session? _dragSession;
     private IView? _dragCandidate;
     private IView? _dragRoot;
@@ -497,11 +503,14 @@ public sealed class OpenHarmonyWindowRenderer
         entry.TextAnchor = anchor;
         entry.CursorPosition = caret;
         entry.SelectionLength = length;
-        if (entry.VirtualView is Microsoft.Maui.Controls.Entry control)
+        if (entry.VirtualView is Microsoft.Maui.Controls.InputView input)
         {
-            control.CursorPosition = caret;
-            control.SelectionLength = length;
+            input.CursorPosition = caret;
+            input.SelectionLength = length;
         }
+        // Keep the shell's input control caret on the managed caret so a following IME
+        // composition uses the same insertion offset (and typing lands where the user tapped).
+        OpenHarmonyBridge.SetKeyboardCaret(caret);
         OpenHarmonyBridge.RequestRedraw();
     }
 
@@ -546,13 +555,11 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (_textDragTarget is { IsTextEntry: true } textEntry)
         {
-            // Selection extension is approximate (proportional text metrics); keep the caret
-            // stable when the estimate does not move.
-            int index = textEntry.CursorIndexFromX(x);
-            if (index != textEntry.CursorPosition)
-            {
-                ApplyTextSelection(textEntry, index);
-            }
+            // The press recorded the scroll-container delta (content space vs. screen space) so a
+            // selection drag stays aligned when the entry lives inside a scrolled view. The move
+            // always applies: with a handle drag the caret can stay fixed while the selection
+            // start moves (the cursor comparison alone would miss that).
+            ApplyTextSelection(textEntry, textEntry.CursorIndexFromX(x + _textDragOffsetX));
             return true;
         }
         if (_panTarget is { } panTarget)
@@ -875,6 +882,8 @@ public sealed class OpenHarmonyWindowRenderer
                 return true;
             }
             _textDragTarget = null;
+            _textHandleSide = 0;
+            OpenHarmonyScrollPhysics.ClearReleaseSuppression();
             if (_panTarget is { } panTarget)
             {
                 if (_panGestureId == -2)
@@ -967,15 +976,34 @@ public sealed class OpenHarmonyWindowRenderer
         {
             if (down)
             {
-                // Pressing inside a text entry moves the cursor and starts a selection drag.
+                // Pressing inside a text entry moves the cursor and starts a selection drag;
+                // pressing on a selection handle (round handles below the text line) drags that
+                // endpoint instead.
+                _textDragOffsetX = x - _downX;
+                int handle = textEntry.SelectionHandleHit(x, y);
+                if (handle != 0)
+                {
+                    _textHandleSide = handle;
+                    textEntry.TextAnchor = handle == 1 ? textEntry.SelectionEnd : textEntry.SelectionStart;
+                }
+                else
+                {
+                    _textHandleSide = 0;
+                    textEntry.TextAnchor = -1;
+                    ApplyTextSelection(textEntry, textEntry.CursorIndexFromX(x));
+                }
+                // Selection work owns the gesture: stop any in-flight inertia and keep the
+                // enclosing scroll view from flinging when the finger lifts.
+                OpenHarmonyScrollPhysics.CancelAll();
+                OpenHarmonyScrollPhysics.SuppressReleaseFling();
                 _textDragTarget = textEntry;
-                _textDragAnchor = textEntry.CursorIndexFromX(x);
-                ApplyTextSelection(textEntry, _textDragAnchor);
                 handled = true;
             }
             else if (up)
             {
                 _textDragTarget = null;
+                _textHandleSide = 0;
+                OpenHarmonyScrollPhysics.ClearReleaseSuppression();
             }
         }
         if (view.Handler?.PlatformView is OpenHarmonyView platform)

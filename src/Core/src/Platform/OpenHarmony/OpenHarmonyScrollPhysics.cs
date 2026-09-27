@@ -169,6 +169,18 @@ internal static class OpenHarmonyScrollPhysics
     // while the finger is still down.
     private static volatile bool s_pointerDown;
 
+    // True while a text selection gesture (drag or selection-handle drag) owns the pointer. The
+    // renderer sets it on the press and clears it on the release; a release that is still
+    // suppressed must not start a fling from the scroll samples (dragging a selection is not a
+    // scroll gesture). Set/cleared from the touch thread only.
+    private static volatile bool s_suppressReleaseFling;
+
+    /// <summary>Marks the current gesture as selection work: no fling when the finger lifts.</summary>
+    internal static void SuppressReleaseFling() => s_suppressReleaseFling = true;
+
+    /// <summary>Clears the selection-drag fling suppression (release/cancel).</summary>
+    internal static void ClearReleaseSuppression() => s_suppressReleaseFling = false;
+
     /// <summary>
     /// Subscribes to the platform touch stream when the assembly loads, so the pointer state is
     /// known from the very first press even though the physics is only touched during a scroll.
@@ -246,7 +258,7 @@ internal static class OpenHarmonyScrollPhysics
     /// </summary>
     internal static bool TryStartFling(OpenHarmonyView view, long maxSampleAgeMs = ReleaseWindowMs)
     {
-        if (!Enabled || view is null || !s_tracked.TryGetValue(view, out Tracked? tracked))
+        if (!Enabled || view is null || s_suppressReleaseFling || !s_tracked.TryGetValue(view, out Tracked? tracked))
         {
             return false;
         }
@@ -368,6 +380,7 @@ internal static class OpenHarmonyScrollPhysics
         if (args.Action == OpenHarmonyTouchAction.Cancel)
         {
             s_pointerDown = false;
+            s_suppressReleaseFling = false;
             CancelAll();
             return;
         }
@@ -376,6 +389,13 @@ internal static class OpenHarmonyScrollPhysics
             return;
         }
         s_pointerDown = false;
+        if (s_suppressReleaseFling)
+        {
+            // A text selection gesture owned this pointer; the renderer clears the flag when its
+            // release handler runs. Never fling out of a selection drag.
+            s_suppressReleaseFling = false;
+            return;
+        }
         if (s_lastScrolled is not { } reference ||
             !reference.TryGetTarget(out OpenHarmonyView? view) ||
             !view.Frame.Contains(args.X, args.Y))

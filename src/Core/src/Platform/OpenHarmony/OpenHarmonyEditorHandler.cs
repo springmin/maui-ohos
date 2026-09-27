@@ -15,6 +15,8 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
             [nameof(ITextStyle.TextColor)] = MapTextColor,
             [nameof(ITextStyle.Font)] = MapFont,
             [nameof(IPlaceholder.Placeholder)] = MapPlaceholder,
+            [nameof(ITextInput.CursorPosition)] = MapCursor,
+            [nameof(ITextInput.SelectionLength)] = MapCursor,
         };
 
     public OpenHarmonyEditorHandler() : base(Mapper) { }
@@ -34,12 +36,14 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
         base.ConnectHandler(platformView);
         OpenHarmonyBridge.TextInput += OnTextInput;
         OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
+        OpenHarmonyBridge.TextComposition += OnTextComposition;
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
         OpenHarmonyBridge.TextInput -= OnTextInput;
         OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
+        OpenHarmonyBridge.TextComposition -= OnTextComposition;
         base.DisconnectHandler(platformView);
     }
 
@@ -73,6 +77,12 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
         if (focused)
         {
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
+            if (PlatformView.CursorPosition < 0)
+            {
+                PlatformView.CursorPosition = PlatformView.Text?.Length ?? 0;
+            }
+            // Same caret/shell-input sync as the Entry handler (IME composition offset).
+            OpenHarmonyBridge.SetKeyboardCaret(PlatformView.CursorPosition);
         }
         OpenHarmonyBridge.RequestTextInput(focused);
         // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
@@ -111,6 +121,40 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
         }
     }
 
+    private int _compositionLength;
+
+    /// <summary>
+    /// IME preedit (PreviewText.value/offset): drawn at the caret until the shell commits the
+    /// text (empty composition + the new text through <see cref="OnTextInput"/>).
+    /// </summary>
+    private void OnTextComposition(string value, int offset)
+    {
+        if (!PlatformView.IsFocused)
+        {
+            return;
+        }
+        PlatformView.CompositionText = value;
+        PlatformView.CompositionOffset = offset;
+        if (string.IsNullOrEmpty(value))
+        {
+            int caret = offset + _compositionLength;
+            _compositionLength = 0;
+            PlatformView.CursorPosition = caret;
+            PlatformView.SelectionLength = 0;
+            if (VirtualView is Microsoft.Maui.Controls.InputView input)
+            {
+                input.CursorPosition = caret;
+                input.SelectionLength = 0;
+            }
+            OpenHarmonyBridge.SetKeyboardCaret(caret);
+        }
+        else
+        {
+            _compositionLength = value.Length;
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
         => new(Math.Min(widthConstraint, widthConstraint), Math.Min(120, heightConstraint));
 
@@ -125,4 +169,14 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
 
     public static void MapPlaceholder(OpenHarmonyEditorHandler handler, IEditor editor)
         => handler.PlatformView.Placeholder = ((IPlaceholder)editor).Placeholder;
+
+    public static void MapCursor(OpenHarmonyEditorHandler handler, IEditor editor)
+    {
+        handler.PlatformView.CursorPosition = ((ITextInput)editor).CursorPosition;
+        handler.PlatformView.SelectionLength = ((ITextInput)editor).SelectionLength;
+        if (handler.PlatformView.IsFocused)
+        {
+            OpenHarmonyBridge.SetKeyboardCaret(handler.PlatformView.CursorPosition);
+        }
+    }
 }

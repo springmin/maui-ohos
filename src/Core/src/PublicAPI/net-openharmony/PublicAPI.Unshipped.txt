@@ -1298,6 +1298,7 @@ static Microsoft.Maui.Platform.OpenHarmonyDeviceDisplay.Register() -> void
 static Microsoft.Maui.Platform.OpenHarmonyDiagnostics.Enabled.get -> bool
 static Microsoft.Maui.Platform.OpenHarmonyDiagnostics.Enabled.set -> void
 static Microsoft.Maui.Platform.OpenHarmonyDiagnostics.OutlinesDrawn.get -> int
+static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapCursor(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapFont(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapPlaceholder(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapText(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void

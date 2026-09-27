@@ -114,12 +114,14 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         base.ConnectHandler(platformView);
         OpenHarmonyBridge.TextInput += OnTextInput;
         OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
+        OpenHarmonyBridge.TextComposition += OnTextComposition;
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
         OpenHarmonyBridge.TextInput -= OnTextInput;
         OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
+        OpenHarmonyBridge.TextComposition -= OnTextComposition;
         base.DisconnectHandler(platformView);
     }
 
@@ -152,6 +154,42 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         }
     }
 
+    private int _compositionLength;
+
+    /// <summary>
+    /// IME preedit from the shell's input (PreviewText.value/offset): the platform view draws it
+    /// at the caret (underline/highlight) until the commit arrives as an empty composition plus
+    /// the new text through <see cref="OnTextInput"/>.
+    /// </summary>
+    private void OnTextComposition(string value, int offset)
+    {
+        if (!PlatformView.IsFocused)
+        {
+            return;
+        }
+        PlatformView.CompositionText = value;
+        PlatformView.CompositionOffset = offset;
+        if (string.IsNullOrEmpty(value))
+        {
+            // Compose committed or cancelled: the caret lands after the committed text.
+            int caret = offset + _compositionLength;
+            _compositionLength = 0;
+            PlatformView.CursorPosition = caret;
+            PlatformView.SelectionLength = 0;
+            if (VirtualView is Microsoft.Maui.Controls.InputView input)
+            {
+                input.CursorPosition = caret;
+                input.SelectionLength = 0;
+            }
+            OpenHarmonyBridge.SetKeyboardCaret(caret);
+        }
+        else
+        {
+            _compositionLength = value.Length;
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
     // The platform view is the source of truth; the virtual view is updated through the
     // read-only IsFocused bindable key so app code sees IsFocused/Focused/Unfocused.
     private void SetFocus(bool focused)
@@ -160,6 +198,13 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         if (focused)
         {
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
+            if (PlatformView.CursorPosition < 0)
+            {
+                PlatformView.CursorPosition = PlatformView.Text?.Length ?? 0;
+            }
+            // The shell's input caret is what the IME composes at; keep it on the managed caret
+            // (the mapper refreshes it on every CursorPosition change).
+            OpenHarmonyBridge.SetKeyboardCaret(PlatformView.CursorPosition);
         }
         OpenHarmonyBridge.RequestTextInput(focused);
         // Name the ArkUI target as well (the shell's registerFocusSink handler): with the input
@@ -229,5 +274,9 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
     {
         handler.PlatformView.CursorPosition = ((ITextInput)entry).CursorPosition;
         handler.PlatformView.SelectionLength = ((ITextInput)entry).SelectionLength;
+        if (handler.PlatformView.IsFocused)
+        {
+            OpenHarmonyBridge.SetKeyboardCaret(handler.PlatformView.CursorPosition);
+        }
     }
 }

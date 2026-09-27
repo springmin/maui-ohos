@@ -255,8 +255,61 @@ public class OpenHarmonyView
     }
 
     // Image support
-    public byte[]? ImageBytes { get; set; }
+    private byte[]? _imageBytes;
+    private int _imageGeneration;
+    private int _imageStageGeneration = -1;   // generation whose preview/final pass already ran
+    private int _imageFailedGeneration = -1;  // generation whose decode failed (placeholder shown)
+
+    /// <summary>
+    /// Encoded image bytes drawn by this view. A different array starts a new image generation:
+    /// the progressive decode state (preview pass, placeholder) is reset for it, and the host
+    /// cache keys on content + requested size, so the generation stays a managed-side concern.
+    /// </summary>
+    public byte[]? ImageBytes
+    {
+        get => _imageBytes;
+        set
+        {
+            if (ReferenceEquals(_imageBytes, value))
+            {
+                return;
+            }
+            _imageBytes = value;
+            _imageGeneration++;
+            ImageDecodePasses = 0;
+            _imageStageGeneration = -1;
+            _imageFailedGeneration = -1;
+        }
+    }
+
     public Aspect ImageAspect { get; set; } = Aspect.AspectFit;
+
+    // Progressive decode (P2b-IMG): a destination at least ImagePreviewMinEdgePx long decodes a
+    // coarse preview first (fast, bounded), then requests a redraw that decodes at the display
+    // size; a smaller destination decodes once at the display size. The host never decodes the
+    // full source for the draw path, so a large image cannot OOM the frame.
+    internal const int ImagePreviewMinEdgePx = 128;
+    internal const int ImagePreviewDivisor = 8;
+
+    /// <summary>Decode passes completed for the current bytes: 0 none, 1 preview, 2 display size.</summary>
+    internal int ImageDecodePasses { get; private set; }
+
+    /// <summary>Last decode size requested from the host (tests/diagnostics).</summary>
+    internal int LastImageDecodeWidth { get; private set; }
+    internal int LastImageDecodeHeight { get; private set; }
+
+    /// <summary>
+    /// Test seam: receives the requesting view plus every image draw request, stage 1 = preview,
+    /// 2 = display size. The view is part of the callback so a test can pin one view's contract
+    /// while other image views in the tree keep drawing.
+    /// </summary>
+    internal static Action<OpenHarmonyView, RectF, int, int, int>? ImageDrawRequested { get; set; }
+
+    /// <summary>Test seam: receives the view whose failed decode fell back to the placeholder.</summary>
+    internal static Action<OpenHarmonyView, RectF>? ImagePlaceholderDrawn { get; set; }
+
+    /// <summary>Test seam: replaces the host blit (data, x, y, w, h, decodeW, decodeH).</summary>
+    internal static Func<byte[], int, int, int, int, int, int, bool?>? ImageDrawOverride { get; set; }
 
     // CheckBox support
     public bool IsCheckBox { get; set; }
@@ -1398,6 +1451,14 @@ public class OpenHarmonyView
         return value.Length * FontSize * 0.55f;
     }
 
+    private static readonly Color s_imagePlaceholderFill = Color.FromArgb("#FFE8E8E8");
+    private static readonly Color s_imagePlaceholderStroke = Color.FromArgb("#FFBDBDBD");
+
+    /// <summary>
+    /// Draws the image progressively: one coarse preview decode for a large destination (fast,
+    /// bounded), then the display-size decode on the frame the redraw requests. A small
+    /// destination skips the preview; a failed decode falls back to a neutral placeholder.
+    /// </summary>
     private void DrawImage(MauiCanvas canvas, RectF frame)
     {
         float imageWidth = frame.Width;
@@ -1415,8 +1476,100 @@ public class OpenHarmonyView
         }
         var destination = new RectF(x, y, imageWidth, imageHeight);
         ImageDrawn?.Invoke(destination);
-        Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
-            ImageBytes!, (int)x, (int)y, (int)imageWidth, (int)imageHeight);
+        if (destination.Width <= 0.5f || destination.Height <= 0.5f)
+        {
+            return;
+        }
+        if (_imageFailedGeneration == _imageGeneration)
+        {
+            DrawImagePlaceholder(canvas, destination);
+            return;
+        }
+        byte[] bytes = ImageBytes!;
+        int targetWidth = Math.Max(1, (int)MathF.Round(destination.Width));
+        int targetHeight = Math.Max(1, (int)MathF.Round(destination.Height));
+        bool progressive = Math.Max(targetWidth, targetHeight) >= ImagePreviewMinEdgePx;
+        if (progressive && _imageStageGeneration != _imageGeneration)
+        {
+            // First sight of this image: decode the coarse preview, then ask for the frame that
+            // replaces it with the display-size decode. The host sizes the decode, so the
+            // preview never pays for the full source.
+            int previewWidth = Math.Max(1, targetWidth / ImagePreviewDivisor);
+            int previewHeight = Math.Max(1, targetHeight / ImagePreviewDivisor);
+            LastImageDecodeWidth = previewWidth;
+            LastImageDecodeHeight = previewHeight;
+            ImageDrawRequested?.Invoke(this, destination, previewWidth, previewHeight, 1);
+            bool? preview = DrawImageBytes(bytes, destination, previewWidth, previewHeight);
+            if (preview is true)
+            {
+                ImageDecodePasses = 1;
+                _imageStageGeneration = _imageGeneration;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.RequestRedraw();
+                return;
+            }
+            if (preview is null)
+            {
+                // No sized host path (older host library, or tests): keep the existing behavior.
+                LegacyDrawImageBytes(bytes, destination);
+                _imageStageGeneration = _imageGeneration;
+                return;
+            }
+            ImageDecodePasses = 0;
+            _imageFailedGeneration = _imageGeneration;
+            DrawImagePlaceholder(canvas, destination);
+            return;
+        }
+        LastImageDecodeWidth = targetWidth;
+        LastImageDecodeHeight = targetHeight;
+        ImageDrawRequested?.Invoke(this, destination, targetWidth, targetHeight, 2);
+        bool? final = DrawImageBytes(bytes, destination, targetWidth, targetHeight);
+        if (final is true)
+        {
+            ImageDecodePasses = 2;
+            _imageStageGeneration = _imageGeneration;
+        }
+        else if (final is null)
+        {
+            LegacyDrawImageBytes(bytes, destination);
+            _imageStageGeneration = _imageGeneration;
+        }
+        else if (ImageDecodePasses <= 0)
+        {
+            // The decode failed and no preview is on screen: degrade to the placeholder.
+            _imageFailedGeneration = _imageGeneration;
+            DrawImagePlaceholder(canvas, destination);
+        }
+        // A failed display-size decode keeps the already-drawn preview visible.
+    }
+
+    /// <summary>The host-sized blit; the test seam can replace it (null = host unavailable).</summary>
+    private static bool? DrawImageBytes(byte[] bytes, RectF destination, int decodeWidth, int decodeHeight)
+    {
+        if (ImageDrawOverride is { } over)
+        {
+            return over(bytes, (int)destination.X, (int)destination.Y, (int)destination.Width,
+                        (int)destination.Height, decodeWidth, decodeHeight);
+        }
+        return Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytesSized(
+            bytes, (int)destination.X, (int)destination.Y, (int)destination.Width,
+            (int)destination.Height, decodeWidth, decodeHeight);
+    }
+
+    /// <summary>The pre-P2b blit: full-resolution decode, used when the host lacks the sized path.</summary>
+    private static void LegacyDrawImageBytes(byte[] bytes, RectF destination)
+        => Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
+            bytes, (int)destination.X, (int)destination.Y, (int)destination.Width,
+            (int)destination.Height);
+
+    /// <summary>Neutral fallback for an undecodable image (no exception, no blank frame).</summary>
+    private void DrawImagePlaceholder(MauiCanvas canvas, RectF destination)
+    {
+        canvas.FillColor = s_imagePlaceholderFill;
+        canvas.FillRectangle(destination.X, destination.Y, destination.Width, destination.Height);
+        canvas.StrokeColor = s_imagePlaceholderStroke;
+        canvas.StrokeSize = 1;
+        canvas.DrawRectangle(destination.X, destination.Y, destination.Width, destination.Height);
+        ImagePlaceholderDrawn?.Invoke(this, destination);
     }
 
     private void DrawFlyoutChrome(MauiCanvas canvas, RectF frame)

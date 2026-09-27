@@ -182,3 +182,44 @@ What a public rc.1 surface would need (documented once):
      returns bool / a VisualElement.KeyDown routed event) so a matched accelerator can stop
      ArkUI from also processing the key; the current host callback is void, so consumption
      cannot be reported back and the slice only records/invokes.
+
+## Image decoding and drawing (`OpenHarmonyImageHandler`, `OpenHarmonyView`)
+
+The slice has no native image widget: every image-like control maps onto
+`OpenHarmonyView.ImageBytes` (encoded File/Stream/Uri bytes; a `FontImageSource` instead goes
+through the compositor's text path, documented in the handler). The view draws the bytes
+through the host canvas, and since P2b-IMG the decode is sized to the destination instead of
+decoding the source at full resolution:
+
+* **Generation.** Replacing `ImageBytes` (new source, reload, edited file) starts a new
+  generation and resets the progressive state; the host cache is content-keyed, so a
+  generation bump re-decodes once and repeated frames hit the cache.
+* **Progressive pass.** A destination whose long edge is at least `ImagePreviewMinEdgePx`
+  (128) first decodes a coarse preview at `destination / ImagePreviewDivisor` (8) through
+  `OpenHarmonyCanvas.DrawImageBytesSized`, then calls `OpenHarmonyBridge.RequestRedraw`; the
+  next frame decodes at the display size and replaces the preview. A smaller destination
+  decodes once at its own size (no preview frame).
+* **Failure.** A decode failure (preview or single pass) draws a neutral placeholder and is
+  not retried for that generation (no per-frame decode loop); a failed display-size decode
+  after a successful preview keeps the preview visible. Drawing never throws.
+* **Older host.** `DrawImageBytesSized` returns null when the host library has no
+  `ohos_host_draw_image_bytes_sized` (or no native host in tests); the view then uses the
+  pre-P2b full-resolution `DrawImageBytes`, so behavior degrades to before the feature.
+* **Test seams.** `ImageDrawRequested` / `ImagePlaceholderDrawn` receive the requesting view
+  (other images in the tree keep drawing while one view's contract is pinned) and
+  `ImageDrawOverride` replaces the host blit. The interaction suite pins preview -> final,
+  the small single-pass path, the placeholder-once rule and the host contract.
+
+Host side (`ohos_host_draw_image_bytes_sized`, `openharmony_host.c`): the decoder is asked
+for the requested size through `OH_DecodingOptions_SetDesiredSize` (API 12+, resolved softly
+so an image library without it keeps the full-resolution decode), each edge is clamped to
+`OHOS_IMAGE_DECODE_MAX_EDGE` (4096), and the pixelmap cache key carries content hash, length
+and the requested decode size, so a window resize misses once and the previous entry ages
+out of the same LRU/byte budget. A local bench of a 3.27 MB JPEG (3400x2550, target
+1032x200) measured 86.3 ms full decode vs 63.4 ms downsample and a retained bitmap of
+34.7 MB vs 0.8 MB; the 4.77 MB 4000x3000 case was 117.3 ms vs 88.2 ms (48.0 MB vs 3.5 MB
+retained). See the packaging doc's P2b-IMG section for the on-device commands.
+
+Limits: `AspectFit` centers a square only (the platform view does not track intrinsic size
+yet), the placeholder is the documented undecodable fallback, and animated formats are not
+sampled - a still frame is drawn.

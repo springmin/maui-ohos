@@ -87,7 +87,29 @@ public class OpenHarmonyView
     /// <summary>Invoked when a tap lands inside this view (buttons wire it to SendClicked).</summary>
     public Action? Tap { get; set; }
 
-    public bool Pressed { get; set; }
+    private bool _pressed;
+
+    /// <summary>
+    /// Touch-down state. The setter drives the press-progress transition (see
+    /// <see cref="PressProgress"/>), so the drawn pressed tint eases in/out instead of snapping.
+    /// </summary>
+    public bool Pressed
+    {
+        get => _pressed;
+        set
+        {
+            if (_pressed == value)
+            {
+                return;
+            }
+            _pressed = value;
+            (_pressChannel ??= new ProgressChannel(_pressed ? 0f : 1f))
+                .TransitionTo(_pressed ? 1f : 0f, PressDurationMs);
+        }
+    }
+
+    /// <summary>Press feedback progress, 0 (rest) to 1 (fully pressed).</summary>
+    internal float PressProgress => _pressChannel?.Value ?? (_pressed ? 1f : 0f);
 
     // Entry support
     private bool _isTextEntry;
@@ -238,12 +260,54 @@ public class OpenHarmonyView
 
     // CheckBox support
     public bool IsCheckBox { get; set; }
-    public bool IsChecked { get; set; }
+
+    private bool _isChecked;
+
+    /// <summary>Checked state; the setter eases the drawn check mark in/out.</summary>
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set
+        {
+            if (_isChecked == value)
+            {
+                return;
+            }
+            _isChecked = value;
+            (_checkChannel ??= new ProgressChannel(_isChecked ? 0f : 1f))
+                .TransitionTo(_isChecked ? 1f : 0f, CheckDurationMs);
+        }
+    }
+
+    /// <summary>Check-mark draw-on progress, 0 (unchecked) to 1 (checked).</summary>
+    internal float CheckProgress => _checkChannel?.Value ?? (_isChecked ? 1f : 0f);
+
     public Color CheckBoxColor { get; set; } = Colors.White;
 
     // Switch support
     public bool IsSwitch { get; set; }
-    public bool IsOn { get; set; }
+
+    private bool _isOn;
+
+    /// <summary>Switch state; the setter eases the knob/track between the two poses.</summary>
+    public bool IsOn
+    {
+        get => _isOn;
+        set
+        {
+            if (_isOn == value)
+            {
+                return;
+            }
+            _isOn = value;
+            (_switchChannel ??= new ProgressChannel(_isOn ? 0f : 1f))
+                .TransitionTo(_isOn ? 1f : 0f, SwitchDurationMs);
+        }
+    }
+
+    /// <summary>Knob/track progress, 0 (off) to 1 (on).</summary>
+    internal float SwitchProgress => _switchChannel?.Value ?? (_isOn ? 1f : 0f);
+
     public Color SwitchTrackColor { get; set; } = Colors.DimGray;
     public Color SwitchThumbColor { get; set; } = Colors.White;
 
@@ -338,6 +402,117 @@ public class OpenHarmonyView
         else
         {
             Interlocked.Decrement(ref s_animationCount);
+        }
+    }
+
+    // Control-state transitions (P1a-ANIM) ------------------------------------------------
+    // Press feedback, the switch knob and the check mark are the slice's common state changes.
+    // Each channel is one cached <see cref="ProgressChannel"/> on the shared frame loop: the
+    // first transition lazily creates it, later transitions reuse it, no per-frame allocation.
+    private const long PressDurationMs = 90;
+    private const long SwitchDurationMs = 160;
+    private const long CheckDurationMs = 140;
+
+    private ProgressChannel? _pressChannel;
+    private ProgressChannel? _switchChannel;
+    private ProgressChannel? _checkChannel;
+
+    /// <summary>
+    /// One animated 0..1 progress value on the shared frame loop. The owning view reads
+    /// <see cref="Value"/> while drawing; the channel re-registers itself on the first
+    /// transition and retires when it reaches its target, so idle views never tick.
+    /// </summary>
+    private sealed class ProgressChannel : IOpenHarmonyAnimation
+    {
+        private float _value;
+        private float _from;
+        private float _target;
+        private long _startMs;
+        private long _durationMs = 1;
+        private bool _active;
+
+        internal ProgressChannel(float value)
+        {
+            _value = value;
+            _target = value;
+        }
+
+        internal float Value => _value;
+
+        public bool NeedsRedraw => true;
+
+        /// <summary>Eases to <paramref name="target"/>; snaps under reduce-motion.</summary>
+        internal void TransitionTo(float target, long durationMs)
+        {
+            if (OpenHarmonyMotion.ReduceMotion)
+            {
+                Snap(target);
+                return;
+            }
+            if (_active && Math.Abs(target - _target) < 0.0001f)
+            {
+                return;
+            }
+            _from = _value;
+            _target = target;
+            _startMs = OpenHarmonyAnimationLoop.NowMs;
+            _durationMs = Math.Max(1, durationMs);
+            if (!_active)
+            {
+                _active = true;
+                OpenHarmonyAnimationLoop.Register(this);
+            }
+        }
+
+        internal void Snap(float value)
+        {
+            _value = value;
+            _target = value;
+            if (_active)
+            {
+                _active = false;
+                OpenHarmonyAnimationLoop.Unregister(this);
+            }
+            RequestRepaint();
+        }
+
+        public bool Step(long nowMs, float dtSeconds)
+        {
+            if (!_active)
+            {
+                return false;
+            }
+            float t = (nowMs - _startMs) / (float)_durationMs;
+            if (t >= 1f)
+            {
+                _value = _target;
+                // Retire explicitly: the loop removes the finished entry, but a later
+                // TransitionTo must see the channel idle so it re-registers.
+                _active = false;
+                // The final frame must be painted even though this step retires the channel.
+                RequestRepaint();
+                return false;
+            }
+            if (t < 0f)
+            {
+                t = 0f;
+            }
+            // Cubic ease-out: fast response with a soft settle.
+            float inverse = 1f - t;
+            _value = _from + (_target - _from) * (1f - inverse * inverse * inverse);
+            return true;
+        }
+
+        private static void RequestRepaint()
+        {
+            try
+            {
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.RequestRedraw();
+            }
+            catch (Exception)
+            {
+                // No host: the next input/frame repaint shows the settled value.
+            }
         }
     }
 
@@ -788,6 +963,19 @@ public class OpenHarmonyView
         Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.ClearEffects();
     }
 
+    /// <summary>Fills this view's background rect (rounded when a corner radius is set).</summary>
+    internal void FillBackgroundRect(MauiCanvas canvas, RectF frame)
+    {
+        if (CornerRadius > 0)
+        {
+            canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
+        }
+        else
+        {
+            canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+        }
+    }
+
     public virtual void Draw(MauiCanvas canvas)
     {
         RectF frame = Frame;
@@ -797,14 +985,19 @@ public class OpenHarmonyView
         }
         if (Background is not null)
         {
-            canvas.FillColor = Pressed ? Colors.OrangeRed : BackgroundForDraw!;
-            if (CornerRadius > 0)
+            canvas.FillColor = BackgroundForDraw!;
+            FillBackgroundRect(canvas, frame);
+            // Press feedback: the previous static pressed look was a full OrangeRed fill. Drawing
+            // it as an overlay whose alpha follows the press progress keeps that exact end state,
+            // eases in/out, and allocates nothing per frame.
+            float press = PressProgress;
+            if (press > 0.001f)
             {
-                canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
-            }
-            else
-            {
-                canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+                float savedAlpha = canvas.Alpha;
+                canvas.Alpha = savedAlpha * press;
+                canvas.FillColor = Colors.OrangeRed;
+                FillBackgroundRect(canvas, frame);
+                canvas.Alpha = savedAlpha;
             }
         }
         // Focus affordance for the self-drawn route: the PE2/OpenHarmonyFocusManager path marks
@@ -1562,12 +1755,29 @@ public class OpenHarmonyView
         canvas.StrokeColor = CheckBoxColor;
         canvas.StrokeSize = 2;
         canvas.DrawRoundedRectangle(x, y, side, side, 4);
-        if (IsChecked)
+        // The check mark draws on with the animated progress: the first leg fills 0..0.5, the
+        // second 0.5..1, and progress 1 reproduces the previous static two lines exactly.
+        float progress = CheckProgress;
+        if (progress > 0.01f)
         {
+            float p1x = x + side * 0.25f;
+            float p1y = y + side * 0.55f;
+            float mx = x + side * 0.45f;
+            float my = y + side * 0.75f;
+            float p2x = x + side * 0.78f;
+            float p2y = y + side * 0.28f;
+            float first = Math.Min(1f, progress * 2f);
+            float second = Math.Max(0f, progress * 2f - 1f);
             canvas.StrokeColor = CheckBoxColor;
             canvas.StrokeSize = 3;
-            canvas.DrawLine(x + side * 0.25f, y + side * 0.55f, x + side * 0.45f, y + side * 0.75f);
-            canvas.DrawLine(x + side * 0.45f, y + side * 0.75f, x + side * 0.78f, y + side * 0.28f);
+            if (first > 0f)
+            {
+                canvas.DrawLine(p1x, p1y, p1x + (mx - p1x) * first, p1y + (my - p1y) * first);
+            }
+            if (second > 0f)
+            {
+                canvas.DrawLine(mx, my, mx + (p2x - mx) * second, my + (p2y - my) * second);
+            }
         }
     }
 
@@ -1578,10 +1788,21 @@ public class OpenHarmonyView
         float x = frame.X + (frame.Width - width) / 2f;
         float y = frame.Y + (frame.Height - height) / 2f;
         float radius = height / 2f;
-        canvas.FillColor = IsOn ? SliderMinimumTrackColor : SwitchTrackColor;
+        float progress = SwitchProgress;
+        // Track colour: fill the off colour, then the on colour as an alpha overlay following
+        // the progress. No per-frame allocation, and progress 1 reproduces the on colour exactly.
+        canvas.FillColor = SwitchTrackColor;
         canvas.FillRoundedRectangle(x, y, width, height, radius);
+        if (progress > 0.001f)
+        {
+            float savedAlpha = canvas.Alpha;
+            canvas.Alpha = savedAlpha * progress;
+            canvas.FillColor = SliderMinimumTrackColor;
+            canvas.FillRoundedRectangle(x, y, width, height, radius);
+            canvas.Alpha = savedAlpha;
+        }
         float thumbRadius = radius - 3f;
-        float thumbX = IsOn ? x + width - radius : x + radius;
+        float thumbX = x + radius + (width - radius * 2f) * progress;
         canvas.FillColor = SwitchThumbColor;
         canvas.FillCircle(thumbX, y + radius, thumbRadius);
     }

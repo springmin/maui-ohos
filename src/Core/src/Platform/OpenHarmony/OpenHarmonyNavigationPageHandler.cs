@@ -32,26 +32,29 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         base.ConnectHandler(platformView);
         if (VirtualView is { } navigationPage)
         {
-            navigationPage.Pushed += OnStackChanged;
-            navigationPage.Popped += OnStackChanged;
+            navigationPage.Pushed += OnPushed;
+            navigationPage.Popped += OnPopped;
         }
         UpdateNavigationBar();
+        _previousPage = VirtualView?.CurrentPage;
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
         if (VirtualView is { } navigationPage)
         {
-            navigationPage.Pushed -= OnStackChanged;
-            navigationPage.Popped -= OnStackChanged;
+            navigationPage.Pushed -= OnPushed;
+            navigationPage.Popped -= OnPopped;
         }
         base.DisconnectHandler(platformView);
     }
 
     /// <summary>
     /// MAUI's navigation pipeline (MauiNavigationImpl) asks the platform handler to perform a
-    /// navigation. There is no transition animation here, so the new stack is reported back
-    /// immediately - that call also completes the pending <c>PushAsync</c>/<c>PopAsync</c>.
+    /// navigation. The stack is reported back immediately (that call also completes the pending
+    /// PushAsync/PopAsync); the visible page then enters through the shared frame loop (see
+    /// OpenHarmonyPageTransitions) while the outgoing page's "shared:" elements are captured in
+    /// OnStackChanged for the minimal shared transition.
     /// </summary>
     public override void Invoke(string command, object? args)
     {
@@ -68,10 +71,25 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         base.Invoke(command, args);
     }
 
-    private void OnStackChanged(object? sender, NavigationEventArgs args)
+    /// <summary>The page that was current at the last stack change (the outgoing page).</summary>
+    private Page? _previousPage;
+
+    private void OnPushed(object? sender, NavigationEventArgs args) => OnStackChanged(forward: true);
+
+    private void OnPopped(object? sender, NavigationEventArgs args) => OnStackChanged(forward: false);
+
+    private void OnStackChanged(bool forward)
     {
         UpdateNavigationBar();
         OpenHarmonyBridge.RequestRedraw();
+        // The outgoing page is the one that was current before this event: CurrentPage already
+        // points at the incoming page here (MAUI commits the stack before raising Pushed/Popped).
+        Page? outgoing = _previousPage;
+        Page? current = VirtualView?.CurrentPage;
+        _previousPage = current;
+        OpenHarmonySharedTransition.Capture(outgoing);
+        OpenHarmonySharedTransition.Run(current);
+        OpenHarmonyPageTransitions.Enter(current, forward);
     }
 
     private Page? _toolbarPage;

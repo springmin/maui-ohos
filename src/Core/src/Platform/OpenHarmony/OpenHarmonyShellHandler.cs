@@ -65,6 +65,9 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
     /// <summary>Header text rows in FlyoutItems; the flyout selection subtracts them.</summary>
     private int _flyoutLeadingRows;
 
+    /// <summary>Section stack depth at the last Navigated, so a push/pop is told from a tab switch.</summary>
+    private int _lastStackDepth = 1;
+
     protected override OpenHarmonyView CreatePlatformView()
     {
         // The bottom bar reuses the tabbed page chrome (titles + selection).
@@ -117,7 +120,9 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         if (VirtualView is { } shell)
         {
             shell.PropertyChanged += OnShellPropertyChanged;
+            shell.Navigating += OnShellNavigating;
             shell.Navigated += OnShellNavigated;
+            _lastStackDepth = CurrentStackDepth(shell);
         }
         MapShell(this, VirtualView!);
         if (VirtualView is { } connectedShell)
@@ -131,6 +136,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         if (VirtualView is { } shell)
         {
             shell.PropertyChanged -= OnShellPropertyChanged;
+            shell.Navigating -= OnShellNavigating;
             shell.Navigated -= OnShellNavigated;
         }
         DetachSearchHandler();
@@ -138,12 +144,33 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         base.DisconnectHandler(platformView);
     }
 
+    /// <summary>
+    /// Captures "shared:" elements of the page that is about to leave the draw tree, before the
+    /// navigation commit replaces the shell's CurrentPage.
+    /// </summary>
+    private void OnShellNavigating(object? sender, ShellNavigatingEventArgs args)
+        => OpenHarmonySharedTransition.Capture(VirtualView?.CurrentPage);
+
     private void OnShellNavigated(object? sender, ShellNavigatedEventArgs args)
     {
         MapShell(this, VirtualView!);
         UpdateSearchHandler(VirtualView!);
         ArrangeContent();
         OpenHarmonyBridge.RequestRedraw();
+        // Push/pop (the stack depth moved) gets the enter pass; shell item/section/content
+        // switches keep the instant commit. The depth is read before the trackers update.
+        if (VirtualView is { } shell)
+        {
+            int depth = CurrentStackDepth(shell);
+            bool? forward = depth > _lastStackDepth ? true : depth < _lastStackDepth ? false : (bool?)null;
+            _lastStackDepth = depth;
+            if (forward is bool direction)
+            {
+                Page? current = shell.CurrentPage;
+                OpenHarmonySharedTransition.Run(current);
+                OpenHarmonyPageTransitions.Enter(current, direction);
+            }
+        }
     }
 
     private void OnShellPropertyChanged(object? sender, PropertyChangedEventArgs args)

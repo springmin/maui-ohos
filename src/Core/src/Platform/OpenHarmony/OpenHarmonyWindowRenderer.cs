@@ -297,6 +297,13 @@ public sealed class OpenHarmonyWindowRenderer
         {
             return;
         }
+        // The transform must cover the view AND its subtree (a page fade has to carry the
+        // page's content), and it must not leak into the next sibling. ICanvas.SaveState
+        // restores the transform; alpha is a backend field outside that stack, so it is
+        // captured and written back with the same discipline. The state lives outside the
+        // platform-view branch so every exit (including the early returns below) can pop it.
+        bool transformed = false;
+        float previousAlpha = 1f;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
             // View transforms (animations set these): opacity, translation, scale, rotation.
@@ -309,15 +316,13 @@ public sealed class OpenHarmonyWindowRenderer
             bool dimmed = !view.IsEnabled ||
                           (view as Microsoft.Maui.Controls.VisualElement)?.IsEnabled == false;
             platform.Dimmed = dimmed;
-            bool transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
-                               view.Scale != 1.0 || view.Rotation != 0;
+            transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
+                          view.Scale != 1.0 || view.Rotation != 0;
+            previousAlpha = _canvas.Alpha;
             if (transformed)
             {
                 _canvas.SaveState();
                 double effectiveOpacity = view.Opacity;
-                if (view is Microsoft.Maui.Controls.Button)
-                {
-                }
                 _canvas.Alpha = (float)Math.Clamp(effectiveOpacity, 0, 1);
                 if (view.TranslationX != 0 || view.TranslationY != 0)
                 {
@@ -386,6 +391,7 @@ public sealed class OpenHarmonyWindowRenderer
                     DrawView(flyoutContent);
                     _canvas.RestoreState();
                 }
+                RestoreTransform(_canvas, transformed, previousAlpha);
                 return;
             }
             if (platform.IsScrollView)
@@ -399,6 +405,7 @@ public sealed class OpenHarmonyWindowRenderer
                     DrawView(child);
                 }
                 _canvas.RestoreState();
+                RestoreTransform(_canvas, transformed, previousAlpha);
                 return;
             }
         }
@@ -406,6 +413,22 @@ public sealed class OpenHarmonyWindowRenderer
         {
             DrawView(child);
         }
+        RestoreTransform(_canvas, transformed, previousAlpha);
+    }
+
+    /// <summary>
+    /// Pops the transform state pushed for a transformed view (see <see cref="DrawView"/>).
+    /// ICanvas.SaveState restores the transform stack; the backend's alpha field sits outside
+    /// that stack, so it is written back explicitly. Called at every exit of the subtree draw.
+    /// </summary>
+    private static void RestoreTransform(MauiCanvas canvas, bool transformed, float previousAlpha)
+    {
+        if (!transformed)
+        {
+            return;
+        }
+        canvas.Alpha = previousAlpha;
+        canvas.RestoreState();
     }
 
     /// <summary>

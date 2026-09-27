@@ -289,10 +289,11 @@ public class OpenHarmonyTextView : OpenHarmonyView
         if (backgroundPaint is not null)
         {
             float alpha = canvas.Alpha;
-            if (Pressed || Dimmed)
-            {
-                canvas.Alpha = alpha * 0.5f;
-            }
+            // Press feedback over a gradient/image fill: ease the same 50% dim in/out with the
+            // press progress instead of snapping.
+            float fade = Dimmed ? 0.5f : 0f;
+            fade = Math.Min(1f, fade + 0.5f * PressProgress);
+            canvas.Alpha = alpha * (1f - fade);
             OpenHarmonyPaintRenderer.Fill(canvas, backgroundPaint, frame, null, CornerRadius);
             canvas.Alpha = alpha;
         }
@@ -753,14 +754,16 @@ public sealed class OpenHarmonyShapeView : OpenHarmonyView
         }
         else if (Background is not null)
         {
-            canvas.FillColor = Pressed ? Colors.OrangeRed : BackgroundForDraw!;
-            if (CornerRadius > 0)
+            canvas.FillColor = BackgroundForDraw!;
+            FillBackgroundRect(canvas, frame);
+            float press = PressProgress;
+            if (press > 0.001f)
             {
-                canvas.FillRoundedRectangle(frame.X, frame.Y, frame.Width, frame.Height, CornerRadius);
-            }
-            else
-            {
-                canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
+                float savedAlpha = canvas.Alpha;
+                canvas.Alpha = savedAlpha * press;
+                canvas.FillColor = Colors.OrangeRed;
+                FillBackgroundRect(canvas, frame);
+                canvas.Alpha = savedAlpha;
             }
         }
         // MAUI's Shape.PathForBounds returns geometry in the shape's own coordinate space (starting

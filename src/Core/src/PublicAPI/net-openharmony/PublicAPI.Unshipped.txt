@@ -618,6 +618,7 @@ Microsoft.Maui.Platform.OpenHarmonySearchBarHandler
 Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.OpenHarmonySearchBarHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonySecureStorage
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.GetAsync(string! key) -> System.Threading.Tasks.Task<string?>!
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.IsHardwareBacked.get -> bool
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.OpenHarmonySecureStorage(string? path = null) -> void
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.Remove(string! key) -> bool
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.RemoveAll() -> void

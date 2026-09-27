@@ -1,6 +1,7 @@
-// Managed side of the HUKS bridge: requests are queued with ids and completed by the ArkTS
-// sink through ohos_host_keystore_complete. When no sink answers (tests, headless, older
-// hosts) every call fails fast and callers fall back to the file-based implementation.
+// Managed side of the HUKS bridge: requests are queued with ids and completed by the host's
+// native keystore engine (or, when the device has no libhuks_ndk.z.so, by the ArkTS sink) through
+// ohos_host_keystore_complete. When no answer arrives (tests, headless, older hosts) every call
+// fails fast and callers fall back to the file-based implementation.
 using System.Collections.Concurrent;
 using System.Text;
 using Microsoft.OpenHarmony.Hosting;
@@ -38,6 +39,41 @@ internal static partial class OpenHarmonyKeystore
     public static async Task<bool> EnsureKeyAsync(string alias, int timeoutMs = 1500)
         => await ExecuteAsync("generate", alias, string.Empty, timeoutMs) is not null;
 
+    public static async Task<bool> DeleteKeyAsync(string alias, int timeoutMs = 1500)
+        => await ExecuteAsync("delete", alias, string.Empty, timeoutMs) is not null;
+
+    /// <summary>
+    /// True when the host library reports the native HUKS engine (libhuks_ndk.z.so) on this
+    /// device: the value key is generated and kept by the system keystore. False (off-device,
+    /// reduced image, older host) means the store keeps the documented per-install file key.
+    /// The answer is a device capability and is cached for the process lifetime.
+    /// </summary>
+    public static bool IsAvailable
+    {
+        get
+        {
+            if (s_available is bool cached)
+            {
+                return cached;
+            }
+            bool available;
+            try
+            {
+                available = KeystoreAvailable() == 1;
+            }
+            catch
+            {
+                // No host library (tests/desktop) or a host without the export: there is no
+                // keystore, and a status getter never throws.
+                available = false;
+            }
+            s_available = available;
+            return available;
+        }
+    }
+
+    private static bool? s_available;
+
     private static async Task<string?> ExecuteAsync(string op, string alias, string dataBase64, int timeoutMs)
     {
         if (s_unavailable)
@@ -74,4 +110,7 @@ internal static partial class OpenHarmonyKeystore
 
     [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_request", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf8)]
     private static partial void RequestNative(int requestId, string op, string alias, string dataBase64);
+
+    [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_available")]
+    private static partial int KeystoreAvailable();
 }

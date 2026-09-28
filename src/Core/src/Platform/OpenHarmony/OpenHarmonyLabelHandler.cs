@@ -11,6 +11,7 @@ public sealed class OpenHarmonyLabelHandler : OpenHarmonyViewHandler<ILabel>
         new PropertyMapper<ILabel, OpenHarmonyLabelHandler>(ViewMapper)
         {
             [nameof(ILabel.Text)] = MapText,
+            [nameof(Microsoft.Maui.Controls.Label.FormattedText)] = MapFormattedText,
             [nameof(ILabel.TextColor)] = MapTextColor,
             [nameof(ITextStyle.Font)] = MapFont,
             [nameof(ITextStyle.CharacterSpacing)] = MapCharacterSpacing,
@@ -94,10 +95,49 @@ public sealed class OpenHarmonyLabelHandler : OpenHarmonyViewHandler<ILabel>
     }
 
     public static void MapText(OpenHarmonyLabelHandler handler, ILabel label)
-        => handler.PlatformView.Text = label.Text;
+        => SyncText(handler, label);
+
+    /// <summary>
+    /// The label's span list is desugared into platform runs. FormattedText and Text are two
+    /// separate bindable properties that clear each other, and the change notifications arrive in
+    /// both orders (Text then FormattedText=null, or FormattedText then Text=""), so both mappers
+    /// re-read the pair and settle on one mode instead of trusting the event's own property.
+    /// </summary>
+    public static void MapFormattedText(OpenHarmonyLabelHandler handler, ILabel label)
+        => SyncText(handler, label);
+
+    private static void SyncText(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        OpenHarmonyTextView view = handler.PlatformView;
+        OpenHarmonyTextRun[]? runs = OpenHarmonyFormattedText.Create(label, label as Microsoft.Maui.Controls.Label);
+        if (runs is { Length: > 0 })
+        {
+            // The runs own the drawn text; a stale plain text would be measured against them.
+            view.Text = null;
+            view.SetFormattedRuns(runs);
+            return;
+        }
+        view.SetFormattedRuns(null);
+        view.Text = label.Text;
+    }
+
+    /// <summary>
+    /// Label-level style is the fallback for spans that do not set one, so a style change while
+    /// formatted mode is active has to rebuild the runs (the run set cached the old fallback).
+    /// </summary>
+    private static void RefreshFormattedText(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        if (handler.PlatformView.HasFormattedRuns)
+        {
+            SyncText(handler, label);
+        }
+    }
 
     public static void MapTextColor(OpenHarmonyLabelHandler handler, ILabel label)
-        => handler.PlatformView.TextColor = label.TextColor ?? Colors.White;
+    {
+        handler.PlatformView.TextColor = label.TextColor ?? Colors.White;
+        RefreshFormattedText(handler, label);
+    }
 
     /// <summary>
     /// Maps the whole font surface (size, family, weight, slant). MAUI raises the Font change for
@@ -110,10 +150,14 @@ public sealed class OpenHarmonyLabelHandler : OpenHarmonyViewHandler<ILabel>
         OpenHarmonyTextView view = handler.PlatformView;
         view.FontSize = font.Size > 0 ? (float)font.Size : 14f;
         view.TextFont = OpenHarmonyTextMapping.Resolve(handler, font);
+        RefreshFormattedText(handler, label);
     }
 
     public static void MapCharacterSpacing(OpenHarmonyLabelHandler handler, ILabel label)
-        => handler.PlatformView.CharacterSpacing = label.CharacterSpacing;
+    {
+        handler.PlatformView.CharacterSpacing = label.CharacterSpacing;
+        RefreshFormattedText(handler, label);
+    }
 
     public static void MapHorizontalTextAlignment(OpenHarmonyLabelHandler handler, ILabel label)
         => handler.PlatformView.HorizontalTextAlignment = label.HorizontalTextAlignment;
@@ -122,10 +166,16 @@ public sealed class OpenHarmonyLabelHandler : OpenHarmonyViewHandler<ILabel>
         => handler.PlatformView.VerticalTextAlignment = label.VerticalTextAlignment;
 
     public static void MapLineHeight(OpenHarmonyLabelHandler handler, ILabel label)
-        => handler.PlatformView.LineHeight = label.LineHeight;
+    {
+        handler.PlatformView.LineHeight = label.LineHeight;
+        RefreshFormattedText(handler, label);
+    }
 
     public static void MapTextDecorations(OpenHarmonyLabelHandler handler, ILabel label)
-        => handler.PlatformView.TextDecorations = label.TextDecorations;
+    {
+        handler.PlatformView.TextDecorations = label.TextDecorations;
+        RefreshFormattedText(handler, label);
+    }
 
     public static void MapMaxLines(OpenHarmonyLabelHandler handler, ILabel label)
         => handler.PlatformView.MaxLines = (label as Microsoft.Maui.Controls.Label)?.MaxLines ?? -1;

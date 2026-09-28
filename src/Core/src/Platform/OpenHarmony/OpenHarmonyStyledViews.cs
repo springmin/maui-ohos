@@ -280,6 +280,45 @@ public class OpenHarmonyTextView : OpenHarmonyView
     /// <summary>Background paint mapped by a handler (gradient/image); overrides the solid Background.</summary>
     public Paint? BackgroundPaint { get; set; }
 
+    // ---- FormattedText (Span) state --------------------------------------------------------
+    private OpenHarmonyTextRun[]? _formattedRuns;
+    private int _formattedGeneration;
+    private (int Generation, float MaxWidth, LineBreakMode Mode, int MaxLines, float DefaultFontSize,
+        OpenHarmonyFormattedTextLayout Layout)? _formattedLayout;
+
+    /// <summary>True when the mapper handed this view a non-empty run set (formatted mode).</summary>
+    internal bool HasFormattedRuns => _formattedRuns is { Length: > 0 };
+
+    /// <summary>Installs the label's runs (null returns to the plain-text path) and drops the layout cache.</summary>
+    internal void SetFormattedRuns(OpenHarmonyTextRun[]? runs)
+    {
+        _formattedRuns = runs is { Length: > 0 } ? runs : null;
+        _formattedGeneration++;
+        _formattedLayout = null;
+    }
+
+    /// <summary>Run-aware layout at the given width (cached per run set and break contract).</summary>
+    internal OpenHarmonyFormattedTextLayout FormattedLayout(float maxWidth)
+    {
+        float defaultFontSize = TextFont.Size is > 0 and < float.MaxValue ? (float)TextFont.Size : FontSize;
+        if (_formattedLayout is { } cached &&
+            cached.Generation == _formattedGeneration &&
+            cached.MaxWidth.Equals(maxWidth) &&
+            cached.Mode == LineBreakMode &&
+            cached.MaxLines == MaxLines &&
+            cached.DefaultFontSize.Equals(defaultFontSize))
+        {
+            return cached.Layout;
+        }
+        var layout = new OpenHarmonyFormattedTextLayout(_formattedRuns!, LineBreakMode, MaxLines, maxWidth,
+            defaultFontSize);
+        _formattedLayout = (_formattedGeneration, maxWidth, LineBreakMode, MaxLines, defaultFontSize, layout);
+        return layout;
+    }
+
+    /// <summary>Mirrors <c>OpenHarmonyView.DimAlpha</c> for explicit run colours (the base dims only its own).</summary>
+    private const float DisabledTextAlpha = 0.5f;
+
     public override void Draw(MauiCanvas canvas)
     {
         RectF frame = Frame;
@@ -321,15 +360,27 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 Background = background;
             }
         }
-        if (!IsTextEntry && !string.IsNullOrEmpty(text))
+        if (!IsTextEntry)
         {
-            DrawTextBlock(canvas, text);
+            if (_formattedRuns is { Length: > 0 })
+            {
+                DrawFormattedBlock(canvas);
+            }
+            else if (!string.IsNullOrEmpty(text))
+            {
+                DrawTextBlock(canvas, text);
+            }
         }
     }
 
     /// <summary>Desired size of the text block at the given width (padding included).</summary>
     public (float Width, float Height) MeasureTextBlock(string? text, float fontSize, float maxWidth)
     {
+        if (_formattedRuns is { Length: > 0 })
+        {
+            OpenHarmonyFormattedTextLayout formatted = FormattedLayout(maxWidth);
+            return (formatted.Width, formatted.Height);
+        }
         if (string.IsNullOrEmpty(text))
         {
             return (0f, 0f);
@@ -383,9 +434,108 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 _ => left,
             };
             DrawLine(canvas, line, x, y, lineHeight, fontSize, bold);
-            DrawDecorations(canvas, lineWidth, x, y, lineHeight, fontSize);
+            DrawDecorations(canvas, TextDecorations, TextColorForDraw, lineWidth, x, y, lineHeight, fontSize);
             y += lineHeight;
         }
+    }
+
+    /// <summary>
+    /// Draws the run-aware layout: each line places its styled segments at the alignment origin,
+    /// and a segment carries its own colour, font size, weight, spacing, decorations and
+    /// background (the layout already resolved the metrics).
+    /// </summary>
+    private void DrawFormattedBlock(MauiCanvas canvas)
+    {
+        RectF frame = Frame;
+        float left = frame.X + (float)Padding.Left;
+        float top = frame.Y + (float)Padding.Top;
+        float width = Math.Max(0f, frame.Width - (float)(Padding.Left + Padding.Right));
+        float height = Math.Max(0f, frame.Height - (float)(Padding.Top + Padding.Bottom));
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+        float maxWidth = LineBreakMode == LineBreakMode.NoWrap ? float.PositiveInfinity : width;
+        OpenHarmonyFormattedTextLayout layout = FormattedLayout(maxWidth);
+        float y = VerticalTextAlignment switch
+        {
+            TextAlignment.Center => top + (height - layout.Height) / 2f,
+            TextAlignment.End => top + height - layout.Height,
+            _ => top,
+        };
+        foreach (OpenHarmonyFormattedLine line in layout.Lines)
+        {
+            float x = HorizontalTextAlignment switch
+            {
+                TextAlignment.Center => left + (width - line.Width) / 2f,
+                TextAlignment.End => left + width - line.Width,
+                _ => left,
+            };
+            foreach (OpenHarmonyFormattedSegment segment in line.Segments)
+            {
+                DrawFormattedSegment(canvas, segment, x, y, line.Height);
+                x += segment.Width;
+            }
+            y += line.Height;
+        }
+    }
+
+    private void DrawFormattedSegment(MauiCanvas canvas, OpenHarmonyFormattedSegment segment, float x, float y,
+        float lineHeight)
+    {
+        OpenHarmonyTextRun run = segment.Run;
+        float fontSize = run.FontSize;
+        Color color = run.TextColor is { } runColor
+            ? (Dimmed ? runColor.WithAlpha(DisabledTextAlpha) : runColor)
+            : TextColorForDraw;
+        if (run.BackgroundColor is { } background)
+        {
+            Color fill = canvas.FillColor;
+            canvas.FillColor = background;
+            canvas.FillRectangle(x, y, segment.Width, lineHeight);
+            canvas.FillColor = fill;
+        }
+        if (run.IsItalic)
+        {
+            OpenHarmonyStatus.Once("text.italic",
+                "italic text is drawn upright: the OpenHarmony text bridge exposes no typeface slant");
+        }
+        Color savedColor = canvas.FontColor;
+        float savedSize = canvas.FontSize;
+        canvas.FontColor = color;
+        canvas.FontSize = fontSize;
+        float segmentWidth = Math.Max(1f, segment.Width);
+        if (run.CharacterSpacing == 0)
+        {
+            canvas.DrawString(segment.Text, x, y, segmentWidth, lineHeight,
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+            if (run.IsBold)
+            {
+                canvas.DrawString(segment.Text, x + BoldOffset(fontSize), y, segmentWidth, lineHeight,
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+            }
+        }
+        else
+        {
+            // Same per-glyph emulation as the plain path (each glyph needs its own advance).
+            float cx = x;
+            foreach (char character in segment.Text)
+            {
+                string glyph = Glyph(character);
+                float glyphWidth = MeasureLine(glyph, fontSize);
+                canvas.DrawString(glyph, cx, y, Math.Max(1f, glyphWidth), lineHeight,
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (run.IsBold)
+                {
+                    canvas.DrawString(glyph, cx + BoldOffset(fontSize), y, Math.Max(1f, glyphWidth), lineHeight,
+                        HorizontalAlignment.Left, VerticalAlignment.Center);
+                }
+                cx += glyphWidth + (float)run.CharacterSpacing;
+            }
+        }
+        DrawDecorations(canvas, run.TextDecorations, color, segment.Width, x, y, lineHeight, fontSize);
+        canvas.FontColor = savedColor;
+        canvas.FontSize = savedSize;
     }
 
     private void DrawLine(MauiCanvas canvas, string line, float x, float y, float lineHeight, float fontSize, bool bold)
@@ -441,16 +591,16 @@ public class OpenHarmonyTextView : OpenHarmonyView
         return glyph;
     }
 
-    private void DrawDecorations(MauiCanvas canvas, float lineWidth, float x, float y, float lineHeight, float fontSize)
+    private void DrawDecorations(MauiCanvas canvas, TextDecorations decorations, Color color, float lineWidth,
+        float x, float y, float lineHeight, float fontSize)
     {
-        TextDecorations decorations = TextDecorations;
         if (decorations == TextDecorations.None)
         {
             return;
         }
         Color stroke = canvas.StrokeColor;
         float strokeSize = canvas.StrokeSize;
-        canvas.StrokeColor = TextColorForDraw;
+        canvas.StrokeColor = color;
         canvas.StrokeSize = Math.Max(1f, fontSize / 14f);
         float extent = Math.Max(1f, lineWidth);
         if ((decorations & TextDecorations.Underline) != TextDecorations.None)

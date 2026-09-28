@@ -1385,6 +1385,7 @@ static Microsoft.Maui.Platform.OpenHarmonyImageHandler.MapSource(Microsoft.Maui.
 static Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler.MapIndicator(Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler! handler, Microsoft.Maui.IIndicatorView! indicator) -> void
 static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapCharacterSpacing(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void
 static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapFont(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void
+static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapFormattedText(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void
 static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapHorizontalTextAlignment(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void
 static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapLineBreakMode(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void
 static Microsoft.Maui.Platform.OpenHarmonyLabelHandler.MapLineHeight(Microsoft.Maui.Platform.OpenHarmonyLabelHandler! handler, Microsoft.Maui.ILabel! label) -> void

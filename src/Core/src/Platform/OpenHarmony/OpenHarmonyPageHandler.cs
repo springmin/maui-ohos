@@ -31,6 +31,14 @@ public sealed class OpenHarmonyPageHandler : OpenHarmonyViewHandler<Page>
         {
             return;
         }
+        // The page walks arrange a page through IView.Arrange, which lands here; arranging that
+        // same page again would recurse for a page with no presented content (the walk has
+        // nothing to descend into, so it calls Arrange on the same page) until the stack
+        // overflows. The nested call only has to place the frame, which the walk already did.
+        if (OpenHarmonyContentArrange.IsArranging(page))
+        {
+            return;
+        }
         Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
         if (!OpenHarmonySafeArea.IsEmpty(insets) &&
             OpenHarmonyBridge.Surface is { Width: > 0, Height: > 0 } surface)

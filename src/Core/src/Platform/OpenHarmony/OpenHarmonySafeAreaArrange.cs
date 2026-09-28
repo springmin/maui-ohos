@@ -22,57 +22,70 @@ internal static class OpenHarmonySafeAreaArrange
     /// </summary>
     internal static void Arrange(IView view, Rect frame, Rect windowBounds, Thickness insets, int depth = 0)
     {
-        // No system insets and no keyboard: exactly the historical arrangement. A keyboard-only
-        // state (soft input > 0) still goes through the safe-area walk, because Pad consumes
-        // the keyboard inset for SoftInput/All edges.
-        if (OpenHarmonySafeArea.IsEmpty(insets) && !OpenHarmonySafeArea.HasSoftInput())
+        // Both page walks mark the view they are arranging; a page the walk places through
+        // IView.Arrange comes back through the page handler's PlatformArrange, which then skips
+        // its own walk for that view (see OpenHarmonyContentArrange). Without the marker an
+        // empty page - nothing to descend into - would be walked again and again until the
+        // stack overflows.
+        IView? previous = OpenHarmonyContentArrange.BeginArrange(view);
+        try
         {
-            OpenHarmonyContentArrange.Arrange(view, frame, depth);
-            return;
-        }
-        if (depth > MaxDepth)
-        {
-            return;
-        }
-        OpenHarmonyHandlerConnector.ConnectTree(view);
-
-        if (view is NavigationPage navigation)
-        {
-            // Container pages have no SafeAreaEdges in the MAUI model; keep the historical look
-            // (navigation bar and content out of the avoid area) by padding the whole page.
-            Rect pageFrame = OpenHarmonySafeArea.Pad(view, frame, windowBounds, insets);
-            view.Frame = pageFrame;
-            double barHeight = (view.Handler?.PlatformView as OpenHarmonyView)?.NavBarHeight ?? 48f;
-            var contentFrame = new Rect(pageFrame.X, pageFrame.Y + barHeight,
-                pageFrame.Width, Math.Max(0, pageFrame.Height - barHeight));
-            if (navigation.CurrentPage is IView currentPage)
+            // No system insets and no keyboard: exactly the historical arrangement. A keyboard-only
+            // state (soft input > 0) still goes through the safe-area walk, because Pad consumes
+            // the keyboard inset for SoftInput/All edges.
+            if (OpenHarmonySafeArea.IsEmpty(insets) && !OpenHarmonySafeArea.HasSoftInput())
             {
-                Arrange(currentPage, contentFrame, windowBounds, insets, depth + 1);
+                OpenHarmonyContentArrange.Arrange(view, frame, depth);
+                return;
             }
-            return;
-        }
+            if (depth > MaxDepth)
+            {
+                return;
+            }
+            OpenHarmonyHandlerConnector.ConnectTree(view);
 
-        if (view is Page && (view as IContentView)?.PresentedContent is IView pageContent)
+            if (view is NavigationPage navigation)
+            {
+                // Container pages have no SafeAreaEdges in the MAUI model; keep the historical look
+                // (navigation bar and content out of the avoid area) by padding the whole page.
+                Rect pageFrame = OpenHarmonySafeArea.Pad(view, frame, windowBounds, insets);
+                view.Frame = pageFrame;
+                double barHeight = (view.Handler?.PlatformView as OpenHarmonyView)?.NavBarHeight ?? 48f;
+                var contentFrame = new Rect(pageFrame.X, pageFrame.Y + barHeight,
+                    pageFrame.Width, Math.Max(0, pageFrame.Height - barHeight));
+                if (navigation.CurrentPage is IView currentPage)
+                {
+                    Arrange(currentPage, contentFrame, windowBounds, insets, depth + 1);
+                }
+                return;
+            }
+
+            if (view is Page && (view as IContentView)?.PresentedContent is IView pageContent)
+            {
+                // A page fills the surface; its edges decide whether the content is padded, so a
+                // page that ignores the safe area still paints edge to edge.
+                view.Frame = frame;
+                Rect contentFrame = OpenHarmonySafeArea.Pad(view, frame, windowBounds, insets);
+                Arrange(pageContent, contentFrame, windowBounds, insets, depth + 1);
+                return;
+            }
+
+            if (view is ILayout || view is IContentView)
+            {
+                // The content view that overlaps the avoid area consumes it; MAUI then arranges its
+                // children inside the padded frame.
+                Rect padded = OpenHarmonySafeArea.Pad(view, frame, windowBounds, insets);
+                view.Measure(padded.Width, padded.Height);
+                view.Arrange(padded);
+                return;
+            }
+
+            view.Measure(frame.Width, frame.Height);
+            view.Arrange(frame);
+        }
+        finally
         {
-            // A page fills the surface; its edges decide whether the content is padded, so a
-            // page that ignores the safe area still paints edge to edge.
-            view.Frame = frame;
-            Rect contentFrame = OpenHarmonySafeArea.Pad(view, frame, windowBounds, insets);
-            Arrange(pageContent, contentFrame, windowBounds, insets, depth + 1);
-            return;
+            OpenHarmonyContentArrange.EndArrange(previous);
         }
-
-        if (view is ILayout || view is IContentView)
-        {
-            // The content view that overlaps the avoid area consumes it; MAUI then arranges its
-            // children inside the padded frame.
-            Rect padded = OpenHarmonySafeArea.Pad(view, frame, windowBounds, insets);
-            view.Measure(padded.Width, padded.Height);
-            view.Arrange(padded);
-            return;
-        }
-
-        view.Measure(frame.Width, frame.Height);
-        view.Arrange(frame);
     }
 }

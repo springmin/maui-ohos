@@ -50,6 +50,7 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.FlyoutPage)] = new(typeof(OpenHarmonyFlyoutPageHandler)),
         [typeof(Microsoft.Maui.Controls.Shell)] = new(typeof(OpenHarmonyShellHandler)),
         [typeof(Microsoft.Maui.Controls.ListView)] = new(typeof(OpenHarmonyListViewHandler)),
+        [typeof(Microsoft.Maui.Controls.TableView)] = new(typeof(OpenHarmonyTableViewHandler)),
         [typeof(Microsoft.Maui.Controls.SwipeView)] = new(typeof(OpenHarmonySwipeViewHandler)),
         [typeof(Microsoft.Maui.Controls.RefreshView)] = new(typeof(OpenHarmonyRefreshViewHandler)),
         [typeof(Microsoft.Maui.Controls.CarouselView)] = new(typeof(OpenHarmonyCarouselViewHandler)),

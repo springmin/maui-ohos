@@ -677,6 +677,8 @@ Microsoft.Maui.Platform.OpenHarmonySwitchHandler
 Microsoft.Maui.Platform.OpenHarmonySwitchHandler.OpenHarmonySwitchHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler
 Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler.OpenHarmonyTabbedPageHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyTableViewHandler
+Microsoft.Maui.Platform.OpenHarmonyTableViewHandler.OpenHarmonyTableViewHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.GetLocalesAsync() -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Microsoft.Maui.Media.Locale!>!>!
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.IsSupported.get -> bool

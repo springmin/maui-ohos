@@ -1,5 +1,7 @@
 // Legacy ListView handler for OpenHarmony: shares the virtualized list pipeline. Cells are
-// rendered through their inner view (ViewCell) or as text (TextCell/ImageCell).
+// rendered through their inner view (ViewCell) or as text (TextCell/ImageCell); the cell
+// materialisation lives in OpenHarmonyCellFactory so the legacy TableView handler renders the
+// same cell types through the same code.
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
@@ -70,10 +72,37 @@ public sealed class OpenHarmonyListViewHandler : OpenHarmonyViewHandler<ListView
             // Cells resolve their bindings from the item before we read their text.
             bindable.BindingContext = item;
         }
+        return OpenHarmonyCellFactory.Create(content, item);
+    }
+
+    public static void MapItemsSource(OpenHarmonyListViewHandler handler, ListView listView)
+    {
+        handler._materializer?.SetItems(listView.ItemsSource);
+        handler._materializer?.Update(force: true);
+    }
+
+    public static void MapItemTemplate(OpenHarmonyListViewHandler handler, ListView listView)
+        => handler._materializer?.Reset();
+}
+
+/// <summary>
+/// Cell materialisation shared by the legacy ListView and TableView handlers: a ViewCell yields
+/// its inner view, TextCell (and ImageCell) yields a styled content row and SwitchCell/
+/// EntryCell yield a label plus the interactive control. The two-way bindings keep the cell
+/// object and its platform view in sync (a tap on the switch writes On; typing writes Text and
+/// forwards Completed); a cell property change updates the row view that was materialized for
+/// it.
+/// </summary>
+internal static class OpenHarmonyCellFactory
+{
+    /// <summary>Creates the platform view for one cell (or item-template content), connected.</summary>
+    public static View Create(object? content, object? item)
+    {
         View view = content switch
         {
             ViewCell cell when cell.View is View inner => inner,
-            TextCell textCell => new Label { Text = textCell.Text ?? string.Empty, FontSize = 26 },
+            ImageCell imageCell => CreateImageCell(imageCell),
+            TextCell textCell => CreateTextCell(textCell),
             SwitchCell switchCell => CreateSwitchCell(switchCell),
             EntryCell entryCell => CreateEntryCell(entryCell),
             View v => v,
@@ -81,6 +110,90 @@ public sealed class OpenHarmonyListViewHandler : OpenHarmonyViewHandler<ListView
         };
         OpenHarmonyHandlerConnector.ConnectTree(view);
         return view;
+    }
+
+    /// <summary>Materialises a TextCell as a text label (plus its detail line when set).</summary>
+    private static View CreateTextCell(TextCell cell)
+    {
+        var label = new Label { Text = cell.Text ?? string.Empty, FontSize = 26 };
+        if (cell.TextColor is { } textColor)
+        {
+            label.TextColor = textColor;
+        }
+        cell.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == TextCell.TextProperty.PropertyName)
+            {
+                label.Text = cell.Text ?? string.Empty;
+            }
+            else if (e.PropertyName == TextCell.TextColorProperty.PropertyName)
+            {
+                label.TextColor = cell.TextColor;
+            }
+        };
+        if (string.IsNullOrEmpty(cell.Detail))
+        {
+            return label;
+        }
+        var detail = new Label { Text = cell.Detail, FontSize = 20, TextColor = Colors.Gray };
+        if (cell.DetailColor is { } detailColor)
+        {
+            detail.TextColor = detailColor;
+        }
+        cell.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == TextCell.DetailProperty.PropertyName)
+            {
+                detail.Text = cell.Detail ?? string.Empty;
+            }
+            else if (e.PropertyName == TextCell.DetailColorProperty.PropertyName)
+            {
+                detail.TextColor = cell.DetailColor;
+            }
+        };
+        return new VerticalStackLayout { Spacing = 2, Children = { label, detail } };
+    }
+
+    /// <summary>Materialises an ImageCell as a thumbnail + text/detail row.</summary>
+    private static View CreateImageCell(ImageCell cell)
+    {
+        var image = new Image
+        {
+            Source = cell.ImageSource,
+            HeightRequest = 40,
+            WidthRequest = 40,
+            VerticalOptions = LayoutOptions.Center,
+        };
+        var label = new Label { Text = cell.Text ?? string.Empty, FontSize = 26, VerticalOptions = LayoutOptions.Center };
+        if (cell.TextColor is { } textColor)
+        {
+            label.TextColor = textColor;
+        }
+        cell.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == ImageCell.ImageSourceProperty.PropertyName)
+            {
+                image.Source = cell.ImageSource;
+            }
+            else if (e.PropertyName == ImageCell.TextProperty.PropertyName)
+            {
+                label.Text = cell.Text ?? string.Empty;
+            }
+        };
+        var row = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star),
+            },
+            ColumnSpacing = 12,
+            Padding = new Thickness(12, 8),
+        };
+        row.Children.Add(image);
+        row.Children.Add(label);
+        Grid.SetColumn(label, 1);
+        return row;
     }
 
     /// <summary>Materialises a SwitchCell as a label + Switch row.</summary>
@@ -168,13 +281,4 @@ public sealed class OpenHarmonyListViewHandler : OpenHarmonyViewHandler<ListView
         Grid.SetColumn(trailing, 1);
         return row;
     }
-
-    public static void MapItemsSource(OpenHarmonyListViewHandler handler, ListView listView)
-    {
-        handler._materializer?.SetItems(listView.ItemsSource);
-        handler._materializer?.Update(force: true);
-    }
-
-    public static void MapItemTemplate(OpenHarmonyListViewHandler handler, ListView listView)
-        => handler._materializer?.Reset();
 }

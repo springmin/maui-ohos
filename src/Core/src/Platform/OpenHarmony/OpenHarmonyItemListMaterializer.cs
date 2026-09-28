@@ -103,6 +103,44 @@ internal sealed class OpenHarmonyItemListMaterializer
 
     public double ItemHeight { get; private set; } = 40;
 
+    /// <summary>
+    /// Fixed height for every row (0 = use the measured height of the first row). The legacy
+    /// TableView handler sets it from TableView.RowHeight, whose contract is one height for all
+    /// rows; a fixed height also keeps the row maths off the header row's measured height when
+    /// the first row is a section header.
+    /// </summary>
+    public double FixedItemHeight
+    {
+        get => _fixedItemHeight;
+        set
+        {
+            _fixedItemHeight = value;
+            if (value > 0)
+            {
+                // The window maths run before the first row is arranged; seed the slot height so
+                // the first pass already computes the right window for the fixed rows.
+                ItemHeight = value;
+            }
+        }
+    }
+
+    private double _fixedItemHeight;
+
+    /// <summary>
+    /// When false (TableView cells) the materializer leaves each row's binding context alone:
+    /// the rows are the cells themselves and carry their own inherited bindings, unlike a
+    /// ListView/CollectionView item template whose view binds to the item it was materialized
+    /// for.
+    /// </summary>
+    public bool BindRowContext { get; set; } = true;
+
+    /// <summary>
+    /// When true rows are never pooled: a TableView cell's platform view carries the cell's
+    /// text/content directly, so re-using a recycled row for a different cell would show the
+    /// previous cell's content.
+    /// </summary>
+    public bool DisablePooling { get; set; }
+
     /// <summary>Columns per row (CollectionView GridItemsLayout span).</summary>
     public int Span
     {
@@ -917,7 +955,10 @@ internal sealed class OpenHarmonyItemListMaterializer
             // re-used row must be reconnected or it would render/tap as an empty platform view.
             OpenHarmonyHandlerConnector.ConnectTree(view);
         }
-        view.BindingContext = isHeader || isFooter ? null : item;
+        if (BindRowContext)
+        {
+            view.BindingContext = isHeader || isFooter ? null : item;
+        }
         SetRowTap(index, view);
         ArrangeRow(index, view);
         return view;
@@ -931,12 +972,19 @@ internal sealed class OpenHarmonyItemListMaterializer
         double itemWidth = GetItemWidth(width);
         view.Measure(itemWidth, double.PositiveInfinity);
         Size size = view.DesiredSize;
-        if (index == 0 && size.Height > 0)
+        if (FixedItemHeight > 0)
+        {
+            // Fixed rows: the first row seeds the slot height regardless of its kind (a section
+            // header must not shrink the cells), and every row is clipped to the fixed height.
+            ItemHeight = FixedItemHeight;
+        }
+        else if (index == 0 && size.Height > 0)
         {
             ItemHeight = size.Height;
         }
+        double height = FixedItemHeight > 0 ? ItemHeight : Math.Max(size.Height, ItemHeight);
         view.Arrange(new Rect(frame.X + GetItemX(index, width), frame.Y + GetItemY(index),
-            itemWidth, Math.Max(size.Height, ItemHeight)));
+            itemWidth, height));
     }
 
     /// <summary>Wires the row's tap: item selection, group-header toggle or nothing.</summary>
@@ -996,7 +1044,7 @@ internal sealed class OpenHarmonyItemListMaterializer
     private void RecycleLocked(int index, View view)
     {
         view.Handler?.DisconnectHandler();
-        if (!IsHeader(index) && !IsFooter(index))
+        if (!DisablePooling && !IsHeader(index) && !IsFooter(index))
         {
             _pool.Add(view);
         }

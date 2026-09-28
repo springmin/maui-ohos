@@ -1,6 +1,10 @@
-// GraphicsView handler for OpenHarmony: the IDrawable paints through the compositor's canvas.
+// GraphicsView handler for OpenHarmony: the IDrawable paints through the compositor's canvas and
+// the compositor routes press/drag/hover/cancel into the IGraphicsView interaction contract
+// (Controls' GraphicsView raises StartInteraction / DragInteraction / EndInteraction /
+// CancelInteraction / *HoverInteraction from these calls).
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
+using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
@@ -9,21 +13,31 @@ public sealed class OpenHarmonyGraphicsViewHandler : OpenHarmonyViewHandler<IGra
     public static readonly IPropertyMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler> Mapper =
         new PropertyMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler>(ViewMapper);
 
-    public OpenHarmonyGraphicsViewHandler() : base(Mapper) { }
+    /// <summary>Commands the Controls GraphicsView invokes on its handler.</summary>
+    public static readonly CommandMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler> CommandMapper =
+        new(ViewCommandMapper)
+        {
+            [nameof(IGraphicsView.Invalidate)] = MapInvalidate,
+        };
+
+    public OpenHarmonyGraphicsViewHandler() : base(Mapper, CommandMapper) { }
+
+    /// <summary>IGraphicsView.Invalidate: the drawable asked the compositor for a repaint.</summary>
+    public static void MapInvalidate(OpenHarmonyGraphicsViewHandler handler, IGraphicsView graphicsView, object? arg)
+    {
+        OpenHarmonyBridge.RequestRedraw();
+    }
 
     protected override OpenHarmonyView CreatePlatformView()
     {
         var view = new OpenHarmonyView { IsGraphicsView = true };
-        view.GraphicsTap = point =>
-        {
-            if (VirtualView is { } graphics)
-            {
-                // IGraphicsView interaction takes point arrays (multi-touch capable).
-                var points = new[] { point };
-                graphics.StartInteraction(points);
-                graphics.EndInteraction(points, true);
-            }
-        };
+        view.GraphicsStartInteraction = points => VirtualView?.StartInteraction(points);
+        view.GraphicsDragInteraction = points => VirtualView?.DragInteraction(points);
+        view.GraphicsEndInteraction = (points, isInsideBounds) => VirtualView?.EndInteraction(points, isInsideBounds);
+        view.GraphicsCancelInteraction = () => VirtualView?.CancelInteraction();
+        view.GraphicsHoverStart = points => VirtualView?.StartHoverInteraction(points);
+        view.GraphicsHoverMove = points => VirtualView?.MoveHoverInteraction(points);
+        view.GraphicsHoverEnd = () => VirtualView?.EndHoverInteraction();
         return view;
     }
 

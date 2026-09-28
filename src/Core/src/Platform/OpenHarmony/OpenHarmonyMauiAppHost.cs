@@ -57,9 +57,10 @@ public sealed class OpenHarmonyMauiAppHost
         {
             bool handled = args.Action switch
             {
-                OpenHarmonyTouchAction.Down => HandleTouch(true, false, args.X, args.Y),
-                OpenHarmonyTouchAction.Up => HandleTouch(false, true, args.X, args.Y),
-                OpenHarmonyTouchAction.Move => _renderer.HandleMove(args.X, args.Y),
+                OpenHarmonyTouchAction.Down => HandleTouch(true, false, args.X, args.Y, args.PointerId),
+                OpenHarmonyTouchAction.Up => HandleTouch(false, true, args.X, args.Y, args.PointerId),
+                OpenHarmonyTouchAction.Move => HandleMoveCore(args.X, args.Y, args.PointerId),
+                OpenHarmonyTouchAction.Cancel => HandleCancel(args.X, args.Y),
                 _ => false,
             };
             if (handled)
@@ -343,15 +344,35 @@ public sealed class OpenHarmonyMauiAppHost
     private bool _pinchWired;
 
     public bool HandleTouch(bool down, bool up, float x, float y)
+        => HandleTouch(down, up, x, y, 0);
+
+    /// <summary>
+    /// Handles a press/release of one pointer. The pointer id comes from the shell's touch stream
+    /// so multi-touch gestures keep their pointer identity (see the bridge's touch arguments).
+    /// </summary>
+    public bool HandleTouch(bool down, bool up, float x, float y, int pointerId)
     {
-        if (!_pinchWired)
+        EnsureInputWired();
+        return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y, pointerId);
+    }
+
+    /// <summary>Cancels the gesture stream (the shell reports a canceled touch): CancelInteraction.</summary>
+    public bool HandleCancel(float x, float y)
+    {
+        EnsureInputWired();
+        return _renderer.HandleCancel(x, y);
+    }
+
+    private void EnsureInputWired()
+    {
+        if (_pinchWired)
         {
-            _pinchWired = true;
-            OpenHarmonyBridge.RegisterPinchListener();
-            OpenHarmonyBridge.Pinch += OnPinch;
-            OpenHarmonyAccessibility.SetActionHandler((nodeId, action) => HandleAccessibilityAction(nodeId, action));
+            return;
         }
-        return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y);
+        _pinchWired = true;
+        OpenHarmonyBridge.RegisterPinchListener();
+        OpenHarmonyBridge.Pinch += OnPinch;
+        OpenHarmonyAccessibility.SetActionHandler((nodeId, action) => HandleAccessibilityAction(nodeId, action));
     }
 
     /// <summary>
@@ -609,8 +630,13 @@ public sealed class OpenHarmonyMauiAppHost
         {
             _renderer.HandlePointerMove(content, x, y);
         }
-        return _renderer.HandleMove(x, y);
+        return HandleMoveCore(x, y, 0);
     }
+
+    /// <summary>Handles a move of one pointer (the shell's touch stream carries the id).</summary>
+    public bool HandleMove(float x, float y, int pointerId) => HandleMoveCore(x, y, pointerId);
+
+    private bool HandleMoveCore(float x, float y, int pointerId) => _renderer.HandleMove(x, y, pointerId);
 
     public string Describe() => RootView is IView content ? _renderer.Describe(content) : "(no window content)";
 

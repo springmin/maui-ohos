@@ -720,9 +720,25 @@ public class OpenHarmonyView
     // WebView support (the shell owns the ArkWeb component; this view is a placeholder)
     public bool IsWebView { get; set; }
 
-    // GraphicsView support
+    // GraphicsView support. The renderer owns press capture and feeds these with every tracked
+    // pointer (window coordinates, the same space as the drawable's dirty rect): a single finger
+    // is a one-entry array and a multi-touch gesture passes the whole set. They are the
+    // IGraphicsView interaction contract the Controls GraphicsView raises its events from.
     public bool IsGraphicsView { get; set; }
-    public Action<PointF>? GraphicsTap { get; set; }
+    /// <summary>IGraphicsView.StartInteraction: a press inside the frame (or a new pointer).</summary>
+    public Action<PointF[]>? GraphicsStartInteraction { get; set; }
+    /// <summary>IGraphicsView.DragInteraction: pointer movement while a press is held.</summary>
+    public Action<PointF[]>? GraphicsDragInteraction { get; set; }
+    /// <summary>IGraphicsView.EndInteraction: release; the flag is whether it happened inside.</summary>
+    public Action<PointF[], bool>? GraphicsEndInteraction { get; set; }
+    /// <summary>IGraphicsView.CancelInteraction: the platform canceled the press.</summary>
+    public Action? GraphicsCancelInteraction { get; set; }
+    /// <summary>IGraphicsView.StartHoverInteraction: a hovering pointer entered the frame.</summary>
+    public Action<PointF[]>? GraphicsHoverStart { get; set; }
+    /// <summary>IGraphicsView.MoveHoverInteraction: a hovering pointer moved inside the frame.</summary>
+    public Action<PointF[]>? GraphicsHoverMove { get; set; }
+    /// <summary>IGraphicsView.EndHoverInteraction: the hovering pointer left the frame.</summary>
+    public Action? GraphicsHoverEnd { get; set; }
 
     // Indicator view support
     public bool IsIndicatorView { get; set; }
@@ -2255,23 +2271,6 @@ public class OpenHarmonyView
                 if (tab >= 0)
                 {
                     TabSelected?.Invoke(tab);
-                }
-                return true;
-            }
-        }
-        if (IsGraphicsView)
-        {
-            if (down && HitTest(x, y))
-            {
-                Pressed = true;
-                return true;
-            }
-            if (up && Pressed)
-            {
-                Pressed = false;
-                if (HitTest(x, y))
-                {
-                    GraphicsTap?.Invoke(new PointF(x, y));
                 }
                 return true;
             }

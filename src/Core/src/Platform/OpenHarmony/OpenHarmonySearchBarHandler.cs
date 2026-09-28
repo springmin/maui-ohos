@@ -15,6 +15,12 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
             [nameof(ITextStyle.TextColor)] = MapTextColor,
             [nameof(ITextStyle.Font)] = MapFont,
             [nameof(IPlaceholder.Placeholder)] = MapPlaceholder,
+            [nameof(ITextInput.MaxLength)] = MapMaxLength,
+            [nameof(ITextInput.IsReadOnly)] = MapIsReadOnly,
+            [nameof(ITextInput.Keyboard)] = MapKeyboard,
+            [nameof(ISearchBar.ReturnType)] = MapReturnType,
+            [nameof(IPlaceholder.PlaceholderColor)] = MapPlaceholderColor,
+            [nameof(ITextAlignment.HorizontalTextAlignment)] = MapHorizontalTextAlignment,
         };
 
     public OpenHarmonySearchBarHandler() : base(Mapper) { }
@@ -70,9 +76,11 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
     private void SetFocus(bool focused)
     {
         PlatformView.IsFocused = focused;
-        OpenHarmonyBridge.RequestTextInput(focused);
+        // Read-only search bars focus but never open the soft keyboard (same rule as Entry).
+        bool editable = !PlatformView.IsReadOnly;
+        OpenHarmonyBridge.RequestTextInput(focused && editable);
         // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
-        if (focused)
+        if (focused && editable)
         {
             OpenHarmonyFocusBridge.RequestTextInputFocus();
         }
@@ -96,10 +104,12 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
 
     private void OnTextInput(string text)
     {
-        if (!PlatformView.IsFocused)
+        if (!PlatformView.IsFocused || PlatformView.IsReadOnly)
         {
             return;
         }
+        text = OpenHarmonyView.ClampToMaxLength(
+            OpenHarmonyView.ApplyKeyboardFilter(PlatformView.Keyboard, text), PlatformView.MaxLength);
         PlatformView.Text = text;
         if (VirtualView is Microsoft.Maui.Controls.SearchBar searchBar)
         {
@@ -121,4 +131,47 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
 
     public static void MapPlaceholder(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
         => handler.PlatformView.Placeholder = ((IPlaceholder)searchBar).Placeholder;
+
+    // InputView mapping (T1): the SearchBar half of the Entry mapper additions (a SearchBar has
+    // no password/clear-button surface; ReturnType drives the shell search key).
+
+    public static void MapMaxLength(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
+    {
+        handler.PlatformView.MaxLength = ((ITextInput)searchBar).MaxLength;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapIsReadOnly(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
+    {
+        handler.PlatformView.IsReadOnly = ((ITextInput)searchBar).IsReadOnly;
+        if (handler.PlatformView.IsReadOnly && handler.PlatformView.IsFocused)
+        {
+            handler.SetFocus(true);
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapKeyboard(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
+    {
+        handler.PlatformView.Keyboard = ((ITextInput)searchBar).Keyboard;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapReturnType(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
+    {
+        handler.PlatformView.ReturnType = searchBar.ReturnType;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapPlaceholderColor(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
+    {
+        handler.PlatformView.PlaceholderColor = ((IPlaceholder)searchBar).PlaceholderColor;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapHorizontalTextAlignment(OpenHarmonySearchBarHandler handler, ISearchBar searchBar)
+    {
+        handler.PlatformView.HorizontalTextAlignment = ((ITextAlignment)searchBar).HorizontalTextAlignment;
+        OpenHarmonyBridge.RequestRedraw();
+    }
 }

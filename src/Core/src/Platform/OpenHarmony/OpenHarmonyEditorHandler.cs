@@ -17,6 +17,11 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
             [nameof(IPlaceholder.Placeholder)] = MapPlaceholder,
             [nameof(ITextInput.CursorPosition)] = MapCursor,
             [nameof(ITextInput.SelectionLength)] = MapCursor,
+            [nameof(ITextInput.MaxLength)] = MapMaxLength,
+            [nameof(ITextInput.IsReadOnly)] = MapIsReadOnly,
+            [nameof(ITextInput.Keyboard)] = MapKeyboard,
+            [nameof(IPlaceholder.PlaceholderColor)] = MapPlaceholderColor,
+            [nameof(ITextAlignment.HorizontalTextAlignment)] = MapHorizontalTextAlignment,
         };
 
     public OpenHarmonyEditorHandler() : base(Mapper) { }
@@ -74,7 +79,9 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
     private void SetFocus(bool focused)
     {
         PlatformView.IsFocused = focused;
-        if (focused)
+        // Read-only editors focus but never open the soft keyboard (same rule as Entry).
+        bool editable = !PlatformView.IsReadOnly;
+        if (focused && editable)
         {
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
             if (PlatformView.CursorPosition < 0)
@@ -84,9 +91,9 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
             // Same caret/shell-input sync as the Entry handler (IME composition offset).
             OpenHarmonyBridge.SetKeyboardCaret(PlatformView.CursorPosition);
         }
-        OpenHarmonyBridge.RequestTextInput(focused);
+        OpenHarmonyBridge.RequestTextInput(focused && editable);
         // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
-        if (focused)
+        if (focused && editable)
         {
             OpenHarmonyFocusBridge.RequestTextInputFocus();
         }
@@ -110,10 +117,12 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
 
     private void OnTextInput(string text)
     {
-        if (!PlatformView.IsFocused)
+        if (!PlatformView.IsFocused || PlatformView.IsReadOnly)
         {
             return;
         }
+        text = OpenHarmonyView.ClampToMaxLength(
+            OpenHarmonyView.ApplyKeyboardFilter(PlatformView.Keyboard, text), PlatformView.MaxLength);
         PlatformView.Text = text;
         if (VirtualView is Microsoft.Maui.Controls.Editor editor)
         {
@@ -178,5 +187,42 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
         {
             OpenHarmonyBridge.SetKeyboardCaret(handler.PlatformView.CursorPosition);
         }
+    }
+
+    // InputView mapping (T1): the Editor half of the Entry mapper additions (an Editor has no
+    // password/clear-button/return-type surface).
+
+    public static void MapMaxLength(OpenHarmonyEditorHandler handler, IEditor editor)
+    {
+        handler.PlatformView.MaxLength = ((ITextInput)editor).MaxLength;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapIsReadOnly(OpenHarmonyEditorHandler handler, IEditor editor)
+    {
+        handler.PlatformView.IsReadOnly = ((ITextInput)editor).IsReadOnly;
+        if (handler.PlatformView.IsReadOnly && handler.PlatformView.IsFocused)
+        {
+            handler.SetFocus(true);
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapKeyboard(OpenHarmonyEditorHandler handler, IEditor editor)
+    {
+        handler.PlatformView.Keyboard = ((ITextInput)editor).Keyboard;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapPlaceholderColor(OpenHarmonyEditorHandler handler, IEditor editor)
+    {
+        handler.PlatformView.PlaceholderColor = ((IPlaceholder)editor).PlaceholderColor;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapHorizontalTextAlignment(OpenHarmonyEditorHandler handler, IEditor editor)
+    {
+        handler.PlatformView.HorizontalTextAlignment = ((ITextAlignment)editor).HorizontalTextAlignment;
+        OpenHarmonyBridge.RequestRedraw();
     }
 }

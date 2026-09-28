@@ -767,6 +767,11 @@ Microsoft.Maui.Platform.OpenHarmonyView.CheckBoxColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.Children.get -> System.Collections.Generic.List<Microsoft.Maui.Platform.OpenHarmonyView!>!
 Microsoft.Maui.Platform.OpenHarmonyView.ChromeRefresh.get -> System.Action?
 Microsoft.Maui.Platform.OpenHarmonyView.ChromeRefresh.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ClearButtonVisible.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ClearButtonVisibility.get -> Microsoft.Maui.ClearButtonVisibility
+Microsoft.Maui.Platform.OpenHarmonyView.ClearButtonVisibility.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ClearText.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.ClearText.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.CornerRadius.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.CornerRadius.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.CursorIndexFromX(float x) -> int
@@ -801,12 +806,15 @@ Microsoft.Maui.Platform.OpenHarmonyView.Frame.get -> Microsoft.Maui.Graphics.Rec
 Microsoft.Maui.Platform.OpenHarmonyView.GraphicsTap.get -> System.Action<Microsoft.Maui.Graphics.PointF>?
 Microsoft.Maui.Platform.OpenHarmonyView.GraphicsTap.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.HitTest(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.get -> Microsoft.Maui.TextAlignment
+Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ImageAspect.get -> Microsoft.Maui.Aspect
 Microsoft.Maui.Platform.OpenHarmonyView.ImageAspect.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ImageBytes.get -> byte[]?
 Microsoft.Maui.Platform.OpenHarmonyView.ImageBytes.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.InBackButton(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.InBackRegion(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InClearButton(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.InFlyoutPanel(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.InHamburger(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IndicatorColor.get -> Microsoft.Maui.Graphics.Color!
@@ -837,10 +845,14 @@ Microsoft.Maui.Platform.OpenHarmonyView.IsNavigationPage.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsNavigationPage.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IsOn.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsOn.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsPassword.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsPassword.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IsPicker.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsPicker.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IsProgressBar.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsProgressBar.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsReadOnly.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsReadOnly.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IsRadioButton.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsRadioButton.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IsRefreshView.get -> bool
@@ -868,6 +880,10 @@ Microsoft.Maui.Platform.OpenHarmonyView.IsTextEntry.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsTextEntry.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IsWebView.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IsWebView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Keyboard.get -> Microsoft.Maui.Keyboard?
+Microsoft.Maui.Platform.OpenHarmonyView.Keyboard.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.MaxLength.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.MaxLength.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.NavBarColor.get -> Microsoft.Maui.Graphics.Color!
 Microsoft.Maui.Platform.OpenHarmonyView.NavBarColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.NavBarHeight.get -> float
@@ -883,6 +899,8 @@ Microsoft.Maui.Platform.OpenHarmonyView.OpenFlyout.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.OpenHarmonyView() -> void
 Microsoft.Maui.Platform.OpenHarmonyView.Placeholder.get -> string?
 Microsoft.Maui.Platform.OpenHarmonyView.Placeholder.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PlaceholderColor.get -> Microsoft.Maui.Graphics.Color?
+Microsoft.Maui.Platform.OpenHarmonyView.PlaceholderColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.PopupClosed.get -> System.Action?
 Microsoft.Maui.Platform.OpenHarmonyView.PopupClosed.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.PopupIndexAt(float x, float y) -> int
@@ -910,6 +928,8 @@ Microsoft.Maui.Platform.OpenHarmonyView.RefreshChanged.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.RefreshColor.get -> Microsoft.Maui.Graphics.Color!
 Microsoft.Maui.Platform.OpenHarmonyView.RefreshColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.RefreshDrag(float dx, float dy) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ReturnType.get -> Microsoft.Maui.ReturnType
+Microsoft.Maui.Platform.OpenHarmonyView.ReturnType.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentHeight.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentHeight.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentWidth.get -> float
@@ -1312,12 +1332,25 @@ static Microsoft.Maui.Platform.OpenHarmonyDiagnostics.Enabled.set -> void
 static Microsoft.Maui.Platform.OpenHarmonyDiagnostics.OutlinesDrawn.get -> int
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapCursor(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapFont(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapHorizontalTextAlignment(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapIsReadOnly(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapKeyboard(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapMaxLength(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapPlaceholder(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapPlaceholderColor(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapText(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEditorHandler.MapTextColor(Microsoft.Maui.Platform.OpenHarmonyEditorHandler! handler, Microsoft.Maui.IEditor! editor) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapClearButtonVisibility(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapCursor(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapFont(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapHorizontalTextAlignment(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapIsPassword(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapIsReadOnly(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapKeyboard(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapMaxLength(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapPlaceholder(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapPlaceholderColor(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
+static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapReturnType(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapText(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
 static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapTextColor(Microsoft.Maui.Platform.OpenHarmonyEntryHandler! handler, Microsoft.Maui.IEntry! entry) -> void
 static Microsoft.Maui.Platform.OpenHarmonyFlashlight.InstallDefault() -> void
@@ -1409,7 +1442,13 @@ static Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.MapContentSize(Micro
 static Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.MapHorizontalOffset(Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler! handler, Microsoft.Maui.IScrollView! scrollView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.MapVerticalOffset(Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler! handler, Microsoft.Maui.IScrollView! scrollView) -> void
 static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapFont(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
+static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapHorizontalTextAlignment(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
+static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapIsReadOnly(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
+static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapKeyboard(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
+static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapMaxLength(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
 static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapPlaceholder(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
+static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapPlaceholderColor(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
+static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapReturnType(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
 static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapText(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
 static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapTextColor(Microsoft.Maui.Platform.OpenHarmonySearchBarHandler! handler, Microsoft.Maui.ISearchBar! searchBar) -> void
 static Microsoft.Maui.Platform.OpenHarmonySemanticScreenReader.InstallDefault() -> void

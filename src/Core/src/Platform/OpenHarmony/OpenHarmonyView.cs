@@ -194,6 +194,151 @@ public class OpenHarmonyView
     /// <summary>Anchor of an in-progress selection drag (-1 when none).</summary>
     public int TextAnchor { get; set; } = -1;
 
+    // InputView mapping (T1): the state the Entry/Editor/SearchBar mapper methods write. The
+    // self-drawn editor honours it while drawing, while hit-testing the caret/selection and
+    // while deciding what the shell's text input may change.
+
+    /// <summary>Maximum input length; 0 or <see cref="int.MaxValue"/> means unlimited.</summary>
+    public int MaxLength { get; set; } = int.MaxValue;
+
+    /// <summary>
+    /// Read-only text entry: focus and selection keep working, the soft keyboard is never
+    /// requested and the shell's text never changes the content.
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>Password entry: every typed character is drawn as a bullet.</summary>
+    public bool IsPassword { get; set; }
+
+    /// <summary>When the entry shows its clear button (never / while editing / always).</summary>
+    public ClearButtonVisibility ClearButtonVisibility { get; set; } = ClearButtonVisibility.Never;
+
+    /// <summary>
+    /// The return-key kind (Default/Done/Go/Next/Search/Send). The shell's keyboard owns the
+    /// key label; the slice records the value so the mapper contract is complete.
+    /// </summary>
+    public ReturnType ReturnType { get; set; } = ReturnType.Default;
+
+    /// <summary>
+    /// The keyboard kind. Numeric and Telephone additionally restrict what the shell's input
+    /// may insert (the closest the self-drawn editor gets to Android's inputType filtering);
+    /// every other kind only records the value.
+    /// </summary>
+    public Keyboard? Keyboard { get; set; }
+
+    /// <summary>Placeholder colour; null falls back to the slice's Gray.</summary>
+    public Color? PlaceholderColor { get; set; }
+
+    /// <summary>Horizontal alignment of the text, placeholder and caret inside the frame.</summary>
+    public TextAlignment HorizontalTextAlignment { get; set; } = TextAlignment.Start;
+
+    /// <summary>Clears the entry's text (wired by the Entry handler to the virtual view).</summary>
+    public Action? ClearText { get; set; }
+
+    private bool _clearPressed;
+
+    /// <summary>Text as drawn: password entries replace every character with a bullet.</summary>
+    internal string DisplayText
+    {
+        get
+        {
+            string text = Text ?? string.Empty;
+            return IsPassword ? MaskPassword(text) : text;
+        }
+    }
+
+    private static string MaskPassword(string text)
+        => text.Length == 0 ? text : new string('\u2022', text.Length);
+
+    /// <summary>Clamps input to <paramref name="maxLength"/> (0/MaxValue = unlimited).</summary>
+    internal static string ClampToMaxLength(string text, int maxLength)
+        => maxLength > 0 && maxLength != int.MaxValue && text.Length > maxLength
+            ? text[..maxLength]
+            : text;
+
+    /// <summary>
+    /// Applies the Keyboard kind's input restriction. Numeric keeps digits and the decimal
+    /// signs, Telephone keeps digits and the dialing punctuation; a keyboard created through
+    /// <see cref="Keyboard.Create(KeyboardFlags)"/> is not one of the static kinds and keeps
+    /// the text unchanged.
+    /// </summary>
+    internal static string ApplyKeyboardFilter(Keyboard? keyboard, string text)
+    {
+        if (ReferenceEquals(keyboard, Keyboard.Numeric))
+        {
+            return FilterChars(text, static c => char.IsAsciiDigit(c) || c is '.' or ',' or '-' or '+');
+        }
+        if (ReferenceEquals(keyboard, Keyboard.Telephone))
+        {
+            return FilterChars(text, static c => char.IsAsciiDigit(c) || c is '+' or '-' or ' ' or '(' or ')' or '.');
+        }
+        return text;
+    }
+
+    private static string FilterChars(string text, Func<char, bool> keep)
+    {
+        int firstDropped = -1;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (!keep(text[i]))
+            {
+                firstDropped = i;
+                break;
+            }
+        }
+        if (firstDropped < 0)
+        {
+            return text;
+        }
+        var builder = new System.Text.StringBuilder(text.Length);
+        builder.Append(text, 0, firstDropped);
+        for (int i = firstDropped + 1; i < text.Length; i++)
+        {
+            if (keep(text[i]))
+            {
+                builder.Append(text[i]);
+            }
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>Clear-button geometry: radius 9, 12 px from the trailing edge.</summary>
+    internal const float ClearButtonRadius = 9f;
+
+    /// <summary>Fingertip slop around the clear-button circle.</summary>
+    internal const float ClearButtonTouchRadius = 16f;
+
+    /// <summary>
+    /// True when the clear button is shown for the current state: the rc.1 enum only carries
+    /// Never/WhileEditing, so the button shows while the entry is focused and has text.
+    /// </summary>
+    public bool ClearButtonVisible =>
+        IsTextEntry && !string.IsNullOrEmpty(Text) &&
+        ClearButtonVisibility == ClearButtonVisibility.WhileEditing && IsFocused;
+
+    /// <summary>Centre of the clear button (drawing and hit testing share it).</summary>
+    internal PointF ClearButtonCenter
+    {
+        get
+        {
+            RectF frame = Frame;
+            return new PointF(frame.X + frame.Width - ClearButtonRadius - 12f, frame.Y + frame.Height / 2f);
+        }
+    }
+
+    /// <summary>True when (x, y) hits the visible clear button (with fingertip slop).</summary>
+    public bool InClearButton(float x, float y)
+    {
+        if (!ClearButtonVisible)
+        {
+            return false;
+        }
+        PointF center = ClearButtonCenter;
+        float dx = x - center.X;
+        float dy = y - center.Y;
+        return dx * dx + dy * dy <= ClearButtonTouchRadius * ClearButtonTouchRadius;
+    }
+
     // IME preedit (composition): the shell's input delivers the input method's preview text
     // (PreviewText.value/offset) while a composition is in flight; it is drawn at the caret with
     // an underline/highlight and replaced by the committed text the shell sends through TextInput.
@@ -1167,9 +1312,11 @@ public class OpenHarmonyView
         string? text = Text;
         if (IsTextEntry && string.IsNullOrEmpty(text))
         {
-            canvas.FontColor = Colors.Gray;
+            canvas.FontColor = PlaceholderColor ?? Colors.Gray;
             canvas.FontSize = FontSize;
-            canvas.DrawString(Placeholder ?? string.Empty, frame.X + 12, frame.Y, frame.Width - 24, frame.Height,
+            float origin = TextOriginX(Placeholder ?? string.Empty);
+            float available = Math.Max(8f, frame.X + frame.Width - 12 - origin);
+            canvas.DrawString(Placeholder ?? string.Empty, origin, frame.Y, available, frame.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
             if (IsFocused)
             {
@@ -1182,21 +1329,38 @@ public class OpenHarmonyView
         {
             canvas.FontColor = TextColorForDraw;
             canvas.FontSize = FontSize;
-            float padding = IsTextEntry ? 12f : (CornerRadius > 0 ? 24f : 0f);
-            if (IsTextEntry && IsFocused)
+            if (IsTextEntry)
             {
-                DrawSelection(canvas, frame, text);
+                if (IsFocused)
+                {
+                    DrawSelection(canvas, frame, text);
+                }
+                // The masked (password) form is what is drawn; the caret/selection metrics use
+                // the same form so the glyphs and the caret stay aligned.
+                string display = DisplayText;
+                float origin = TextOriginX(display);
+                float available = Math.Max(8f, frame.X + frame.Width - 12 - origin);
+                canvas.DrawString(display, origin, frame.Y, available, frame.Height,
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (IsFocused)
+                {
+                    // Composition and caret sit on top of the text (the preedit overlays the range it
+                    // will replace); the selection handles are the topmost layer so a drag never
+                    // hides them under a glyph.
+                    DrawComposition(canvas, frame, text);
+                    DrawCaret(canvas, frame, text);
+                    DrawSelectionHandles(canvas, frame, text);
+                }
+                if (ClearButtonVisible)
+                {
+                    DrawClearButton(canvas);
+                }
             }
-            canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
-                HorizontalAlignment.Left, VerticalAlignment.Center);
-            if (IsTextEntry && IsFocused)
+            else
             {
-                // Composition and caret sit on top of the text (the preedit overlays the range it
-                // will replace); the selection handles are the topmost layer so a drag never
-                // hides them under a glyph.
-                DrawComposition(canvas, frame, text);
-                DrawCaret(canvas, frame, text);
-                DrawSelectionHandles(canvas, frame, text);
+                float padding = CornerRadius > 0 ? 24f : 0f;
+                canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }
         if (IsScrollView)
@@ -1253,13 +1417,14 @@ public class OpenHarmonyView
         {
             return 0;
         }
-        float left = Frame.X + 12;
+        string metrics = MetricsText(text);
+        float left = TextOriginX(metrics);
         float relative = x - left;
         if (relative <= 0)
         {
             return 0;
         }
-        float[] widths = CharWidths(text);
+        float[] widths = CharWidths(metrics);
         float accumulated = 0;
         for (int i = 0; i < widths.Length; i++)
         {
@@ -1273,22 +1438,50 @@ public class OpenHarmonyView
     }
 
     /// <summary>
+    /// X origin of the (possibly password-masked) text at the current alignment: the left
+    /// padding for Start, centred in the padded box for Center, right-aligned for End (Justify
+    /// is a single line here and is drawn like Start). The drawing, the caret, the selection and
+    /// the hit tests all derive from this one origin, so they cannot drift apart.
+    /// </summary>
+    /// <param name="measure">
+    /// The string whose width positions the box (the drawn text, or the placeholder when there
+    /// is none yet); null measures <see cref="DisplayText"/>.
+    /// </param>
+    internal float TextOriginX(string? measure = null)
+    {
+        RectF frame = Frame;
+        const float padding = 12f;
+        float available = Math.Max(0f, frame.Width - padding * 2);
+        float measured = Math.Min(MeasureTextWidth(measure ?? DisplayText), available);
+        return HorizontalTextAlignment switch
+        {
+            TextAlignment.Center => frame.X + padding + (available - measured) / 2f,
+            TextAlignment.End => frame.X + frame.Width - padding - measured,
+            _ => frame.X + padding,
+        };
+    }
+
+    /// <summary>The string the caret metrics measure: the drawn (masked) form of the text.</summary>
+    private string MetricsText(string text) => IsPassword ? MaskPassword(text) : text;
+
+    /// <summary>
     /// X coordinate of the caret slot at <paramref name="index"/> (clamped to the text bounds).
     /// The same cached per-character prefix the hit test uses, so the drawn caret, the selection
     /// highlight, the handles and <see cref="CursorIndexFromX"/> always agree.
     /// </summary>
     internal float TextPositionX(string text, int index)
     {
-        float left = Frame.X + 12;
+        string metrics = MetricsText(text);
+        float left = TextOriginX(metrics);
         if (index <= 0)
         {
             return left;
         }
-        if (index > text.Length)
+        if (index > metrics.Length)
         {
-            index = text.Length;
+            index = metrics.Length;
         }
-        float[] widths = CharWidths(text);
+        float[] widths = CharWidths(metrics);
         float width = 0;
         for (int i = 0; i < index && i < widths.Length; i++)
         {
@@ -1404,6 +1597,26 @@ public class OpenHarmonyView
 
     /// <summary>Handle fill: one shared colour, not a new Color per drawn frame.</summary>
     private static readonly Color s_selectionHandleFill = Colors.DodgerBlue;
+
+    /// <summary>Clear-button fill: one shared colour, not a new Color per drawn frame.</summary>
+    private static readonly Color s_clearButtonFill = Color.FromArgb("#FF9E9E9E");
+
+    /// <summary>
+    /// Draws the clear button (a filled circle with an x) at the trailing edge. Drawing and
+    /// <see cref="InClearButton"/> share <see cref="ClearButtonCenter"/>, so the pixels and the
+    /// touch target cannot drift apart.
+    /// </summary>
+    private void DrawClearButton(MauiCanvas canvas)
+    {
+        PointF center = ClearButtonCenter;
+        canvas.FillColor = s_clearButtonFill;
+        canvas.FillCircle(center.X, center.Y, ClearButtonRadius);
+        canvas.StrokeColor = Colors.White;
+        canvas.StrokeSize = 2;
+        float arm = ClearButtonRadius * 0.42f;
+        canvas.DrawLine(center.X - arm, center.Y - arm, center.X + arm, center.Y + arm);
+        canvas.DrawLine(center.X + arm, center.Y - arm, center.X - arm, center.Y + arm);
+    }
 
     /// <summary>Composition highlight behind the preedit (inverse-video style).</summary>
     private static readonly Color s_compositionFill = Colors.DodgerBlue.WithAlpha(0.35f);
@@ -2153,6 +2366,26 @@ public class OpenHarmonyView
                     (string Text, Color Background, Action Activate) item = SwipeItems[swipeIndex];
                     SetSwipeOpen(false);
                     item.Activate();
+                }
+                return true;
+            }
+        }
+        if (IsTextEntry && ClearButtonVisible)
+        {
+            // The clear button owns its tap: down arms it, up on the same spot clears the text
+            // (through the Entry handler's ClearText binding), up anywhere else cancels. This
+            // runs before the entry's own Tap (focus) so a clear never re-requests the keyboard.
+            if (down && InClearButton(x, y))
+            {
+                _clearPressed = true;
+                return true;
+            }
+            if (up && _clearPressed)
+            {
+                _clearPressed = false;
+                if (InClearButton(x, y))
+                {
+                    ClearText?.Invoke();
                 }
                 return true;
             }

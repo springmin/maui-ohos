@@ -94,6 +94,14 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
             [nameof(IPlaceholder.Placeholder)] = MapPlaceholder,
             [nameof(ITextInput.CursorPosition)] = MapCursor,
             [nameof(ITextInput.SelectionLength)] = MapCursor,
+            [nameof(ITextInput.MaxLength)] = MapMaxLength,
+            [nameof(ITextInput.IsReadOnly)] = MapIsReadOnly,
+            [nameof(ITextInput.Keyboard)] = MapKeyboard,
+            [nameof(IEntry.IsPassword)] = MapIsPassword,
+            [nameof(IEntry.ReturnType)] = MapReturnType,
+            [nameof(IEntry.ClearButtonVisibility)] = MapClearButtonVisibility,
+            [nameof(IPlaceholder.PlaceholderColor)] = MapPlaceholderColor,
+            [nameof(ITextAlignment.HorizontalTextAlignment)] = MapHorizontalTextAlignment,
         };
 
     public OpenHarmonyEntryHandler() : base(Mapper) { }
@@ -104,9 +112,24 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         view.Tap = () =>
         {
             SetFocus(true);
-            OpenHarmonyBridge.RequestTextInput(true);
         };
+        view.ClearText = () => ClearEntryText(view);
         return view;
+    }
+
+    /// <summary>Clears the entry through the virtual view (the same path typing uses).</summary>
+    private void ClearEntryText(OpenHarmonyView view)
+    {
+        view.Text = string.Empty;
+        view.CursorPosition = 0;
+        view.SelectionLength = 0;
+        if (VirtualView is Microsoft.Maui.Controls.Entry entry)
+        {
+            entry.Text = string.Empty;
+        }
+        OpenHarmonyBridge.SetKeyboardText(string.Empty);
+        OpenHarmonyBridge.SetKeyboardCaret(0);
+        OpenHarmonyBridge.RequestRedraw();
     }
 
     protected override void ConnectHandler(OpenHarmonyView platformView)
@@ -138,10 +161,11 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
     {
         // Only the focused entry consumes the shell's text. IText.Text is read-only, so the
         // assignment goes through the Controls types, which raises TextChanged/Completed.
-        if (!PlatformView.IsFocused)
+        if (!PlatformView.IsFocused || PlatformView.IsReadOnly)
         {
             return;
         }
+        text = ApplyInputRules(text);
         PlatformView.Text = text;
         switch (VirtualView)
         {
@@ -152,6 +176,17 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
                 editor.Text = text;
                 break;
         }
+    }
+
+    /// <summary>
+    /// The input rules the mapped properties impose: the Keyboard kind's character set and
+    /// MaxLength. The shell always delivers the whole text, so both rules are applied to the
+    /// incoming value before it reaches the platform/virtual views.
+    /// </summary>
+    private string ApplyInputRules(string text)
+    {
+        text = OpenHarmonyView.ApplyKeyboardFilter(PlatformView.Keyboard, text);
+        return OpenHarmonyView.ClampToMaxLength(text, PlatformView.MaxLength);
     }
 
     private int _compositionLength;
@@ -195,7 +230,10 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
     private void SetFocus(bool focused)
     {
         PlatformView.IsFocused = focused;
-        if (focused)
+        // A read-only entry focuses (focus ring, selection) but never opens the soft keyboard;
+        // ArkUI focus stays on the managed surface so typing cannot reach the shell's input.
+        bool editable = !PlatformView.IsReadOnly;
+        if (focused && editable)
         {
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
             if (PlatformView.CursorPosition < 0)
@@ -206,11 +244,11 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
             // (the mapper refreshes it on every CursorPosition change).
             OpenHarmonyBridge.SetKeyboardCaret(PlatformView.CursorPosition);
         }
-        OpenHarmonyBridge.RequestTextInput(focused);
+        OpenHarmonyBridge.RequestTextInput(focused && editable);
         // Name the ArkUI target as well (the shell's registerFocusSink handler): with the input
         // method NDK path RequestTextInput returns before the shell's text-input sink runs, so
         // this is what hands ArkUI focus to the input (focus) or back to the surface (unfocus).
-        if (focused)
+        if (focused && editable)
         {
             OpenHarmonyFocusBridge.RequestTextInputFocus();
         }
@@ -278,5 +316,63 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         {
             OpenHarmonyBridge.SetKeyboardCaret(handler.PlatformView.CursorPosition);
         }
+    }
+
+    // InputView mapping (T1) --------------------------------------------------------------
+    // Every mapper writes the platform-view state and requests a frame: the properties change
+    // the drawing (password bullets, placeholder colour, alignment, clear button), the focus
+    // path (read-only) or the accepted input (max length, keyboard kind).
+
+    public static void MapMaxLength(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.MaxLength = ((ITextInput)entry).MaxLength;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapIsReadOnly(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.IsReadOnly = ((ITextInput)entry).IsReadOnly;
+        if (handler.PlatformView.IsReadOnly && handler.PlatformView.IsFocused)
+        {
+            // Losing editability closes the keyboard the entry may already have open.
+            handler.SetFocus(true);
+        }
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapKeyboard(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.Keyboard = ((ITextInput)entry).Keyboard;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapIsPassword(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.IsPassword = ((IEntry)entry).IsPassword;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapReturnType(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.ReturnType = ((IEntry)entry).ReturnType;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapClearButtonVisibility(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.ClearButtonVisibility = ((IEntry)entry).ClearButtonVisibility;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapPlaceholderColor(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.PlaceholderColor = ((IPlaceholder)entry).PlaceholderColor;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    public static void MapHorizontalTextAlignment(OpenHarmonyEntryHandler handler, IEntry entry)
+    {
+        handler.PlatformView.HorizontalTextAlignment = ((ITextAlignment)entry).HorizontalTextAlignment;
+        OpenHarmonyBridge.RequestRedraw();
     }
 }

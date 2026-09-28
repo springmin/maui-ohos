@@ -262,7 +262,9 @@ public class OpenHarmonyTextView : OpenHarmonyView
     /// <summary>Line height multiplier (-1 keeps the platform default line height).</summary>
     public double LineHeight { get; set; } = -1;
 
-    public TextAlignment HorizontalTextAlignment { get; set; } = TextAlignment.Start;
+    // The base view now models the entry alignment (T1); the text view keeps its own property
+    // because its layout pipeline owns the value (mapped by the Label/Button handlers).
+    public new TextAlignment HorizontalTextAlignment { get; set; } = TextAlignment.Start;
 
     public TextAlignment VerticalTextAlignment { get; set; } = TextAlignment.Center;
 

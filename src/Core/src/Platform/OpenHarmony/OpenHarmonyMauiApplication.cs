@@ -4,10 +4,11 @@
 // IMauiInitializeService shim, so MauiAppBuilder.Build() publishes the singleton - and
 // IPlatformApplication.Current, set through the interface type - before OpenHarmonyMauiAppHost.Run;
 // Application resolves the registered IApplication lazily because it may not exist during Build.
-// The zero-reference interfaces and their documented gaps - ITitleBar (the ArkTS shell owns the
-// title bar), IKeyboardAccelerator (rc.1 has no per-element collection; see
-// OpenHarmonyKeyboardAcceleratorManager) and IAdorner (nothing initializes the diagnostics
-// overlay the slice's overlay host could draw) - are in docs/openharmony-slice-notes.md.
+// The remaining zero-reference interfaces and their documented gaps - ITitleBar (the ArkTS shell
+// owns the title bar) and IKeyboardAccelerator (rc.1 has no per-element collection; see
+// OpenHarmonyKeyboardAcceleratorManager) - are in docs/openharmony-slice-notes.md; the IAdorner
+// path (Window.VisualDiagnosticsOverlay) is initialized by OpenHarmonyWindowHandler.MapContent
+// and drawn by the overlay host.
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Hosting;
 

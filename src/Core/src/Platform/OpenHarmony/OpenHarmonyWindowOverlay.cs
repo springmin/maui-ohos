@@ -15,9 +15,10 @@
 //   * OpenHarmonyWindowOverlayHost: installed once by UseOpenHarmony (through the platform
 //     application initializer, before the first frame), it chains the renderer's existing public
 //     SurfacePresent seam - the same hook OpenHarmonyToolTipManager uses - and on every frame
-//     draws every visible, initialized overlay found in IWindow.Overlays (plus this type's
-//     registry) with the shared frame canvas, before the previous present runs. Nothing is drawn
-//     while no overlay is attached, so the idle frame path is unchanged.
+//     draws every visible, initialized overlay found in IWindow.Overlays, each window's
+//     diagnostics overlay and this type's registry with the shared frame canvas, before the
+//     previous present runs. Nothing is drawn while no overlay is attached, so the idle frame
+//     path is unchanged.
 //
 // The pool of drawn overlays is discovered per frame instead of at AddOverlay time because the
 // slice's window handler (OpenHarmonyWindowHandler) has no AddOverlay/RemoveOverlay mapper entry
@@ -40,12 +41,17 @@
 //     event raiser is internal to Microsoft.Maui.dll, so a package-derived overlay is drawn but
 //     its Tapped never fires; deriving from OpenHarmonyWindowOverlay gets both.
 //
-//   * Window.VisualDiagnosticsOverlay is drawn only after its Initialize() was called; Controls
-//     creates it uninitialized and the slice's window handler does not initialize it (see the
-//     IAdorner note in OpenHarmonyMauiApplication.cs for what the real wiring needs).
+//   * Window.VisualDiagnosticsOverlay (the IAdorner host) is initialized by the window handler
+//     when it attaches to a window - OpenHarmonyWindowHandler.MapContent, the same hook Tizen
+//     uses - and the frame host then draws it and its adorners like any other overlay. Controls'
+//     Invalidate is a no-op on the platform-less build, so the host notices adorner changes on
+//     the frame tick by signature (one frame of latency) instead of being asked; the element
+//     selector's tap-to-select stays unwired because the Tapped raiser is internal to
+//     Microsoft.Maui (see the previous bullet).
 //
 //   * Draw receives Microsoft.Maui.Graphics.Point coordinates in device pixels from the bridge;
 //     Density reports IWindow.RequestDisplayDensity() (1 when the window has no handler yet).
+using System.Runtime.CompilerServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
 using HostCanvas = Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas;
@@ -219,7 +225,8 @@ public class OpenHarmonyWindowOverlay : IWindowOverlay
 }
 
 /// <summary>
-/// Frame hook that draws the window's overlays. Installed once by the platform application
+/// Frame hook that draws the window's overlays (the registry, <c>IWindow.Overlays</c> and every
+/// window's <c>VisualDiagnosticsOverlay</c>). Installed once by the platform application
 /// initializer; each present call paints the visible overlays on the same canvas the renderer
 /// used and then chains the previous <see cref="OpenHarmonyWindowRenderer.SurfacePresent"/> hook
 /// (or presents through the hosting canvas when there is none).
@@ -228,6 +235,10 @@ internal static class OpenHarmonyWindowOverlayHost
 {
     private static readonly object s_sync = new();
     private static readonly List<IWindowOverlay> s_registered = new();
+    // Last element-set signature per diagnostics overlay, so the frame tick can notice an adorner
+    // change (the overlay cannot ask the host itself; see SyncDiagnostics). Weak keys because
+    // windows come and go.
+    private static readonly List<(WeakReference<IWindowOverlay> Overlay, int Signature)> s_diagnosticsSignatures = new();
     private static bool s_installed;
     private static Action? s_presentDelegate;
     private static Action? s_presentPrevious;
@@ -266,6 +277,9 @@ internal static class OpenHarmonyWindowOverlayHost
             OpenHarmonyWindowRenderer.SurfacePresent = s_presentDelegate;
         }
         OpenHarmonyBridge.Touch += OnTouch;
+        // Adorner changes cannot ask this host directly (Controls' overlay Invalidate is the
+        // platform-less no-op); the frame tick is the observation point (see SyncDiagnostics).
+        OpenHarmonyBridge.Frame += OnFrameTick;
     }
 
     internal static void Register(IWindowOverlay overlay)
@@ -291,6 +305,122 @@ internal static class OpenHarmonyWindowOverlayHost
         }
         RequestRedraw();
     }
+
+    /// <summary>
+    /// Initializes <see cref="IWindow.VisualDiagnosticsOverlay"/> (idempotent) so the frame host
+    /// draws it and the adorners an app adds to it. Called by the window handler when it attaches
+    /// to a window, the lifecycle point Tizen uses for the same wiring; a window whose overlay is
+    /// already initialized (or absent, for a custom IWindow) is a no-op. Never throws: the
+    /// diagnostics surface must not fail a window.
+    /// </summary>
+    internal static void EnsureDiagnosticsOverlayInitialized(IWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        try
+        {
+            IVisualDiagnosticsOverlay? diagnostics = window.VisualDiagnosticsOverlay;
+            if (diagnostics is null || diagnostics.IsPlatformViewInitialized)
+            {
+                return;
+            }
+            _ = diagnostics.Initialize();
+            if (diagnostics.IsPlatformViewInitialized)
+            {
+                RequestRedraw();
+            }
+        }
+        catch (Exception)
+        {
+            // Diagnostics only: a failed overlay must not break the window lifecycle.
+        }
+    }
+
+    /// <summary>
+    /// Requests a redraw when a window's diagnostics overlay changed since the last frame tick
+    /// (an adorner was added/removed or the overlay was shown/hidden). Controls' overlay cannot
+    /// ask this host itself - on the platform-less build its Invalidate is a no-op - so the frame
+    /// tick compares the element-set signature instead; a change repaints one frame later.
+    /// Returns true when a redraw was requested; never throws.
+    /// </summary>
+    internal static bool SyncDiagnostics()
+    {
+        bool changed = false;
+        try
+        {
+            IReadOnlyList<IWindow>? windows = IPlatformApplication.Current?.Application?.Windows;
+            if (windows is not null)
+            {
+                lock (s_sync)
+                {
+                    foreach (IWindow? window in windows)
+                    {
+                        IVisualDiagnosticsOverlay? diagnostics = window?.VisualDiagnosticsOverlay;
+                        if (diagnostics is null || !diagnostics.IsPlatformViewInitialized)
+                        {
+                            continue;
+                        }
+                        int signature = DiagnosticsSignature(diagnostics);
+                        int tracked = IndexOfTrackedDiagnostics(diagnostics);
+                        if (tracked < 0)
+                        {
+                            s_diagnosticsSignatures.Add(
+                                (new WeakReference<IWindowOverlay>(diagnostics), signature));
+                            // A window can receive adorners before its first frame tick: a
+                            // non-empty set is a change so it does not wait for a repaint.
+                            changed |= diagnostics.WindowElements.Count > 0;
+                        }
+                        else if (s_diagnosticsSignatures[tracked].Signature != signature)
+                        {
+                            s_diagnosticsSignatures[tracked] =
+                                (s_diagnosticsSignatures[tracked].Overlay, signature);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Frame-tick diagnostics must never break the frame.
+        }
+        if (changed)
+        {
+            RequestRedraw();
+        }
+        return changed;
+    }
+
+    /// <summary>Index of the tracked signature for one overlay (purging collected weak keys).</summary>
+    private static int IndexOfTrackedDiagnostics(IWindowOverlay overlay)
+    {
+        for (int i = s_diagnosticsSignatures.Count - 1; i >= 0; i--)
+        {
+            if (!s_diagnosticsSignatures[i].Overlay.TryGetTarget(out IWindowOverlay? tracked))
+            {
+                s_diagnosticsSignatures.RemoveAt(i);
+                continue;
+            }
+            if (ReferenceEquals(tracked, overlay))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>Change signature of one diagnostics overlay: visibility plus its element set.</summary>
+    private static int DiagnosticsSignature(IWindowOverlay overlay)
+    {
+        var hash = new HashCode();
+        hash.Add(overlay.IsVisible);
+        foreach (IWindowOverlayElement element in overlay.WindowElements)
+        {
+            hash.Add(RuntimeHelpers.GetHashCode(element));
+        }
+        return hash.ToHashCode();
+    }
+
+    private static void OnFrameTick(OpenHarmonyFrameEventArgs args) => SyncDiagnostics();
 
     /// <summary>Asks the host for the next frame; failures must never surface into the app.</summary>
     internal static void RequestRedraw()
@@ -348,7 +478,7 @@ internal static class OpenHarmonyWindowOverlayHost
 
     /// <summary>
     /// Overlays to draw: this type's registry plus every overlay attached to the application's
-    /// windows (the documented IWindow.AddOverlay path, for package-derived overlays too).
+    /// windows (the documented IWindow.AddOverlay path) and each window's diagnostics overlay.
     /// </summary>
     private static List<IWindowOverlay> ActiveOverlays()
     {
@@ -367,7 +497,19 @@ internal static class OpenHarmonyWindowOverlayHost
             {
                 foreach (IWindow? window in windows)
                 {
-                    if (window?.Overlays is not { } overlays)
+                    if (window is null)
+                    {
+                        continue;
+                    }
+                    // The diagnostics overlay is not part of IWindow.Overlays (Controls rejects
+                    // it there); the window lifecycle initialized it, so draw it and its
+                    // IAdorners here.
+                    IVisualDiagnosticsOverlay? diagnostics = window.VisualDiagnosticsOverlay;
+                    if (diagnostics is not null && !active.Contains(diagnostics))
+                    {
+                        active.Add(diagnostics);
+                    }
+                    if (window.Overlays is not { } overlays)
                     {
                         continue;
                     }

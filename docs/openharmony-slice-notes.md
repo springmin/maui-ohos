@@ -61,14 +61,15 @@ Zero-reference interfaces, status documented once (no silent gaps):
     host callback is void, so the slice only records and invokes.
 
   * IAdorner (rc.1: IAdorner is IWindowOverlayElement + Density + VisualView; Controls'
-    VisualDiagnosticsOverlay.AddAdorner builds one to frame a view). The slice's overlay host
-    (OpenHarmonyWindowOverlay.cs) draws any IWindowOverlayElement, so an adorner on an overlay
-    that is drawn/initialized renders. The remaining gap is that Controls creates
-    Window.VisualDiagnosticsOverlay with IsPlatformViewInitialized false and nothing in the
-    slice calls its Initialize() (Tizen does it from WindowHandler.MapContent, which the
-    slice's OpenHarmonyWindowHandler does not replace). Real wiring needs the window lifecycle
-    to initialize the diagnostics overlay; then the same overlay host draws it and its
-    adorners.
+    VisualDiagnosticsOverlay.AddAdorner builds one to frame a view). Wired: the window handler
+    initializes Window.VisualDiagnosticsOverlay when it attaches to a window
+    (OpenHarmonyWindowHandler.MapContent, the Tizen hook), the overlay host draws it next to
+    IWindow.Overlays, and a frame-tick signature check requests a redraw when an adorner was
+    added or removed (Controls' Invalidate is a no-op on the platform-less build, so the host
+    cannot be asked directly; one frame of latency). Remaining gap: the element selector's
+    tap-to-select never fires for the package overlay because its Tapped raiser is internal to
+    Microsoft.Maui, and the diagnostics overlay does not suppress touch passthrough (recorded
+    flags only, like OpenHarmonyWindowOverlay's documented limitation).
 
 ## Bluetooth GATT (`OpenHarmonyBluetoothGatt`)
 

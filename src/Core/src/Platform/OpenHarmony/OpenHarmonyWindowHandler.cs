@@ -44,7 +44,18 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
             [nameof(IWindow.Height)] = MapHeight,
         };
 
-    public OpenHarmonyWindowHandler() : base(Mapper) { }
+    /// <summary>
+    /// Window commands. <see cref="IWindow.RequestDisplayDensity"/> is answered because Controls'
+    /// Window.RequestDisplayDensity throws "No result value was set." when the command is not
+    /// mapped, and the diagnostics overlay reads its Density through it when an adorner is added.
+    /// </summary>
+    public static readonly CommandMapper<IWindow, OpenHarmonyWindowHandler> CommandMapper =
+        new(ElementCommandMapper)
+        {
+            [nameof(IWindow.RequestDisplayDensity)] = MapRequestDisplayDensity,
+        };
+
+    public OpenHarmonyWindowHandler() : base(Mapper, CommandMapper) { }
 
     [LibraryImport(HostLibrary, EntryPoint = TitleEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int SetWindowTitleNative([MarshalAs(UnmanagedType.LPUTF8Str)] string title);
@@ -62,7 +73,24 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
 
     public static void MapContent(OpenHarmonyWindowHandler handler, IWindow window)
     {
-        // The app host renders window.Content; nothing to do here yet.
+        // The app host renders window.Content. The window lifecycle is also where the
+        // diagnostics overlay is initialized (the Tizen MapContent wiring), so the overlay host
+        // draws it and the adorners an app adds to it once the window exists.
+        OpenHarmonyWindowOverlayHost.EnsureDiagnosticsOverlayInitialized(window);
+    }
+
+    /// <summary>
+    /// Answers <see cref="IWindow.RequestDisplayDensity"/> with 1: the compositor draws in device
+    /// pixels and treats one logical unit as one pixel (the fallback OpenHarmonyWindowOverlay's
+    /// Density documents), so that is the density. Mapping the command keeps Controls' Window
+    /// from throwing "No result value was set." when the diagnostics overlay reads its density.
+    /// </summary>
+    public static void MapRequestDisplayDensity(OpenHarmonyWindowHandler handler, IWindow window, object? args)
+    {
+        if (args is DisplayDensityRequest request)
+        {
+            request.SetResult(1f);
+        }
     }
 
     /// <summary>

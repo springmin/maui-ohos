@@ -66,6 +66,9 @@ public sealed class OpenHarmonyWindowRenderer
             // No surface yet (or the host refuses); the tree is still arranged.
             return false;
         }
+        // Hover resolution happens on moves, which carry no root; the render root is the fallback
+        // and the touch path overwrites it with the host's exact root (modal-aware).
+        _lastRoot = content;
         _canvas.FillColor = BackgroundColor;
         _canvas.FillRectangle(0, 0, width, height);
         _popupView = null;
@@ -647,6 +650,25 @@ public sealed class OpenHarmonyWindowRenderer
     /// <summary>Content-space minus screen-space X at press (entry inside a scrolled view).</summary>
     private float _textDragOffsetX;
 
+    // GraphicsView interaction capture. A press on a GraphicsView captures the whole gesture
+    // stream: every pointer of the stream is tracked (multi-touch) and the release/cancel ends the
+    // capture. Hover is the pointer-over-the-tree case with no press behind it (the shell's mouse
+    // path); a move that follows a finger down is a drag, never a hover.
+    private OpenHarmonyView? _graphicsTarget;
+    private OpenHarmonyView? _graphicsHover;
+    private bool _graphicsDragStarted;
+    private float _graphicsDownX;
+    private float _graphicsDownY;
+    private readonly List<int> _graphicsPointerIds = new();
+    private readonly List<PointF> _graphicsPointerPoints = new();
+    /// <summary>The tree the touch walk resolves against; kept for hover moves (no root argument).</summary>
+    private IView? _lastRoot;
+    /// <summary>True while any press is down: a finger move is a drag, not a hover.</summary>
+    private bool _pointerDown;
+
+    /// <summary>Upstream parity: a drag starts once a single pointer passed this many pixels.</summary>
+    private const float GraphicsDragSlop = 3f;
+
     /// <summary>Active selection-handle drag (0 none, 1 start, 2 end) - diagnostics/tests.</summary>
     internal int TextHandleDrag => _textHandleSide;
     private OpenHarmonyDragAndDrop.Session? _dragSession;
@@ -749,9 +771,117 @@ public sealed class OpenHarmonyWindowRenderer
         return false;
     }
 
-    /// <summary>Handles a touch/mouse move: drags the slider or scrolls the scroll view captured on down.</summary>
-    public bool HandleMove(float x, float y)
+    /// <summary>The tracked touch points of the captured GraphicsView gesture, in pointer-down order.</summary>
+    private PointF[] GraphicsPoints()
     {
+        var points = new PointF[_graphicsPointerIds.Count];
+        for (int i = 0; i < points.Length; i++)
+        {
+            points[i] = _graphicsPointerPoints[i];
+        }
+        return points;
+    }
+
+    /// <summary>Adds or moves a pointer of the captured GraphicsView gesture.</summary>
+    private void TrackGraphicsPointer(int pointerId, float x, float y)
+    {
+        int index = _graphicsPointerIds.IndexOf(pointerId);
+        if (index >= 0)
+        {
+            _graphicsPointerPoints[index] = new PointF(x, y);
+            return;
+        }
+        _graphicsPointerIds.Add(pointerId);
+        _graphicsPointerPoints.Add(new PointF(x, y));
+    }
+
+    private void RemoveGraphicsPointer(int pointerId)
+    {
+        int index = _graphicsPointerIds.IndexOf(pointerId);
+        if (index >= 0)
+        {
+            _graphicsPointerIds.RemoveAt(index);
+            _graphicsPointerPoints.RemoveAt(index);
+        }
+    }
+
+    /// <summary>Ends the captured gesture (release of the last pointer, or a cancel).</summary>
+    private void EndGraphicsCapture()
+    {
+        _graphicsTarget = null;
+        _graphicsDragStarted = false;
+        _graphicsPointerIds.Clear();
+        _graphicsPointerPoints.Clear();
+    }
+
+    private void EndGraphicsHover()
+    {
+        if (_graphicsHover is { } hover)
+        {
+            _graphicsHover = null;
+            hover.GraphicsHoverEnd?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Hover for a move with no press behind it: the deepest GraphicsView under the pointer gets
+    /// StartHover on enter, MoveHover on every report and EndHover when the pointer leaves it.
+    /// Returns true when the move belonged to a GraphicsView (so the frame repaints).
+    /// </summary>
+    private bool UpdateGraphicsHover(float x, float y)
+    {
+        if (_lastRoot is null)
+        {
+            return false;
+        }
+        TouchWalk walk = default;
+        CollectTouchTargets(_lastRoot, x, y, true, TouchTargets.Graphics, ref walk);
+        OpenHarmonyView? target = walk.Graphics;
+        if (ReferenceEquals(target, _graphicsHover))
+        {
+            if (target is null)
+            {
+                return false;
+            }
+            target.GraphicsHoverMove?.Invoke(new[] { new PointF(x, y) });
+            return true;
+        }
+        _graphicsHover?.GraphicsHoverEnd?.Invoke();
+        _graphicsHover = target;
+        target?.GraphicsHoverStart?.Invoke(new[] { new PointF(x, y) });
+        // Leaving a view is an interaction too: the old hover state must repaint.
+        return true;
+    }
+
+    /// <summary>Handles a touch/mouse move: drags the slider or scrolls the scroll view captured on down.</summary>
+    public bool HandleMove(float x, float y) => HandleMove(x, y, 0);
+
+    internal bool HandleMove(float x, float y, int pointerId)
+    {
+        // A move with no press behind it is a hover (the shell's mouse path).
+        if (_graphicsTarget is null && !_pointerDown && UpdateGraphicsHover(x, y))
+        {
+            return true;
+        }
+        // A captured GraphicsView owns the moves of the whole gesture stream.
+        if (_graphicsTarget is { IsGraphicsView: true } graphics)
+        {
+            TrackGraphicsPointer(pointerId, x, y);
+            // Upstream parity: a single pointer must pass the slop before a drag starts; with a
+            // second pointer down the gesture is unambiguously a drag.
+            if (!_graphicsDragStarted && _graphicsPointerIds.Count == 1 &&
+                (Math.Abs(x - _graphicsDownX) > GraphicsDragSlop || Math.Abs(y - _graphicsDownY) > GraphicsDragSlop))
+            {
+                _graphicsDragStarted = true;
+            }
+            if (_graphicsDragStarted)
+            {
+                // A drag never counts as a tap for the recognizers on the same view.
+                _moved = true;
+                graphics.GraphicsDragInteraction?.Invoke(GraphicsPoints());
+            }
+            return true;
+        }
         // Touch slop: a drag must not end up as a tap/selection.
         if (!_moved && (Math.Abs(x - _downX) > 8 || Math.Abs(y - _downY) > 8))
         {
@@ -866,7 +996,11 @@ public sealed class OpenHarmonyWindowRenderer
     }
 
     public bool HandleTouch(IView root, bool down, bool up, float x, float y)
+        => HandleTouch(root, down, up, x, y, 0);
+
+    internal bool HandleTouch(IView root, bool down, bool up, float x, float y, int pointerId)
     {
+        _lastRoot = root;
         // An open alert owns all touches until a button is chosen.
         if (OpenHarmonyAlertHost.Current is { } alertState)
         {
@@ -940,7 +1074,7 @@ public sealed class OpenHarmonyWindowRenderer
         if (down)
         {
             wanted |= TouchTargets.Scroll | TouchTargets.Slider | TouchTargets.Drag
-                | TouchTargets.Gesture | TouchTargets.Drop;
+                | TouchTargets.Gesture | TouchTargets.Drop | TouchTargets.Graphics;
         }
         TouchWalk walk = default;
         if (wanted != TouchTargets.None)
@@ -1035,11 +1169,31 @@ public sealed class OpenHarmonyWindowRenderer
         }
         // The drag target is resolved once at the top level; the recursive walk must not
         // overwrite it as it descends into leaves.
+        bool graphicsHandled = false;
         if (down)
         {
             _downX = x;
             _downY = y;
             _moved = false;
+            _pointerDown = true;
+            // A press on a GraphicsView captures the gesture stream: later pointers join the
+            // tracked set and the release of the last pointer (or a cancel) ends the capture.
+            if (_graphicsTarget is null)
+            {
+                _graphicsTarget = walk.Graphics;
+                _graphicsDragStarted = false;
+                _graphicsPointerIds.Clear();
+                _graphicsPointerPoints.Clear();
+            }
+            if (_graphicsTarget is { } graphicsTarget)
+            {
+                _graphicsDownX = x;
+                _graphicsDownY = y;
+                EndGraphicsHover();
+                TrackGraphicsPointer(pointerId, x, y);
+                graphicsTarget.GraphicsStartInteraction?.Invoke(GraphicsPoints());
+                graphicsHandled = true;
+            }
             _dragScrollTarget = walk.Scroll;
             _dragSliderTarget = walk.Slider;
             _dragLastY = y;
@@ -1086,6 +1240,21 @@ public sealed class OpenHarmonyWindowRenderer
         }
         else if (up)
         {
+            _pointerDown = false;
+            if (_graphicsTarget is { } graphicsTarget)
+            {
+                // Upstream parity: the release carries the point and whether it is inside the
+                // frame; the pointer is dropped after the callback and the capture ends with the
+                // last pointer.
+                TrackGraphicsPointer(pointerId, x, y);
+                graphicsTarget.GraphicsEndInteraction?.Invoke(GraphicsPoints(), graphicsTarget.HitTest(x, y));
+                RemoveGraphicsPointer(pointerId);
+                if (_graphicsPointerIds.Count == 0)
+                {
+                    EndGraphicsCapture();
+                }
+                graphicsHandled = true;
+            }
             if (_dragSession is { } dragSession)
             {
                 // The release completes the drag over the view under the pointer (if any).
@@ -1124,7 +1293,23 @@ public sealed class OpenHarmonyWindowRenderer
             }
             _dragScrollTarget = null;
         }
-        return HandleTouchCore(root, down, up, x, y);
+        return HandleTouchCore(root, down, up, x, y) | graphicsHandled;
+    }
+
+    /// <summary>
+    /// Cancels a captured GraphicsView gesture (the shell reporting a canceled touch stream):
+    /// IGraphicsView.CancelInteraction fires and the capture is dropped without a release event.
+    /// </summary>
+    internal bool HandleCancel(float x, float y)
+    {
+        _pointerDown = false;
+        if (_graphicsTarget is not { } graphics)
+        {
+            return false;
+        }
+        EndGraphicsCapture();
+        graphics.GraphicsCancelInteraction?.Invoke();
+        return true;
     }
 
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
@@ -1273,6 +1458,7 @@ public sealed class OpenHarmonyWindowRenderer
         Popup = 1 << 5,
         Flyout = 1 << 6,
         Drop = 1 << 7,
+        Graphics = 1 << 8,
     }
 
     /// <summary>Results of one touch walk; null means "nothing of that kind under the point".</summary>
@@ -1285,6 +1471,7 @@ public sealed class OpenHarmonyWindowRenderer
         public IView? Gesture;
         public OpenHarmonyView? Popup;
         public OpenHarmonyView? Flyout;
+        public OpenHarmonyView? Graphics;
 
         /// <summary>True when the walk saw a usable drop recognizer anywhere (structure, not position).</summary>
         public bool SawDropCapable;
@@ -1343,6 +1530,7 @@ public sealed class OpenHarmonyWindowRenderer
         OpenHarmonyView? sliderBefore = walk.Slider;
         IView? dragBefore = walk.Drag;
         IView? gestureBefore = walk.Gesture;
+        OpenHarmonyView? graphicsBefore = walk.Graphics;
         foreach (IView child in ChildrenInZOrder(view))
         {
             CollectTouchTargets(child, localX, localY, positioned, wanted, ref walk);
@@ -1382,6 +1570,11 @@ public sealed class OpenHarmonyWindowRenderer
         {
             walk.Gesture = view;
         }
+        if ((wanted & TouchTargets.Graphics) != 0 && ReferenceEquals(walk.Graphics, graphicsBefore)
+            && platform is { IsGraphicsView: true })
+        {
+            walk.Graphics = platform;
+        }
     }
 
     private IView? _pointerHover;
@@ -1392,6 +1585,7 @@ public sealed class OpenHarmonyWindowRenderer
     /// </summary>
     public bool HandlePointerMove(IView root, float x, float y)
     {
+        _lastRoot = root;
         IView? target = FindPointerTarget(root, x, y);
         if (!ReferenceEquals(target, _pointerHover))
         {

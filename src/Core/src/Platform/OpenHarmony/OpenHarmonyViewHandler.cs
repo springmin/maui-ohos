@@ -9,6 +9,9 @@ public abstract class OpenHarmonyViewHandler<TVirtualView> : ViewHandler<TVirtua
 {
     protected OpenHarmonyViewHandler(IPropertyMapper mapper) : base(mapper) { }
 
+    protected OpenHarmonyViewHandler(IPropertyMapper mapper, CommandMapper commandMapper)
+        : base(mapper, commandMapper) { }
+
     public override void SetVirtualView(IView view)
     {
         base.SetVirtualView(view);

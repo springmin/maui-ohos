@@ -500,8 +500,11 @@ Microsoft.Maui.Platform.OpenHarmonyMauiAppHost
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Arrange(int width, int height) -> void
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Describe() -> string!
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.HandleAccessibilityAction(int nodeId, int action) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.HandleCancel(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.HandleMove(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.HandleMove(float x, float y, int pointerId) -> bool
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.HandleTouch(bool down, bool up, float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.HandleTouch(bool down, bool up, float x, float y, int pointerId) -> bool
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.OpenHarmonyMauiAppHost(System.IServiceProvider! services) -> void
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Render() -> bool
 Microsoft.Maui.Platform.OpenHarmonyMauiAppHost.Run(Microsoft.Maui.IApplication! application) -> void
@@ -803,8 +806,20 @@ Microsoft.Maui.Platform.OpenHarmonyView.FlyoutWidth.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.FontSize.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.FontSize.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.Frame.get -> Microsoft.Maui.Graphics.RectF
-Microsoft.Maui.Platform.OpenHarmonyView.GraphicsTap.get -> System.Action<Microsoft.Maui.Graphics.PointF>?
-Microsoft.Maui.Platform.OpenHarmonyView.GraphicsTap.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsCancelInteraction.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsCancelInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsDragInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[]>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsDragInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsEndInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[], bool>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsEndInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverEnd.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverEnd.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverMove.get -> System.Action<Microsoft.Maui.Graphics.PointF[]>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverMove.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverStart.get -> System.Action<Microsoft.Maui.Graphics.PointF[]>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverStart.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsStartInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[]>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsStartInteraction.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.HitTest(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.get -> Microsoft.Maui.TextAlignment
 Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.set -> void
@@ -1034,6 +1049,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.VirtualView.get -> Microsoft.Maui.IView?
 Microsoft.Maui.Platform.OpenHarmonyView.VirtualView.set -> void
 Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>
 Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>.OpenHarmonyViewHandler(Microsoft.Maui.IPropertyMapper! mapper) -> void
+Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>.OpenHarmonyViewHandler(Microsoft.Maui.IPropertyMapper! mapper, Microsoft.Maui.CommandMapper! commandMapper) -> void
 Microsoft.Maui.Platform.OpenHarmonyWebAuthenticator
 Microsoft.Maui.Platform.OpenHarmonyWebAuthenticator.AuthenticateAsync(Microsoft.Maui.Authentication.WebAuthenticatorOptions! webAuthenticatorOptions) -> System.Threading.Tasks.Task<Microsoft.Maui.Authentication.WebAuthenticatorResult!>!
 Microsoft.Maui.Platform.OpenHarmonyWebAuthenticator.AuthenticateAsync(Microsoft.Maui.Authentication.WebAuthenticatorOptions! webAuthenticatorOptions, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<Microsoft.Maui.Authentication.WebAuthenticatorResult!>!
@@ -1366,6 +1382,8 @@ static Microsoft.Maui.Platform.OpenHarmonyGattResult.operator !=(Microsoft.Maui.
 static Microsoft.Maui.Platform.OpenHarmonyGattResult.operator ==(Microsoft.Maui.Platform.OpenHarmonyGattResult left, Microsoft.Maui.Platform.OpenHarmonyGattResult right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyGattValue.operator !=(Microsoft.Maui.Platform.OpenHarmonyGattValue left, Microsoft.Maui.Platform.OpenHarmonyGattValue right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyGattValue.operator ==(Microsoft.Maui.Platform.OpenHarmonyGattValue left, Microsoft.Maui.Platform.OpenHarmonyGattValue right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapDrawable(Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView) -> void
+static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapInvalidate(Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView, object? arg) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHandlerConnector.Connect(Microsoft.Maui.IElement? element) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHandlerConnector.ConnectTree(Microsoft.Maui.IElement? element) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHandlerConnector.Context.get -> Microsoft.Maui.IMauiContext?
@@ -1530,6 +1548,7 @@ static readonly Microsoft.Maui.Platform.OpenHarmonyEntryHandler.Mapper -> Micros
 static readonly Microsoft.Maui.Platform.OpenHarmonyFlashlight.Instance -> Microsoft.Maui.Platform.OpenHarmonyFlashlight!
 static readonly Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.FlyoutPage!, Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyFrameHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.Frame!, Microsoft.Maui.Platform.OpenHarmonyFrameHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.CommandMapper -> Microsoft.Maui.CommandMapper<Microsoft.Maui.IGraphicsView!, Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IGraphicsView!, Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyGyroscope.Instance -> Microsoft.Maui.Platform.OpenHarmonyGyroscope!
 static readonly Microsoft.Maui.Platform.OpenHarmonyHapticFeedback.Instance -> Microsoft.Maui.Platform.OpenHarmonyHapticFeedback!

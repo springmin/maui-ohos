@@ -36,13 +36,19 @@ Zero-reference interfaces, status documented once (no silent gaps):
 
   * ITitleBar / Microsoft.Maui.Controls.Window.TitleBar (rc.1: ITitleBar is IContentView +
     IPadding + ICrossPlatformLayout with Title/Subtitle/PassthroughElements; Window.TitleBar is
-    a bindable property). The slice draws no window chrome of its own: the ArkTS shell owns the
-    title bar and OpenHarmonyWindowHandler.MapTitle only publishes the title through
-    ohos_host_set_window_title. Window.TitleBar is stored by Controls but never measured,
-    drawn or routed. A real implementation would add a title-bar row to the compositor
-    (measure/arrange/draw Title/Subtitle/PassthroughElements and route their touches like the
-    navigation bar does), map the window's navigation affordances (back button) onto it, and
-    confirm the ArkUI shell lets the app own the title area.
+    a bindable property). Wired: OpenHarmonyWindowHandler maps TitleBar onto the compositor-owned
+    OpenHarmonyTitleBarRow. The row takes the top of the surface (the TitleBar's HeightRequest,
+    else the 56px chrome height), measures/arranges and draws the TitleBar's template subtree
+    inside it (Title/Subtitle/Leading/Content/Trailing all draw through the normal walk), and
+    arranges the window content below; touches route into the template's views, and
+    TitleBar.IsVisible = false gives the surface back to the content. The window's back
+    affordance occupies the leading slot: while the window's page tree can consume a back press
+    (modal stack, NavigationPage stack, presented flyout, Shell stack - the slice's mirror of
+    Controls' internal Window.CanConsumeBackNavigation), the row draws the shell chrome's
+    chevron there and a tap invokes IWindow.BackButtonClicked (a custom OnBackButtonPressed
+    override still wins). Still open: the ArkUI shell keeps its own window decorations, so
+    system minimize/maximize/close buttons and drag regions are not mapped onto the row, and
+    the row is not yet part of the accessibility shadow tree.
 
   * IKeyboardAccelerator (the per-element collection). rc.1 exposes the interface
     (Modifiers/Key) and the Microsoft.Maui.Controls.KeyboardAccelerator object, but the only

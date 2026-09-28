@@ -54,11 +54,42 @@ public sealed class OpenHarmonyWindowRenderer
     /// <summary>Flyout scrim over the covered detail: derived once instead of per frame.</summary>
     private static readonly Color s_flyoutScrim = Colors.Black.WithAlpha(0.5f);
 
+    /// <summary>
+    /// The Window.TitleBar row of the window that owns <paramref name="content"/>, when the app
+    /// set one. TitleBar is a logical child of the window, not of the page, so the compositor
+    /// resolves it through the content's window handler; a detached tree (no window) has no row.
+    /// </summary>
+    private static OpenHarmonyTitleBarRow? ResolveTitleBar(IView? content)
+        => content is Microsoft.Maui.Controls.VisualElement element &&
+           element.Window is { Handler: OpenHarmonyWindowHandler windowHandler }
+            ? windowHandler.TitleBar
+            : null;
+
     /// <summary>Measures and arranges the tree, then draws it when a surface is available.</summary>
+    /// <remarks>
+    /// A Window.TitleBar row (when the app set one and it is visible) takes the top of the
+    /// surface: the content is arranged below it through the same page-aware walk the app host
+    /// uses, and the row's own subtree is arranged and drawn above the content.
+    /// </remarks>
     public bool Render(IView content, int width, int height)
     {
-        content.Measure(width, height);
-        content.Arrange(new Rect(0, 0, width, height));
+        OpenHarmonyTitleBarRow? titleBar = ResolveTitleBar(content);
+        bool showsTitleBar = titleBar is { IsVisible: true };
+        float titleBarHeight = showsTitleBar ? titleBar!.Height : 0f;
+        float contentHeight = Math.Max(0f, height - titleBarHeight);
+        content.Measure(width, contentHeight);
+        if (showsTitleBar)
+        {
+            // Pages and navigation pages have no platform layout in this slice, so their
+            // presented content is arranged by the page-aware walk (the app host uses it too)
+            // inside the frame left below the row.
+            OpenHarmonySafeAreaArrange.Arrange(content, new Rect(0, titleBarHeight, width, contentHeight),
+                new Rect(0, 0, width, height), OpenHarmonySafeArea.GetWindowInsets());
+        }
+        else
+        {
+            content.Arrange(new Rect(0, 0, width, height));
+        }
 
         bool surfaceReady = SurfaceBegin is not null ? SurfaceBegin(width, height) : HostCanvas.Begin(width, height);
         if (!surfaceReady)
@@ -75,6 +106,15 @@ public sealed class OpenHarmonyWindowRenderer
         _flyoutPanelView = null;
         _carouselViews.Clear();
         DrawView(content);
+        if (showsTitleBar)
+        {
+            // The window title bar is chrome above the page: arranged into the top row, drawn
+            // after the content, with the back affordance over its leading slot.
+            titleBar!.Measure(width);
+            titleBar.Arrange(new Rect(0, 0, width, titleBarHeight));
+            DrawView(titleBar.View);
+            titleBar.DrawBackAffordance(_canvas);
+        }
         foreach (OpenHarmonyView carousel in _carouselViews)
         {
             DrawCarouselIndicator(carousel);
@@ -1032,6 +1072,21 @@ public sealed class OpenHarmonyWindowRenderer
                 }
                 return true;
             }
+        }
+
+        // The Window.TitleBar row is window chrome above the page tree: a touch that lands on it
+        // resolves against the TitleBar subtree, and the leading slot maps onto the window's back
+        // affordance. The slot wins over the app's leading content, like the navigation bar's
+        // back region wins over its children.
+        if (ResolveTitleBar(root) is { IsVisible: true } titleBar && titleBar.Contains(x, y))
+        {
+            if (down && titleBar.ShowsBack && titleBar.InBackButton(x, y) && titleBar.BackTapped())
+            {
+                return true;
+            }
+            bool rowHandled = HandleTouchCore(titleBar.View, down, up, x, y);
+            // A press on the row never leaks into the page underneath.
+            return rowHandled || down || up;
         }
 
         // Pointer gestures (pointer recognizers receive enter/press on touch down, release/exit on up).

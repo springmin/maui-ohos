@@ -11,6 +11,10 @@
 // observable off-device - and the handler degrades silently with one status line. The host clamps
 // the rectangle it queues (width/height into (0, 16384], x/y into [-32768, 32768]) and rejects a
 // non-positive size, so a rectangle is only published once a usable size is known.
+// Window.TitleBar additionally maps onto the compositor: MapTitleBar builds the title-bar row
+// (OpenHarmonyTitleBarRow) that the renderer measures/arranges/draws above the window content and
+// through which touches reach the TitleBar's own views; the renderer resolves the row from the
+// window handler of the content's window.
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -28,6 +32,9 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         {
             [nameof(IWindow.Content)] = MapContent,
             [nameof(IWindow.Title)] = MapTitle,
+            // Window.TitleBar (Controls' bindable property; the name travels through
+            // Element.UpdateHandlerValue, so the mapper key is the property name).
+            ["TitleBar"] = MapTitleBar,
             // The ArkUI window belongs to the shell; the frame MAUI knows (mirrored from the
             // reported surface size by the app host, or set by the app) is pushed back through
             // ohos_host_set_window_rect.
@@ -68,6 +75,27 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         PublishTitle(window.Title);
     }
 
+    /// <summary>
+    /// Builds the compositor row for Window.TitleBar (null when the app cleared it). The row
+    /// lives on the handler, not in the page tree, because the TitleBar is a logical child of the
+    /// window; the renderer resolves it through the content's window handler.
+    /// </summary>
+    public static void MapTitleBar(OpenHarmonyWindowHandler handler, IWindow window)
+    {
+        ITitleBar? titleBar = (window as Microsoft.Maui.Controls.Window)?.TitleBar;
+        if (titleBar is null)
+        {
+            handler.TitleBar = null;
+            return;
+        }
+        if (ReferenceEquals(handler.TitleBar?.VirtualView, titleBar))
+        {
+            return;
+        }
+        handler.TitleBar = new OpenHarmonyTitleBarRow(window, titleBar);
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
     public static void MapX(OpenHarmonyWindowHandler handler, IWindow window)
     {
         handler.X = window.X;
@@ -94,6 +122,9 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
 
     /// <summary>Last title mapped from the window (the fallback when the chrome export is absent).</summary>
     public string? Title { get; private set; }
+
+    /// <summary>The window's title-bar row, when the app set Window.TitleBar (see MapTitleBar).</summary>
+    internal OpenHarmonyTitleBarRow? TitleBar { get; private set; }
 
     /// <summary>Last X mapped from <see cref="IWindow.X"/>.</summary>
     public double X { get; private set; }

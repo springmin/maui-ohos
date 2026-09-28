@@ -367,6 +367,12 @@ public sealed class OpenHarmonyMauiAppHost
         {
             return false;
         }
+        // Modal focus trap: while an alert is open, stale background nodes are inert; only the
+        // alert's own subtree accepts actions (its buttons route through the same tap path).
+        if (OpenHarmonyAlertHost.Current is not null && !OpenHarmonyAccessibility.IsModalNode(nodeId))
+        {
+            return false;
+        }
         OpenHarmonyAccessibility.TryFindView(nodeId, out IView? target);
         switch ((OpenHarmonyAccessibilityAction)action)
         {

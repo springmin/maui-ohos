@@ -58,7 +58,9 @@ public static partial class OpenHarmonyAccessibility
     /// <c>(nodeId, action)</c> with no value payload, so SET_TEXT and SET_CURSOR_POSITION can never
     /// be honoured and are not published. This slice has no platform long-press path either, so
     /// LONG_CLICK is not published. CLICK, the scroll actions (IScrollView/ISlider) and the text
-    /// input actions (copy/paste/cut/select, all executed on the node's view) are.
+    /// input actions (copy/paste/cut/select, all executed on the node's view) are. The modal
+    /// prompt field is the one narrowing: it publishes CLICK and COPY only, because its edits
+    /// ride the keyboard bridge and it has no view or caret/selection model.
     /// </remarks>
     public static IReadOnlyList<OpenHarmonyAccessibilityAction> ActionsFor(string role)
         => role switch
@@ -104,6 +106,18 @@ public static partial class OpenHarmonyAccessibility
         _ => 0,
     };
 
+    /// <summary>
+    /// Action mask for one published node, with the modal prompt field narrowed to the actions
+    /// the alert really executes: it is a <c>textInput</c> by role, but its edits ride the
+    /// keyboard bridge (no view, no caret/selection model), so only CLICK (focus it) and COPY
+    /// (its published text) can be honoured; PASTE/CUT/SELECT_TEXT would be advertised but
+    /// no-op and are withheld for modal nodes.
+    /// </summary>
+    private static int ActionMask(string role, bool modal)
+        => modal && role == "textInput"
+            ? (int)(OpenHarmonyAccessibilityAction.Click | OpenHarmonyAccessibilityAction.Copy)
+            : ActionMask(role);
+
     // The shadow tree is published as immutable snapshots: Refresh walks the live tree into
     // reusable build buffers and only swaps the published snapshot in when something actually
     // moved. An accessibility callback on another thread (Nodes, TryFindNode, the action
@@ -113,23 +127,32 @@ public static partial class OpenHarmonyAccessibility
     // objects at all: every node position reuses the previous frame's immutable node record.
     private sealed class Frame
     {
-        public static readonly Frame Empty = new(Array.Empty<OpenHarmonyAccessibilityNode>(), Array.Empty<IView>());
+        public static readonly Frame Empty = new(Array.Empty<OpenHarmonyAccessibilityNode>(), Array.Empty<IView?>(), 0);
 
-        public Frame(OpenHarmonyAccessibilityNode[] nodes, IView[] views)
+        public Frame(OpenHarmonyAccessibilityNode[] nodes, IView?[] views, int modalRootId)
         {
             Nodes = nodes;
             Views = views;
+            ModalRootId = modalRootId;
         }
 
         /// <summary>Nodes of the frame, root first, parent before child (id = index + 1).</summary>
         public OpenHarmonyAccessibilityNode[] Nodes { get; }
 
         /// <summary>
-        /// Positional view table: <c>Views[i]</c> is the view <c>Nodes[i]</c> was built from. The
-        /// array is swapped together with <see cref="Nodes"/>, so an action callback always routes
-        /// against a single complete frame, never a partially rebuilt one.
+        /// Positional view table: <c>Views[i]</c> is the view <c>Nodes[i]</c> was built from (null
+        /// for the modal alert nodes, which have no view). The array is swapped together with
+        /// <see cref="Nodes"/>, so an action callback always routes against a single complete
+        /// frame, never a partially rebuilt one.
         /// </summary>
-        public IView[] Views { get; }
+        public IView?[] Views { get; }
+
+        /// <summary>
+        /// Id of the modal alert subtree root (an open Alert/ActionSheet/Prompt), 0 when no alert
+        /// is open. The modal nodes are appended after the view tree, so ids
+        /// <c>&gt;= ModalRootId</c> are exactly the alert subtree (the focus trap's inside).
+        /// </summary>
+        public int ModalRootId { get; }
     }
 
     private static Frame s_frame = Frame.Empty;
@@ -403,18 +426,35 @@ public static partial class OpenHarmonyAccessibility
 
     /// <summary>
     /// Finds the view a published node was built from, so an action can be executed on it
-    /// (scrolling, text edits). False when the node is unknown or its view has gone away.
+    /// (scrolling, text edits). False when the node is unknown, is a modal alert node (which has
+    /// no view; the alert itself handles the action) or its view has gone away.
     /// </summary>
     public static bool TryFindView(int id, out IView view)
     {
         Frame frame = Volatile.Read(ref s_frame);
-        if (id >= 1 && id <= frame.Views.Length && frame.Nodes[id - 1].Id == id)
+        if (id >= 1 && id <= frame.Views.Length && frame.Nodes[id - 1].Id == id
+            && frame.Views[id - 1] is { } found)
         {
-            view = frame.Views[id - 1];
+            view = found;
             return true;
         }
         view = null!;
         return false;
+    }
+
+    /// <summary>
+    /// True when the id belongs to the modal alert subtree of the published frame (an open
+    /// Alert/ActionSheet/Prompt). While a modal is open only these nodes accept actions; the
+    /// background tree stays published but non-focusable, so the screen reader's focus order
+    /// (the host's focusable-bit scans) cannot leave the dialog.
+    /// </summary>
+    internal static bool IsModalNode(int id)
+    {
+        Frame frame = Volatile.Read(ref s_frame);
+        return frame.ModalRootId != 0
+            && id >= frame.ModalRootId
+            && id <= frame.Nodes.Length
+            && frame.Nodes[id - 1].Id == id;
     }
 
     /// <summary>Nodes handed to the host by the last publish pass (0 when unavailable).</summary>
@@ -496,7 +536,13 @@ public static partial class OpenHarmonyAccessibility
             s_buildNodes.Clear();
             s_buildViews.Clear();
             s_buildPending.Clear();
-            bool changed = Visit(root, previous);
+            // An open alert is modal: the background tree stays in the frame with its content,
+            // but every background node is republished non-focusable and the alert's own nodes
+            // are appended after it as the only focusable region (the focus trap).
+            OpenHarmonyAlertState? alert = OpenHarmonyAlertHost.Current;
+            bool changed = Visit(root, previous, alert is not null);
+            (int modalRootId, bool modalChanged) = AppendAlertNodes(previous, alert);
+            changed |= modalChanged || modalRootId != previous.ModalRootId;
             if (!changed)
             {
                 return;
@@ -504,7 +550,7 @@ public static partial class OpenHarmonyAccessibility
             // Publish the completed frame with atomic reference swaps: a callback on the
             // accessibility thread either sees the previous complete frame or this one, never a
             // partial rebuild, and the arrays themselves are never mutated after publication.
-            Volatile.Write(ref s_frame, new Frame(s_buildNodes.ToArray(), s_buildViews.ToArray()));
+            Volatile.Write(ref s_frame, new Frame(s_buildNodes.ToArray(), s_buildViews.ToArray(), modalRootId));
         }
     }
 
@@ -514,7 +560,8 @@ public static partial class OpenHarmonyAccessibility
     /// </summary>
     public static void Publish()
     {
-        OpenHarmonyAccessibilityNode[] nodes = Volatile.Read(ref s_frame).Nodes;
+        Frame frame = Volatile.Read(ref s_frame);
+        OpenHarmonyAccessibilityNode[] nodes = frame.Nodes;
         // The event source is managed state, so the diff runs even when the host is unavailable.
         PendingEventCount = DiffFrames(nodes);
         if (!_available || nodes.Length == 0)
@@ -536,8 +583,10 @@ public static partial class OpenHarmonyAccessibility
             foreach (OpenHarmonyAccessibilityNode node in nodes)
             {
                 int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
+                bool modal = frame.ModalRootId != 0 && node.Id >= frame.ModalRootId;
                 AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description, node.Hint,
-                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags, ActionMask(node.Role),
+                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags,
+                    ActionMask(node.Role, modal),
                     node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
             }
             AccessibilityCommit();
@@ -562,7 +611,8 @@ public static partial class OpenHarmonyAccessibility
     // walk in progress. They grow to the tree size once and are then reused every frame.
     private static readonly object s_buildLock = new();
     private static readonly List<OpenHarmonyAccessibilityNode> s_buildNodes = new();
-    private static readonly List<IView> s_buildViews = new();
+    // Null slots are the modal alert nodes: they are built from the alert state, not from a view.
+    private static readonly List<IView?> s_buildViews = new();
     private static readonly Stack<(IView View, int ParentId)> s_buildPending = new();
     private static readonly List<IView> s_buildChildren = new();
 
@@ -572,7 +622,7 @@ public static partial class OpenHarmonyAccessibility
     /// snapshots: the reused record still holds the same values it was published with.
     /// </summary>
     private static OpenHarmonyAccessibilityNode BuildNode(IView view, int id, int parentId,
-        OpenHarmonyAccessibilityNode? previous)
+        OpenHarmonyAccessibilityNode? previous, bool modal)
     {
         RectF bounds = default;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
@@ -590,7 +640,10 @@ public static partial class OpenHarmonyAccessibility
         string? description = view is VisualElement element ? SemanticProperties.GetDescription(element) : null;
         string? hint = view is VisualElement hintElement ? SemanticProperties.GetHint(hintElement) : null;
         bool enabled = view is not VisualElement visual || visual.IsEnabled;
-        bool focusable = view is VisualElement focusableElement && focusableElement.IsEnabled && role != "group";
+        // While an alert is open the whole background tree drops the focusable bit: the host's
+        // focus-move scans walk the published table by exactly this flag, so focus cannot leave
+        // the dialog (the alert's own nodes are appended focusable after the tree).
+        bool focusable = !modal && view is VisualElement focusableElement && focusableElement.IsEnabled && role != "group";
         // Range is published only where the control has one; NaN bounds mark it absent (the
         // host's "RangeMin <= RangeMax" check can never pass for NaN). Sliders use their own
         // Minimum/Maximum/Value; MAUI's IProgress.Progress is already a 0..1 fraction, so the
@@ -645,8 +698,12 @@ public static partial class OpenHarmonyAccessibility
             && node.RangeCurrent.Equals(rangeCurrent)
             && node.Checked == checkedState;
 
-    private static bool Visit(IView root, Frame previous)
+    private static bool Visit(IView root, Frame previous, bool modal)
     {
+        // The view walk covers the content nodes only; the previous frame's alert nodes (appended
+        // at ModalRootId) are not positions the walk can produce, so the length check compares
+        // against the previous content count alone.
+        int previousViewCount = previous.ModalRootId == 0 ? previous.Nodes.Length : previous.ModalRootId - 1;
         bool changed = false;
         s_buildPending.Push((root, 0));
         while (s_buildPending.Count > 0)
@@ -661,14 +718,14 @@ public static partial class OpenHarmonyAccessibility
                 index < previous.Nodes.Length && ReferenceEquals(previous.Views[index], view)
                     ? previous.Nodes[index]
                     : null;
-            OpenHarmonyAccessibilityNode node = BuildNode(view, id, parent, previousNode);
+            OpenHarmonyAccessibilityNode node = BuildNode(view, id, parent, previousNode, modal);
             s_buildNodes.Add(node);
             s_buildViews.Add(view);
             changed |= !ReferenceEquals(node, previousNode);
             PushChildren(view, id);
         }
         // A shorter frame is a change even when every surviving position reused its node.
-        return changed || s_buildNodes.Count != previous.Nodes.Length;
+        return changed || s_buildNodes.Count != previousViewCount;
     }
 
     /// <summary>
@@ -698,6 +755,82 @@ public static partial class OpenHarmonyAccessibility
         {
             s_buildPending.Push((s_buildChildren[i], id));
         }
+    }
+
+    /// <summary>
+    /// Appends the open alert's nodes after the view tree: a dialog root (title, or the message
+    /// when there is no title), the message when both are present, the prompt text field and one
+    /// button per accept/cancel label or action sheet row. Returns the dialog root's id (0 when
+    /// no alert is open) and whether any appended node had to be rebuilt.
+    /// </summary>
+    private static (int RootId, bool Changed) AppendAlertNodes(Frame previous, OpenHarmonyAlertState? alert)
+    {
+        if (alert is null)
+        {
+            return (0, false);
+        }
+        bool changed = false;
+        int rootId = s_buildNodes.Count + 1;
+        // Title and message collapse into the dialog node when only one of them exists, so a
+        // dialog with a message but no title does not get an empty leading focus stop.
+        string? title = !string.IsNullOrEmpty(alert.Title) ? alert.Title : null;
+        string? message = !string.IsNullOrEmpty(alert.Message) ? alert.Message : null;
+        AddAlertNode(previous, 0, "dialog", title ?? message, null, null,
+            OpenHarmonyAlertHost.BoxRect, focusable: true, ref changed);
+        if (title is not null && message is not null)
+        {
+            AddAlertNode(previous, rootId, "text", message, null, null,
+                OpenHarmonyAlertHost.MessageRect, focusable: true, ref changed);
+        }
+        if (alert.Kind == OpenHarmonyAlertKind.Prompt)
+        {
+            AddAlertNode(previous, rootId, "textInput", alert.PromptText, null, null,
+                OpenHarmonyAlertHost.PromptRect, focusable: true, ref changed);
+        }
+        if (alert.Kind == OpenHarmonyAlertKind.ActionSheet)
+        {
+            for (int i = 0; i < alert.Options.Count; i++)
+            {
+                AddAlertNode(previous, rootId, "button", alert.Options[i], null, null,
+                    OpenHarmonyAlertHost.OptionRect(i), focusable: true, ref changed);
+            }
+        }
+        if (!string.IsNullOrEmpty(alert.Accept))
+        {
+            AddAlertNode(previous, rootId, "button", alert.Accept, null, null,
+                OpenHarmonyAlertHost.AcceptRect, focusable: true, ref changed);
+        }
+        if (!string.IsNullOrEmpty(alert.Cancel))
+        {
+            AddAlertNode(previous, rootId, "button", alert.Cancel, null, null,
+                OpenHarmonyAlertHost.CancelRect, focusable: true, ref changed);
+        }
+        return (rootId, changed);
+    }
+
+    /// <summary>
+    /// Appends one alert node, reusing the previous frame's immutable record at the same position
+    /// when it was also an alert node with identical published values (the same reuse rule the
+    /// view walk applies, minus the view identity, which alert nodes do not have).
+    /// </summary>
+    private static void AddAlertNode(Frame previous, int parentId, string role, string? text,
+        string? description, string? hint, RectF bounds, bool focusable, ref bool changed)
+    {
+        int index = s_buildNodes.Count;
+        int id = index + 1;
+        OpenHarmonyAccessibilityNode? previousNode =
+            index < previous.Nodes.Length && previous.Views[index] is null ? previous.Nodes[index] : null;
+        if (previousNode is not null && NodeMatches(previousNode, id, parentId, role, text, description,
+            hint, bounds, true, focusable, double.NaN, double.NaN, 0, -1))
+        {
+            s_buildNodes.Add(previousNode);
+            s_buildViews.Add(null);
+            return;
+        }
+        s_buildNodes.Add(new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds,
+            true, focusable, double.NaN, double.NaN, 0, -1));
+        s_buildViews.Add(null);
+        changed = true;
     }
 
     private static string RoleOf(IView view) => view switch

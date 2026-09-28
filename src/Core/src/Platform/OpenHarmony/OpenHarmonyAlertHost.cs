@@ -66,6 +66,36 @@ internal static class OpenHarmonyAlertHost
         }
     }
 
+    /// <summary>Title row of the dialog (shared by drawing and the accessibility shadow tree).</summary>
+    public static RectF TitleRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            return new RectF(box.X + 20, box.Y + 8, box.Width - 40, 48);
+        }
+    }
+
+    /// <summary>Message body of the dialog (drawing and the accessibility shadow tree).</summary>
+    public static RectF MessageRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            return new RectF(box.X + 20, box.Y + 60, box.Width - 40, box.Height - 140);
+        }
+    }
+
+    /// <summary>Prompt text field (drawing and the accessibility shadow tree).</summary>
+    public static RectF PromptRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            return new RectF(box.X + 20, box.Y + 110, box.Width - 40, 56);
+        }
+    }
+
     /// <summary>Row rects of an action sheet (options then cancel).</summary>
     public static RectF OptionRect(int index)
     {

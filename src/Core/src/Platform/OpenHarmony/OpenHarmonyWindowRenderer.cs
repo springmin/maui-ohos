@@ -25,7 +25,16 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas = CanvasFactory?.Invoke() ?? new MauiCanvas();
         // A changed IView.Shadow must repaint; the drawing below reads the shadow directly.
         OpenHarmonyShadow.Install();
+        // An alert opening or closing must repaint (and republish the accessibility shadow tree)
+        // even when no input follows it. One process-wide subscription, not one per renderer.
+        if (!s_alertRedrawWired)
+        {
+            s_alertRedrawWired = true;
+            OpenHarmonyAlertHost.Changed += OpenHarmonyBridge.RequestRedraw;
+        }
     }
+
+    private static bool s_alertRedrawWired;
 
     public Color BackgroundColor { get; set; } = Colors.DarkSlateBlue;
 
@@ -132,10 +141,12 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas.FillRoundedRectangle(box.X, box.Y, box.Width, box.Height, 12);
         _canvas.FontColor = Colors.White;
         _canvas.FontSize = 30;
-        _canvas.DrawString(alert.Title ?? string.Empty, box.X + 20, box.Y + 8, box.Width - 40, 48,
+        RectF title = OpenHarmonyAlertHost.TitleRect;
+        _canvas.DrawString(alert.Title ?? string.Empty, title.X, title.Y, title.Width, title.Height,
             HorizontalAlignment.Left, VerticalAlignment.Center);
         _canvas.FontSize = 24;
-        _canvas.DrawString(alert.Message ?? string.Empty, box.X + 20, box.Y + 60, box.Width - 40, box.Height - 140,
+        RectF message = OpenHarmonyAlertHost.MessageRect;
+        _canvas.DrawString(alert.Message ?? string.Empty, message.X, message.Y, message.Width, message.Height,
             HorizontalAlignment.Left, VerticalAlignment.Top);
         _canvas.FontSize = 26;
         if (alert.Kind == OpenHarmonyAlertKind.ActionSheet)
@@ -153,11 +164,11 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (alert.Kind == OpenHarmonyAlertKind.Prompt)
         {
-            RectF field = OpenHarmonyAlertHost.BoxRect;
+            RectF field = OpenHarmonyAlertHost.PromptRect;
             _canvas.FillColor = Colors.Black;
-            _canvas.FillRoundedRectangle(field.X + 20, field.Y + 110, field.Width - 40, 56, 8);
+            _canvas.FillRoundedRectangle(field.X, field.Y, field.Width, field.Height, 8);
             _canvas.FontColor = Colors.White;
-            _canvas.DrawString(alert.PromptText, field.X + 32, field.Y + 110, field.Width - 64, 56,
+            _canvas.DrawString(alert.PromptText, field.X + 12, field.Y, field.Width - 24, field.Height,
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
         if (!string.IsNullOrEmpty(alert.Accept))

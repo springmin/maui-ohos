@@ -27,13 +27,33 @@ internal static partial class OpenHarmonyKeystore
     public static async Task<byte[]?> EncryptAsync(string alias, byte[] plain, int timeoutMs = 1500)
     {
         string? result = await ExecuteAsync("encrypt", alias, Convert.ToBase64String(plain), timeoutMs);
-        return result is null ? null : Convert.FromBase64String(result);
+        return DecodeBase64(result);
     }
 
     public static async Task<byte[]?> DecryptAsync(string alias, byte[] cipher, int timeoutMs = 1500)
     {
         string? result = await ExecuteAsync("decrypt", alias, Convert.ToBase64String(cipher), timeoutMs);
-        return result is null ? null : Convert.FromBase64String(result);
+        return DecodeBase64(result);
+    }
+
+    /// <summary>
+    /// The shell sink's base64 answer decoded safely: a malformed answer (a broken sink or a
+    /// truncated native result) reads as absent instead of throwing out of a storage call.
+    /// </summary>
+    private static byte[]? DecodeBase64(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+        try
+        {
+            return Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     public static async Task<bool> EnsureKeyAsync(string alias, int timeoutMs = 1500)

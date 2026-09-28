@@ -10,9 +10,16 @@ namespace Microsoft.Maui.Platform;
 
 public sealed class OpenHarmonySecureStorage : ISecureStorage
 {
+    /// <summary>Bytes of the per-install fallback key (AES-256 key material for the XOR stream).</summary>
+    private const int FileKeyBytes = 32;
+
     private readonly string _path;
     private readonly string _alias;
     private readonly byte[] _key;
+    // Serializes the load-modify-save sequences (and the file reads) of this store: two
+    // concurrent Set calls would otherwise apply their values to the same snapshot and the
+    // later save would drop the earlier one. Never held across an await.
+    private readonly object _fileSync = new();
 
     public OpenHarmonySecureStorage(string? path = null)
     {
@@ -22,23 +29,58 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
         // namespaces the key for this library and v1 pins the scheme
         // (AES-256-GCM, sealed as nonce||ciphertext||tag).
         _alias = "maui.ohos.securestorage.v1." + PathHash(_path);
-        string keyPath = _path + ".key";
-        if (File.Exists(keyPath))
+        _key = LoadOrCreateFileKey(_path + ".key");
+    }
+
+    /// <summary>
+    /// The per-install fallback key next to the data file. A missing, truncated, wrong-length
+    /// or unreadable key file is replaced: a zero-length file would otherwise divide by zero
+    /// in <see cref="Encode"/>, and a wrong-length key cannot round-trip existing values. The
+    /// write is best effort with owner-only permissions; the new key stays in memory when it
+    /// fails (the old values then read as empty, exactly like a lost key).
+    /// </summary>
+    private static byte[] LoadOrCreateFileKey(string keyPath)
+    {
+        try
         {
-            _key = File.ReadAllBytes(keyPath);
+            byte[] existing = File.ReadAllBytes(keyPath);
+            if (existing.Length == FileKeyBytes)
+            {
+                EnsureOwnerOnlyFile(keyPath);
+                return existing;
+            }
         }
-        else
+        catch
         {
-            _key = new byte[32];
-            Random.Shared.NextBytes(_key);
-            try
+            // Missing or unreadable: fall through to regeneration.
+        }
+        byte[] key = new byte[FileKeyBytes];
+        Random.Shared.NextBytes(key);
+        try
+        {
+            File.WriteAllBytes(keyPath, key);
+            EnsureOwnerOnlyFile(keyPath);
+        }
+        catch
+        {
+            // Best effort: the key stays in memory for this session.
+        }
+        return key;
+    }
+
+    /// <summary>Owner read/write only (0600) for the key material; best effort off-device.</summary>
+    private static void EnsureOwnerOnlyFile(string path)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows())
             {
-                File.WriteAllBytes(keyPath, _key);
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             }
-            catch
-            {
-                // Best effort: the key stays in memory for this session.
-            }
+        }
+        catch
+        {
+            // Not a Unix file system: the app sandbox still bounds the file to this app.
         }
     }
 
@@ -54,7 +96,11 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
 
     public async Task<string?> GetAsync(string key)
     {
-        Dictionary<string, string> values = Load();
+        Dictionary<string, string> values;
+        lock (_fileSync)
+        {
+            values = Load();
+        }
         if (!values.TryGetValue(key, out string? value))
         {
             return null;
@@ -72,7 +118,7 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
                 // GetAsync (a failed keystore decrypt below already answers null).
                 return null;
             }
-            byte[]? plain = await OpenHarmonyKeystore.DecryptAsync(_alias, cipher);
+            byte[]? plain = await OpenHarmonyKeystore.DecryptAsync(_alias, cipher).ConfigureAwait(false);
             return plain is null ? null : Encoding.UTF8.GetString(plain);
         }
         return value;
@@ -80,15 +126,19 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
 
     public async Task SetAsync(string key, string value)
     {
-        Dictionary<string, string> values = Load();
-        // Prefer the HUKS-backed keystore; the wrapper never throws.
-        if (await OpenHarmonyKeystore.EnsureKeyAsync(_alias))
+        // Prefer the HUKS-backed keystore; the wrapper never throws. The keystore work happens
+        // before the file lock, so the store never blocks a thread across an await.
+        if (await OpenHarmonyKeystore.EnsureKeyAsync(_alias).ConfigureAwait(false))
         {
-            byte[]? cipher = await OpenHarmonyKeystore.EncryptAsync(_alias, Encoding.UTF8.GetBytes(value));
+            byte[]? cipher = await OpenHarmonyKeystore.EncryptAsync(_alias, Encoding.UTF8.GetBytes(value)).ConfigureAwait(false);
             if (cipher is not null)
             {
-                values[key] = KeystorePrefix + Convert.ToBase64String(cipher);
-                Save(values);
+                lock (_fileSync)
+                {
+                    Dictionary<string, string> values = Load();
+                    values[key] = KeystorePrefix + Convert.ToBase64String(cipher);
+                    Save(values);
+                }
                 return;
             }
         }
@@ -97,21 +147,31 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
         // protection is visible at runtime, not just in the header.
         OpenHarmonyStatus.Once("securestorage.filekey",
             "secure storage is using the per-install file key: the HUKS-backed key path failed, values are obfuscated but not hardware-backed");
-        values[key] = value;
-        Save(values);
+        lock (_fileSync)
+        {
+            Dictionary<string, string> values = Load();
+            values[key] = value;
+            Save(values);
+        }
     }
 
     public bool Remove(string key)
     {
-        Dictionary<string, string> values = Load();
-        bool removed = values.Remove(key);
-        Save(values);
-        return removed;
+        lock (_fileSync)
+        {
+            Dictionary<string, string> values = Load();
+            bool removed = values.Remove(key);
+            Save(values);
+            return removed;
+        }
     }
 
     public void RemoveAll()
     {
-        Save(new Dictionary<string, string>());
+        lock (_fileSync)
+        {
+            Save(new Dictionary<string, string>());
+        }
         // Best effort: drop the device-bound key too, so a cleared store leaves no key that
         // could decrypt a stray ciphertext. The call never throws and is intentionally not
         // awaited (ISecureStorage.RemoveAll is synchronous).
@@ -171,6 +231,7 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
                 Directory.CreateDirectory(directory);
             }
             File.WriteAllText(_path, builder.ToString());
+            EnsureOwnerOnlyFile(_path);
         }
         catch (Exception ex)
         {

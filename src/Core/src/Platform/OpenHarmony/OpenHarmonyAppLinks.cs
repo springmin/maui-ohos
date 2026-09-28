@@ -14,9 +14,10 @@
 //     is created/activated and on every foreground).
 //   * Routes go through Shell.GoToAsync, which is the existing Navigating approval chain: an
 //     app-canceled navigation is recorded, never bypassed. app://host/path?query maps to
-//     //host/path?query; an https link is accepted only when its host is in the app-link
-//     allow-list (seeded from the packaging's OpenHarmonyAppLinkHosts through the activation
-//     payload; an app can add hosts through AllowedHttpsHosts).
+//     //host/path?query; a route path with a literal '..' segment is rejected with a status
+//     line (SEC-SCAN-3 S3-DL3); an https link is accepted only when its host is in the
+//     app-link allow-list (seeded from the packaging's OpenHarmonyAppLinkHosts through the
+//     activation payload; an app can add hosts through AllowedHttpsHosts).
 //   * Without a Shell the request falls back to a NavigationPage when the route is registered
 //     with Routing.RegisterRoute and the live window's root is a NavigationPage; otherwise it is
 //     ignored with a status line. A malformed URI, an unregistered route or a failing
@@ -359,6 +360,15 @@ public static class OpenHarmonyAppLinks
                 rejection = "the app link carries no route";
                 return false;
             }
+            if (HasDotDotSegment(segments))
+            {
+                // app://../x parses with Uri.Host == ".." and would become the Shell route
+                // "//../x" (SEC-SCAN-3 S3-DL3). Shell treats it as a segment name, not a
+                // file path, but a traversal-shaped segment has no route semantics: reject
+                // it with a status line instead of passing it on.
+                rejection = "the app link route contains a '..' segment";
+                return false;
+            }
             route = "//" + segments;
         }
         else if (uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
@@ -371,6 +381,11 @@ public static class OpenHarmonyAppLinks
             if (path.Length == 0)
             {
                 rejection = "the https app link carries no route";
+                return false;
+            }
+            if (HasDotDotSegment(path))
+            {
+                rejection = "the https app link route contains a '..' segment";
                 return false;
             }
             route = "//" + path;
@@ -386,6 +401,24 @@ public static class OpenHarmonyAppLinks
             route += uri.Query;
         }
         return true;
+    }
+
+    /// <summary>
+    /// True when a route path carries a literal '..' segment. The route is a Shell-level
+    /// segment list (no file semantics), but app://../x and https://host/../x would otherwise
+    /// reach GoToAsync as a traversal-shaped route, so they are rejected and recorded instead
+    /// (SEC-SCAN-3 S3-DL3).
+    /// </summary>
+    private static bool HasDotDotSegment(string path)
+    {
+        foreach (string segment in path.Split('/'))
+        {
+            if (segment == "..")
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool IsHttpsHostAllowed(string host)

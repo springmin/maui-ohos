@@ -2,6 +2,7 @@
 // Microsoft.Maui.Graphics canvas and route taps to the handlers' platform views.
 using System.Text;
 using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
 using HostCanvas = Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas;
 using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
@@ -18,6 +19,12 @@ public sealed class OpenHarmonyWindowRenderer
 
     public static Action? SurfacePresent { get; set; }
 
+    /// <summary>
+    /// Test seam: reports the pivot (canvas coordinates) of every rotate/scale transform the
+    /// drawing pass applies, so off-device tests can pin AnchorX/AnchorY without a rasterizer.
+    /// </summary>
+    internal static Action<float, float>? TransformPivotObserved { get; set; }
+
     private readonly MauiCanvas _canvas;
 
     public OpenHarmonyWindowRenderer()
@@ -32,6 +39,9 @@ public sealed class OpenHarmonyWindowRenderer
             s_alertRedrawWired = true;
             OpenHarmonyAlertHost.Changed += OpenHarmonyBridge.RequestRedraw;
         }
+        // Clip, anchor, input transparency and z-order are read from the virtual view on every
+        // draw as well; their property changes need a repaint for the same reason.
+        OpenHarmonyLayoutRedraw.Install();
     }
 
     private static bool s_alertRedrawWired;
@@ -302,6 +312,140 @@ public sealed class OpenHarmonyWindowRenderer
 
     private static ChildEnumerator ChildrenOf(IView view) => new(view);
 
+    /// <summary>
+    /// Enumerates a view's children in ascending <see cref="IView.ZIndex"/> order (stable for
+    /// equal values), the order both the drawing pass and the hit-test passes need: the platform
+    /// stacks siblings by z-order, so the highest value is drawn last and is the topmost.
+    /// </summary>
+    /// <remarks>
+    /// The fast path keeps the allocation-free <see cref="ChildEnumerator"/> when the children
+    /// are already ordered (the usual case: every ZIndex is 0); only a node with an out-of-order
+    /// child materialises and sorts its children for that walk. Sorting is a stable insertion
+    /// sort: child lists are small and a run only happens after a ZIndex change, so the O(n^2)
+    /// worst case buys zero allocations on the frame path.
+    /// </remarks>
+    private struct OrderedChildEnumerator
+    {
+        private ChildEnumerator _inner;
+        private List<IView>? _sorted;
+        private int _index;
+
+        public OrderedChildEnumerator(IView view)
+        {
+            _inner = default;
+            _sorted = null;
+            _index = -1;
+            int previous = int.MinValue;
+            bool outOfOrder = false;
+            foreach (IView child in ChildrenOf(view))
+            {
+                if (child.ZIndex < previous)
+                {
+                    outOfOrder = true;
+                    break;
+                }
+                previous = child.ZIndex;
+            }
+            if (!outOfOrder)
+            {
+                _inner = new ChildEnumerator(view);
+                return;
+            }
+            var list = new List<IView>();
+            foreach (IView child in ChildrenOf(view))
+            {
+                InsertByZIndex(list, child);
+            }
+            _sorted = list;
+        }
+
+        private static void InsertByZIndex(List<IView> list, IView child)
+        {
+            int z = child.ZIndex;
+            int index = list.Count;
+            while (index > 0 && list[index - 1].ZIndex > z)
+            {
+                index--;
+            }
+            list.Insert(index, child);
+        }
+
+        public readonly IView Current => _sorted is null ? _inner.Current : _sorted[_index];
+
+        /// <summary>Pattern-based foreach entry point: copied per loop, still allocation-free.</summary>
+        public readonly OrderedChildEnumerator GetEnumerator() => this;
+
+        public bool MoveNext()
+        {
+            if (_sorted is null)
+            {
+                return _inner.MoveNext();
+            }
+            _index++;
+            return _index < _sorted.Count;
+        }
+    }
+
+    private static OrderedChildEnumerator ChildrenInZOrder(IView view) => new(view);
+
+    /// <summary>
+    /// True when the view's subtree must not receive input: an input-transparent view blocks its
+    /// own input, and a <see cref="Microsoft.Maui.Controls.Layout"/> additionally blocks its
+    /// children while <c>CascadeInputTransparent</c> is true (the Layout default). A
+    /// non-cascading layout stays transparent itself but its children remain hit-testable.
+    /// </summary>
+    private static bool BlocksInput(IView view)
+        => view.InputTransparent &&
+           (view is not Microsoft.Maui.Controls.Layout layout || layout.CascadeInputTransparent);
+
+    /// <summary>
+    /// True when the view's clip shape excludes the point. The clip is built in the view's bounds
+    /// (the geometry is bounds-relative, like every MAUI platform clip) and translated into the
+    /// canvas coordinates the frame uses; the flattened path is tested with an even-odd ray cast.
+    /// A view without a clip contains every point; a clip with no geometry contains none.
+    /// </summary>
+    private static bool ClipContainsPoint(IView view, RectF frame, float x, float y)
+    {
+        if (view.Clip is not { } clip)
+        {
+            return true;
+        }
+        PathF path = ClipPathFor(clip, frame);
+        if (path.Points is null || path.Count == 0)
+        {
+            return false;
+        }
+        PathF flat = path.Count >= 3 ? path.GetFlattenedPath(0.25f, false) : path;
+        int count = flat.Points is null ? 0 : flat.Count;
+        if (count < 3)
+        {
+            return false;
+        }
+        bool inside = false;
+        for (int i = 0, j = count - 1; i < count; j = i++)
+        {
+            PointF a = flat[i];
+            PointF b = flat[j];
+            if ((a.Y > y) != (b.Y > y) && x < (b.X - a.X) * (y - a.Y) / (b.Y - a.Y) + a.X)
+            {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    /// <summary>
+    /// The clip path in canvas coordinates: MAUI clip geometry is relative to the element's
+    /// bounds (0,0,w,h), so <see cref="IShape.PathForBounds"/> is asked for the origin bounds and
+    /// the result is translated to the view's frame position.
+    /// </summary>
+    private static PathF ClipPathFor(IShape clip, RectF frame)
+    {
+        PathF path = clip.PathForBounds(new RectF(0, 0, frame.Width, frame.Height));
+        path.Transform(System.Numerics.Matrix3x2.CreateTranslation(frame.X, frame.Y));
+        return path;
+    }
+
     private void DrawView(IView view)
     {
         if (view.Visibility != Visibility.Visible)
@@ -315,6 +459,7 @@ public sealed class OpenHarmonyWindowRenderer
         // platform-view branch so every exit (including the early returns below) can pop it.
         bool transformed = false;
         float previousAlpha = 1f;
+        bool clipped = false;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
             // View transforms (animations set these): opacity, translation, scale, rotation.
@@ -341,14 +486,37 @@ public sealed class OpenHarmonyWindowRenderer
                 }
                 if (view.Rotation != 0 || view.Scale != 1.0)
                 {
+                    // Rotation and scale pivot at the view's anchor (AnchorX/AnchorY, 0.5 by
+                    // default = the frame centre); the anchor is not clamped, matching the
+                    // platform semantics where an anchor outside the frame is legal.
                     RectF frame = platform.Frame;
-                    _canvas.Rotate((float)view.Rotation, frame.Center.X, frame.Center.Y);
+                    float anchorX = frame.X + (float)view.AnchorX * frame.Width;
+                    float anchorY = frame.Y + (float)view.AnchorY * frame.Height;
+                    TransformPivotObserved?.Invoke(anchorX, anchorY);
+                    _canvas.Rotate((float)view.Rotation, anchorX, anchorY);
                     if (view.Scale != 1.0)
                     {
-                        // ICanvas.Scale has no centre overload: translate around the centre.
-                        _canvas.Translate(frame.Center.X, frame.Center.Y);
+                        // ICanvas.Scale has no centre overload: translate around the anchor.
+                        _canvas.Translate(anchorX, anchorY);
                         _canvas.Scale((float)view.Scale, (float)view.Scale);
-                        _canvas.Translate(-frame.Center.X, -frame.Center.Y);
+                        _canvas.Translate(-anchorX, -anchorY);
+                    }
+                }
+            }
+            // The view's clip applies to the view and its subtree: clipping is one saved canvas
+            // state, and the path is built in the view's frame (the drawing coordinates), so a
+            // transformed view clips in its transformed space.
+            if (view.Clip is { } clip)
+            {
+                RectF clipFrame = platform.Frame;
+                if (clipFrame.Width > 0 && clipFrame.Height > 0)
+                {
+                    PathF clipPath = ClipPathFor(clip, clipFrame);
+                    if (clipPath.Count > 0)
+                    {
+                        _canvas.SaveState();
+                        _canvas.ClipPath(clipPath);
+                        clipped = true;
                     }
                 }
             }
@@ -402,7 +570,7 @@ public sealed class OpenHarmonyWindowRenderer
                     DrawView(flyoutContent);
                     _canvas.RestoreState();
                 }
-                RestoreTransform(_canvas, transformed, previousAlpha);
+                RestoreViewState(_canvas, transformed, previousAlpha, clipped);
                 return;
             }
             if (platform.IsScrollView)
@@ -411,20 +579,33 @@ public sealed class OpenHarmonyWindowRenderer
                 _canvas.SaveState();
                 _canvas.ClipRectangle(platform.Frame.X, platform.Frame.Y, platform.Frame.Width, platform.Frame.Height);
                 _canvas.Translate(-platform.ScrollOffsetX, -platform.ScrollOffsetY);
-                foreach (IView child in ChildrenOf(view))
+                foreach (IView child in ChildrenInZOrder(view))
                 {
                     DrawView(child);
                 }
                 _canvas.RestoreState();
-                RestoreTransform(_canvas, transformed, previousAlpha);
+                RestoreViewState(_canvas, transformed, previousAlpha, clipped);
                 return;
             }
         }
-        foreach (IView child in ChildrenOf(view))
+        foreach (IView child in ChildrenInZOrder(view))
         {
             DrawView(child);
         }
-        RestoreTransform(_canvas, transformed, previousAlpha);
+        RestoreViewState(_canvas, transformed, previousAlpha, clipped);
+    }
+
+    /// <summary>
+    /// Pops the canvas state pushed for a clipped view (see <see cref="DrawView"/>), then the
+    /// transform state. Both use the canvas stack, so the pops stay in reverse order.
+    /// </summary>
+    private static void RestoreViewState(MauiCanvas canvas, bool transformed, float previousAlpha, bool clipped)
+    {
+        if (clipped)
+        {
+            canvas.RestoreState();
+        }
+        RestoreTransform(canvas, transformed, previousAlpha);
     }
 
     /// <summary>
@@ -948,8 +1129,24 @@ public sealed class OpenHarmonyWindowRenderer
 
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
     {
+        if (BlocksInput(view))
+        {
+            // Input-transparent view (and, for a cascading layout, its whole subtree).
+            return false;
+        }
+        // A non-cascading transparent layout still routes touches to its children; only its own
+        // handlers below are skipped.
+        bool transparent = view.InputTransparent;
+        // A clip excludes the point from the view and its subtree: hit-testing follows the
+        // drawing, which does not paint a clipped-away point.
+        if (view.Handler?.PlatformView is OpenHarmonyView clipped
+            && view.Clip is not null
+            && !ClipContainsPoint(view, clipped.Frame, x, y))
+        {
+            return false;
+        }
         bool handled = false;
-        if (view.Handler?.PlatformView is OpenHarmonyView { ShowsTitleBar: true } chromeView)
+        if (!transparent && view.Handler?.PlatformView is OpenHarmonyView { ShowsTitleBar: true } chromeView)
         {
             if (down && chromeView.InBackButton(x, y))
             {
@@ -957,7 +1154,7 @@ public sealed class OpenHarmonyWindowRenderer
                 return true;
             }
         }
-        if (view.Handler?.PlatformView is OpenHarmonyView { ShowsHamburger: true } shellView)
+        if (!transparent && view.Handler?.PlatformView is OpenHarmonyView { ShowsHamburger: true } shellView)
         {
             if (down && shellView.InHamburger(x, y) && !shellView.FlyoutOpen)
             {
@@ -1001,11 +1198,11 @@ public sealed class OpenHarmonyWindowRenderer
             childX += container.ScrollOffsetX;
             childY += container.ScrollOffsetY;
         }
-        foreach (IView child in ChildrenOf(view))
+        foreach (IView child in ChildrenInZOrder(view))
         {
             handled |= HandleTouchCore(child, down, up, childX, childY);
         }
-        if (view.Handler?.PlatformView is OpenHarmonyView { IsTextEntry: true } textEntry && !_moved &&
+        if (!transparent && view.Handler?.PlatformView is OpenHarmonyView { IsTextEntry: true } textEntry && !_moved &&
             textEntry.Frame.Contains(x, y) && textEntry.IsFocused)
         {
             if (down)
@@ -1040,7 +1237,7 @@ public sealed class OpenHarmonyWindowRenderer
                 OpenHarmonyScrollPhysics.ClearReleaseSuppression();
             }
         }
-        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        if (!transparent && view.Handler?.PlatformView is OpenHarmonyView platform)
         {
             // Views handle their own touches (buttons, navigation bars); plain views ignore them.
             // A drag never counts as a tap.
@@ -1103,6 +1300,11 @@ public sealed class OpenHarmonyWindowRenderer
     /// </summary>
     private void CollectTouchTargets(IView view, float x, float y, bool positioned, TouchTargets wanted, ref TouchWalk walk)
     {
+        if (BlocksInput(view))
+        {
+            // Input-transparent view (cascading layout: its whole subtree).
+            return;
+        }
         OpenHarmonyView? platform = view.Handler?.PlatformView as OpenHarmonyView;
         if (platform is not null)
         {
@@ -1116,6 +1318,12 @@ public sealed class OpenHarmonyWindowRenderer
             }
             if (positioned && !platform.Frame.Contains(x, y))
             {
+                positioned = false;
+            }
+            if (positioned && view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y))
+            {
+                // The clip excludes the point from the view and its subtree (the drawing pass
+                // does not paint a clipped-away point either).
                 positioned = false;
             }
         }
@@ -1135,12 +1343,18 @@ public sealed class OpenHarmonyWindowRenderer
         OpenHarmonyView? sliderBefore = walk.Slider;
         IView? dragBefore = walk.Drag;
         IView? gestureBefore = walk.Gesture;
-        foreach (IView child in ChildrenOf(view))
+        foreach (IView child in ChildrenInZOrder(view))
         {
             CollectTouchTargets(child, localX, localY, positioned, wanted, ref walk);
         }
         if (!positioned)
         {
+            return;
+        }
+        if (view.InputTransparent)
+        {
+            // Non-cascading transparent layout: its children were visited above, the view itself
+            // never matches an input query.
             return;
         }
         if ((wanted & TouchTargets.Pointer) != 0 && ReferenceEquals(walk.Pointer, pointerBefore)
@@ -1200,27 +1414,40 @@ public sealed class OpenHarmonyWindowRenderer
 
     private IView? FindPinchTarget(IView view, float x, float y)
     {
-        IView? found = null;
-        if (view.Handler?.PlatformView is OpenHarmonyView platform && !platform.Frame.Contains(x, y))
+        if (BlocksInput(view))
         {
             return null;
         }
-        foreach (IView child in ChildrenOf(view))
+        IView? found = null;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            if (!platform.Frame.Contains(x, y)
+                || (view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y)))
+            {
+                return null;
+            }
+        }
+        foreach (IView child in ChildrenInZOrder(view))
         {
             found = FindPinchTarget(child, x, y) ?? found;
         }
-        return found ?? (OpenHarmonyPinch.HasPinch(view) ? view : null);
+        return found ?? (!view.InputTransparent && OpenHarmonyPinch.HasPinch(view) ? view : null);
     }
 
     /// <summary>Deepest view containing the point that owns a pointer recognizer.</summary>
     private IView? FindPointerTarget(IView view, float x, float y)
     {
+        if (BlocksInput(view))
+        {
+            return null;
+        }
         IView? found = null;
         float localX = x;
         float localY = y;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            if (!platform.Frame.Contains(x, y))
+            if (!platform.Frame.Contains(x, y)
+                || (view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y)))
             {
                 return null;
             }
@@ -1230,22 +1457,27 @@ public sealed class OpenHarmonyWindowRenderer
                 localY += platform.ScrollOffsetY;
             }
         }
-        foreach (IView child in ChildrenOf(view))
+        foreach (IView child in ChildrenInZOrder(view))
         {
             found = FindPointerTarget(child, localX, localY) ?? found;
         }
-        return found ?? (OpenHarmonyPointer.HasPointer(view) ? view : null);
+        return found ?? (!view.InputTransparent && OpenHarmonyPointer.HasPointer(view) ? view : null);
     }
 
     /// <summary>Deepest view containing the point that owns a usable drop recognizer.</summary>
     private IView? FindDropTarget(IView view, float x, float y)
     {
+        if (BlocksInput(view))
+        {
+            return null;
+        }
         IView? found = null;
         float localX = x;
         float localY = y;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            if (!platform.Frame.Contains(x, y))
+            if (!platform.Frame.Contains(x, y)
+                || (view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y)))
             {
                 return null;
             }
@@ -1255,11 +1487,11 @@ public sealed class OpenHarmonyWindowRenderer
                 localY += platform.ScrollOffsetY;
             }
         }
-        foreach (IView child in ChildrenOf(view))
+        foreach (IView child in ChildrenInZOrder(view))
         {
             found = FindDropTarget(child, localX, localY) ?? found;
         }
-        return found ?? (OpenHarmonyDragAndDrop.HasDrop(view) ? view : null);
+        return found ?? (!view.InputTransparent && OpenHarmonyDragAndDrop.HasDrop(view) ? view : null);
     }
 
     /// <summary>Human-readable tree for logs/tests: type, text and arranged frame.</summary>
@@ -1349,5 +1581,63 @@ public sealed class OpenHarmonyWindowRenderer
         {
             DescribeInto(child, depth + 1, sb);
         }
+    }
+}
+
+/// <summary>
+/// Layout semantics (T5) the compositor reads from the virtual view every frame instead of
+/// storing on the platform view: Clip, AnchorX/AnchorY, InputTransparent and ZIndex. A property
+/// change has to request a repaint or the next frame is only drawn when some other input
+/// arrives, exactly like <see cref="OpenHarmonyShadow"/>. The default ViewMapper maps Clip,
+/// AnchorX/AnchorY and InputTransparent to no-ops in this platform-less slice and has no ZIndex
+/// entry at all, so each key gets one wrapper that runs the previous mapping (when one exists)
+/// and then requests a frame. Installed once, from the renderer constructor.
+/// </summary>
+internal static class OpenHarmonyLayoutRedraw
+{
+    private static bool s_installed;
+
+    internal static void Install()
+    {
+        if (s_installed)
+        {
+            return;
+        }
+        s_installed = true;
+        if (ViewHandler.ViewMapper is not PropertyMapper<IView, IViewHandler> mapper)
+        {
+            return;
+        }
+        Hook(mapper, nameof(IView.Clip));
+        Hook(mapper, nameof(IView.ZIndex));
+        Hook(mapper, nameof(ITransform.AnchorX));
+        Hook(mapper, nameof(ITransform.AnchorY));
+        Hook(mapper, nameof(IView.InputTransparent));
+    }
+
+    private static void Hook(PropertyMapper<IView, IViewHandler> mapper, string key)
+    {
+        // GetProperty returns null for a key the default map does not carry (ZIndex); the indexer
+        // would throw on it.
+        Action<IViewHandler, IView>? previous = mapper.GetProperty(key);
+        mapper[key] = (handler, view) =>
+        {
+            try
+            {
+                previous?.Invoke(handler, view);
+            }
+            catch (Exception)
+            {
+                // The default rc.1 mapping has no OpenHarmony platform view contract; ignore.
+            }
+            try
+            {
+                OpenHarmonyBridge.RequestRedraw();
+            }
+            catch (Exception)
+            {
+                // No host: the next input/frame event repaints anyway.
+            }
+        };
     }
 }

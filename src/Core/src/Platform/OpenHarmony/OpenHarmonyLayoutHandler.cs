@@ -81,6 +81,9 @@ public sealed class OpenHarmonyLayoutHandler : OpenHarmonyViewHandler<ILayout>, 
 
     public void UpdateZIndex(IView child)
     {
-        // Children keep insertion order; z-order is not modelled by the compositor yet.
+        // The compositor re-reads each child's ZIndex when it draws, so the change only needs a
+        // frame: the child list itself stays in insertion order (the draw/hit-test walk orders it
+        // iteratively by ZIndex).
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.RequestRedraw();
     }
 }

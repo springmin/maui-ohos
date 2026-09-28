@@ -855,6 +855,12 @@ public class OpenHarmonyView
     public Action? CalendarNextMonth { get; set; }
     public Action<DateTime>? CalendarSelectDay { get; set; }
 
+    /// <summary>First selectable day (date only); earlier days draw disabled and do not hit-test.</summary>
+    public DateTime CalendarMinimum { get; set; } = DateTime.MinValue;
+
+    /// <summary>Last selectable day (date only); later days draw disabled and do not hit-test.</summary>
+    public DateTime CalendarMaximum { get; set; } = DateTime.MaxValue;
+
     public const float CalendarWidth = 380f;
     public const float CalendarHeaderHeight = 52f;
     public const float CalendarRowHeight = 46f;
@@ -862,7 +868,116 @@ public class OpenHarmonyView
 
     public static float CalendarHeight => CalendarHeaderHeight + CalendarRowHeight * (CalendarWeeks + 1);
 
-    /// <summary>Hit test for the calendar: -1 outside, -2 previous, -3 next, 1..31 day.</summary>
+    private static readonly string[] s_calendarWeekdays = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
+
+    private static readonly string[] s_calendarDayLabels = BuildCalendarDayLabels();
+
+    private static readonly Color s_calendarSelected = Colors.DodgerBlue;
+    private static readonly Color s_calendarDisabled = Colors.Gray;
+
+    private int _calendarTitleYear;
+    private int _calendarTitleMonth;
+    private string _calendarTitle = string.Empty;
+
+    private static string[] BuildCalendarDayLabels()
+    {
+        var labels = new string[31];
+        for (int day = 1; day <= labels.Length; day++)
+        {
+            labels[day - 1] = day.ToString();
+        }
+        return labels;
+    }
+
+    /// <summary>The header title; the string is rebuilt only when the shown month changes.</summary>
+    private string CalendarTitle()
+    {
+        if (_calendarTitleYear != CalendarYear || _calendarTitleMonth != CalendarMonth)
+        {
+            _calendarTitleYear = CalendarYear;
+            _calendarTitleMonth = CalendarMonth;
+            _calendarTitle = $"{CalendarYear:0000}-{CalendarMonth:00}";
+        }
+        return _calendarTitle;
+    }
+
+    /// <summary>
+    /// Draws the open month calendar below the field: the header (month navigation clamps at the
+    /// min/max month), the Monday-first weekday row and the 6x7 day grid. Days outside
+    /// <see cref="CalendarMinimum"/>..<see cref="CalendarMaximum"/> draw disabled.
+    /// </summary>
+    public void DrawCalendar(MauiCanvas canvas)
+    {
+        RectF frame = Frame;
+        float x = frame.X;
+        float y = frame.Y + frame.Height;
+        float width = CalendarWidth;
+        canvas.FillColor = Colors.Black;
+        canvas.FillRectangle(x, y, width, CalendarHeight);
+        canvas.StrokeColor = s_calendarDisabled;
+        canvas.StrokeSize = 1;
+        canvas.DrawRectangle(x, y, width, CalendarHeight);
+
+        // Header: < month year >; an edge arrow is greyed when its month is out of range.
+        DateTime firstMonth = new(CalendarMinimum.Year, CalendarMinimum.Month, 1);
+        DateTime lastMonth = new(CalendarMaximum.Year, CalendarMaximum.Month, 1);
+        DateTime shownMonth = new(CalendarYear, CalendarMonth, 1);
+        canvas.FontColor = shownMonth > firstMonth ? Colors.White : s_calendarDisabled;
+        canvas.FontSize = 26;
+        canvas.DrawString("<", x + 8, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.FontColor = shownMonth < lastMonth ? Colors.White : s_calendarDisabled;
+        canvas.DrawString(">", x + width - 48, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.FontColor = Colors.White;
+        canvas.DrawString(CalendarTitle(), x + 48, y, width - 96, CalendarHeaderHeight,
+            HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        // Weekday row (Monday first), matching CalendarHit's row geometry.
+        canvas.FontColor = s_calendarDisabled;
+        canvas.FontSize = 20;
+        for (int column = 0; column < 7; column++)
+        {
+            canvas.DrawString(s_calendarWeekdays[column], x + column * width / 7f, y + CalendarHeaderHeight,
+                width / 7f, CalendarRowHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+
+        // Day grid: selected day highlighted, today accented, out-of-range days disabled.
+        DateTime first = new(CalendarYear, CalendarMonth, 1);
+        int leading = ((int)first.DayOfWeek + 6) % 7;
+        int days = DateTime.DaysInMonth(CalendarYear, CalendarMonth);
+        DateTime today = DateTime.Today;
+        DateTime min = CalendarMinimum.Date;
+        DateTime max = CalendarMaximum.Date;
+        canvas.FontSize = 22;
+        for (int day = 1; day <= days; day++)
+        {
+            int cell = leading + day - 1;
+            int row = cell / 7;
+            if (row >= CalendarWeeks)
+            {
+                break;
+            }
+            int column = cell % 7;
+            float cellX = x + column * width / 7f;
+            float cellY = y + CalendarHeaderHeight + (row + 1) * CalendarRowHeight;
+            DateTime date = new(CalendarYear, CalendarMonth, day);
+            bool disabled = date < min || date > max;
+            bool selected = day == CalendarSelectedDay && !disabled;
+            if (selected)
+            {
+                canvas.FillColor = s_calendarSelected;
+                canvas.FillCircle(cellX + width / 14f, cellY + CalendarRowHeight / 2f, CalendarRowHeight / 2f - 2);
+            }
+            bool isToday = !disabled && CalendarYear == today.Year && CalendarMonth == today.Month && day == today.Day;
+            canvas.FontColor = disabled ? s_calendarDisabled
+                : selected ? Colors.White
+                : isToday ? s_calendarSelected
+                : Colors.White;
+            canvas.DrawString(s_calendarDayLabels[day - 1], cellX, cellY, width / 7f, CalendarRowHeight,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+    }
+
+    /// <summary>Hit test for the calendar: -1 outside, -2 previous, -3 next, 1..31 selectable day.</summary>
     public int CalendarHit(float x, float y)
     {
         RectF frame = Frame;
@@ -892,7 +1007,12 @@ public class OpenHarmonyView
         int leading = ((int)first.DayOfWeek + 6) % 7;
         int day = (row - 1) * 7 + column - leading + 1;
         int days = DateTime.DaysInMonth(CalendarYear, CalendarMonth);
-        return day >= 1 && day <= days ? day : 0;
+        if (day < 1 || day > days)
+        {
+            return 0;
+        }
+        DateTime date = new(CalendarYear, CalendarMonth, day);
+        return date >= CalendarMinimum.Date && date <= CalendarMaximum.Date ? day : 0;
     }
 
     // Flyout page support
@@ -1878,8 +1998,17 @@ public class OpenHarmonyView
     /// <summary>Draws the open dropdown on top of everything else.</summary>
     public void DrawPopup(MauiCanvas canvas)
     {
+        if (!PopupVisible)
+        {
+            return;
+        }
+        if (IsCalendar)
+        {
+            DrawCalendar(canvas);
+            return;
+        }
         RectF frame = Frame;
-        if (!PopupVisible || PopupItems.Count == 0)
+        if (PopupItems.Count == 0)
         {
             return;
         }

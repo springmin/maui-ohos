@@ -1,5 +1,7 @@
-// DatePicker handler for OpenHarmony: the field opens an inline dropdown of candidate dates
-// (the current date +/- a week). A full calendar view is a later iteration.
+// DatePicker handler for OpenHarmony: the field opens a month calendar (header with < / >, a
+// weekday row and a 6x7 day grid). Only days inside MinimumDate..MaximumDate are selectable -
+// the day grid draws the rest disabled and refuses to hit-test them - and the header clamps to
+// the range's first/last month, so no tap can navigate outside the selectable range.
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -8,13 +10,13 @@ namespace Microsoft.Maui.Platform;
 
 public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDatePicker>
 {
-    private const int DaysAroundCurrent = 7;
-
     public static readonly IPropertyMapper<IDatePicker, OpenHarmonyDatePickerHandler> Mapper =
         new PropertyMapper<IDatePicker, OpenHarmonyDatePickerHandler>(ViewMapper)
         {
             [nameof(IDatePicker.Date)] = MapDate,
             [nameof(IDatePicker.Format)] = MapDate,
+            [nameof(IDatePicker.MinimumDate)] = MapCalendarRange,
+            [nameof(IDatePicker.MaximumDate)] = MapCalendarRange,
             [nameof(ITextStyle.TextColor)] = MapTextColor,
         };
 
@@ -23,71 +25,136 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
     protected override OpenHarmonyView CreatePlatformView()
     {
         var view = new OpenHarmonyView { IsPicker = true, IsCalendar = true, Background = Colors.DimGray, FontSize = 26 };
-        view.Tap = () =>
+        view.Tap = () => OpenCalendar(view, (VirtualView?.Date ?? DateTime.Today).Date);
+        view.CalendarPreviousMonth = () => ShiftCalendarMonth(view, -1);
+        view.CalendarNextMonth = () => ShiftCalendarMonth(view, +1);
+        view.CalendarSelectDay = selected =>
         {
-            DateTime current = (VirtualView?.Date ?? DateTime.Today).Date;
-            view.CalendarYear = current.Year;
-            view.CalendarMonth = current.Month;
-            view.CalendarSelectedDay = current.Day;
-            view.PopupVisible = true;
-            OpenHarmonyBridge.RequestRedraw();
-        };
-        view.CalendarPreviousMonth = () =>
-        {
-            DateTime month = new DateTime(view.CalendarYear, view.CalendarMonth, 1).AddMonths(-1);
-            view.CalendarYear = month.Year;
-            view.CalendarMonth = month.Month;
-            OpenHarmonyBridge.RequestRedraw();
-        };
-        view.CalendarNextMonth = () =>
-        {
-            DateTime month = new DateTime(view.CalendarYear, view.CalendarMonth, 1).AddMonths(1);
-            view.CalendarYear = month.Year;
-            view.CalendarMonth = month.Month;
-            OpenHarmonyBridge.RequestRedraw();
-        };
-        view.CalendarSelectDay = date =>
-        {
+            DateTime date = ClampToRange(view, selected.Date);
             if (VirtualView is { } picker)
             {
-                switch (picker)
+                if (picker is Microsoft.Maui.Controls.DatePicker control)
                 {
-                    case Microsoft.Maui.Controls.DatePicker control:
-                        control.Date = date;
-                        break;
+                    control.Date = date;
                 }
-                view.CalendarSelectedDay = date.Day;
+                // The control's own coercion (MinimumDate/MaximumDate) has the last word.
+                date = ClampToRange(view, (picker.Date ?? date).Date);
                 MapDate(this, picker);
             }
+            view.CalendarYear = date.Year;
+            view.CalendarMonth = date.Month;
+            view.CalendarSelectedDay = date.Day;
             view.PopupVisible = false;
             OpenHarmonyBridge.RequestRedraw();
         };
         return view;
     }
 
-    private void RebuildItems()
+    public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
+        => new(Math.Min(260, widthConstraint), Math.Min(48, heightConstraint));
+
+    /// <summary>Clamps the picker's date into range and opens the calendar on that month.</summary>
+    private static void OpenCalendar(OpenHarmonyView view, DateTime date)
     {
-        OpenHarmonyView view = PlatformView;
-        view.PopupItems.Clear();
-        if (VirtualView is not { } picker)
+        DateTime clamped = ClampToRange(view, date);
+        view.CalendarYear = clamped.Year;
+        view.CalendarMonth = clamped.Month;
+        view.CalendarSelectedDay = clamped.Day;
+        view.PopupVisible = true;
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
+    /// Moves the shown month by <paramref name="delta"/>, clamped to the month of MinimumDate /
+    /// MaximumDate, so the header can never navigate outside the selectable range.
+    /// </summary>
+    private static void ShiftCalendarMonth(OpenHarmonyView view, int delta)
+    {
+        DateTime first = new(view.CalendarMinimum.Year, view.CalendarMinimum.Month, 1);
+        DateTime last = new(view.CalendarMaximum.Year, view.CalendarMaximum.Month, 1);
+        DateTime shown = new(view.CalendarYear, view.CalendarMonth, 1);
+        if (shown < first)
+        {
+            shown = first;
+        }
+        if (shown > last)
+        {
+            shown = last;
+        }
+        // AddMonths cannot step past DateTime.MinValue/MaxValue (the unset-range defaults).
+        DateTime target = shown;
+        if (delta < 0 && shown > first)
+        {
+            target = shown.AddMonths(-1);
+        }
+        else if (delta > 0 && shown < last)
+        {
+            target = shown.AddMonths(1);
+        }
+        if (target < first)
+        {
+            target = first;
+        }
+        if (target > last)
+        {
+            target = last;
+        }
+        if (target.Year == view.CalendarYear && target.Month == view.CalendarMonth)
         {
             return;
         }
-        DateTime today = (picker.Date ?? DateTime.Today).Date;
-        for (int offset = -DaysAroundCurrent; offset <= DaysAroundCurrent; offset++)
-        {
-            view.PopupItems.Add(today.AddDays(offset).ToString("yyyy-MM-dd ddd"));
-        }
-        view.PopupSelectedIndex = DaysAroundCurrent;
+        view.CalendarYear = target.Year;
+        view.CalendarMonth = target.Month;
+        OpenHarmonyBridge.RequestRedraw();
     }
 
-    public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
-        => new(Math.Min(260, widthConstraint), Math.Min(48, heightConstraint));
+    /// <summary>Clamps a date into the picker's MinimumDate..MaximumDate range (date only).</summary>
+    private static DateTime ClampToRange(OpenHarmonyView view, DateTime date)
+    {
+        DateTime min = view.CalendarMinimum.Date;
+        DateTime max = view.CalendarMaximum.Date;
+        if (date < min)
+        {
+            return min;
+        }
+        if (date > max)
+        {
+            return max;
+        }
+        return date;
+    }
 
     public static void MapDate(OpenHarmonyDatePickerHandler handler, IDatePicker picker)
     {
         DateTime date = picker.Date ?? DateTime.Today;
-        handler.PlatformView.Text = date.ToString(string.IsNullOrEmpty(picker.Format) ? "yyyy-MM-dd" : picker.Format);
+        OpenHarmonyView view = handler.PlatformView;
+        view.Text = date.ToString(string.IsNullOrEmpty(picker.Format) ? "yyyy-MM-dd" : picker.Format);
+        if (view.PopupVisible)
+        {
+            // The date changed while the calendar is open (programmatic or a clamped selection):
+            // keep the shown month and the highlighted day in sync.
+            DateTime clamped = ClampToRange(view, date.Date);
+            view.CalendarYear = clamped.Year;
+            view.CalendarMonth = clamped.Month;
+            view.CalendarSelectedDay = clamped.Day;
+        }
+    }
+
+    public static void MapCalendarRange(OpenHarmonyDatePickerHandler handler, IDatePicker picker)
+    {
+        OpenHarmonyView view = handler.PlatformView;
+        view.CalendarMinimum = picker.MinimumDate ?? DateTime.MinValue;
+        view.CalendarMaximum = picker.MaximumDate ?? DateTime.MaxValue;
+        if (!view.PopupVisible)
+        {
+            return;
+        }
+        // A range change can exclude the shown month or the highlighted day; re-clamp in place.
+        int day = Math.Clamp(view.CalendarSelectedDay, 1, DateTime.DaysInMonth(view.CalendarYear, view.CalendarMonth));
+        DateTime clamped = ClampToRange(view, new DateTime(view.CalendarYear, view.CalendarMonth, day));
+        view.CalendarYear = clamped.Year;
+        view.CalendarMonth = clamped.Month;
+        view.CalendarSelectedDay = clamped.Day;
     }
 
     public static void MapTextColor(OpenHarmonyDatePickerHandler handler, IDatePicker picker)

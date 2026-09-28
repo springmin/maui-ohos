@@ -751,6 +751,10 @@ Microsoft.Maui.Platform.OpenHarmonyView.BorderStroke.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.BorderStrokeThickness.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.BorderStrokeThickness.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.CalendarHit(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMaximum.get -> System.DateTime
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMaximum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMinimum.get -> System.DateTime
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMinimum.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.CalendarMonth.get -> int
 Microsoft.Maui.Platform.OpenHarmonyView.CalendarMonth.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.CalendarNextMonth.get -> System.Action?
@@ -786,6 +790,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.DotsColor.get -> Microsoft.Maui.Graphics
 Microsoft.Maui.Platform.OpenHarmonyView.DotsColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DotsSize.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.DotsSize.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawCalendar(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawFlyoutPanel(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawPopup(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawShadow(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void

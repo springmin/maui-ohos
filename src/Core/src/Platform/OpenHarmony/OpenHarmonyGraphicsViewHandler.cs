@@ -11,7 +11,10 @@ namespace Microsoft.Maui.Platform;
 public sealed class OpenHarmonyGraphicsViewHandler : OpenHarmonyViewHandler<IGraphicsView>
 {
     public static readonly IPropertyMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler> Mapper =
-        new PropertyMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler>(ViewMapper);
+        new PropertyMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler>(ViewMapper)
+        {
+            [nameof(IGraphicsView.Drawable)] = MapDrawable,
+        };
 
     /// <summary>Commands the Controls GraphicsView invokes on its handler.</summary>
     public static readonly CommandMapper<IGraphicsView, OpenHarmonyGraphicsViewHandler> CommandMapper =
@@ -21,6 +24,12 @@ public sealed class OpenHarmonyGraphicsViewHandler : OpenHarmonyViewHandler<IGra
         };
 
     public OpenHarmonyGraphicsViewHandler() : base(Mapper, CommandMapper) { }
+
+    /// <summary>IGraphicsView.Drawable: a replaced drawable must repaint the surface.</summary>
+    public static void MapDrawable(OpenHarmonyGraphicsViewHandler handler, IGraphicsView graphicsView)
+    {
+        OpenHarmonyBridge.RequestRedraw();
+    }
 
     /// <summary>IGraphicsView.Invalidate: the drawable asked the compositor for a repaint.</summary>
     public static void MapInvalidate(OpenHarmonyGraphicsViewHandler handler, IGraphicsView graphicsView, object? arg)

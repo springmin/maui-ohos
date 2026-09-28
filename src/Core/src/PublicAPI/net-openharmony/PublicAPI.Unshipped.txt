@@ -1382,7 +1382,8 @@ static Microsoft.Maui.Platform.OpenHarmonyGattResult.operator !=(Microsoft.Maui.
 static Microsoft.Maui.Platform.OpenHarmonyGattResult.operator ==(Microsoft.Maui.Platform.OpenHarmonyGattResult left, Microsoft.Maui.Platform.OpenHarmonyGattResult right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyGattValue.operator !=(Microsoft.Maui.Platform.OpenHarmonyGattValue left, Microsoft.Maui.Platform.OpenHarmonyGattValue right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyGattValue.operator ==(Microsoft.Maui.Platform.OpenHarmonyGattValue left, Microsoft.Maui.Platform.OpenHarmonyGattValue right) -> bool
-static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapInvalidate(Microsoft.Maui.Handlers.IGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView, object? arg) -> void
+static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapDrawable(Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView) -> void
+static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapInvalidate(Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView, object? arg) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHandlerConnector.Connect(Microsoft.Maui.IElement? element) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHandlerConnector.ConnectTree(Microsoft.Maui.IElement? element) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHandlerConnector.Context.get -> Microsoft.Maui.IMauiContext?

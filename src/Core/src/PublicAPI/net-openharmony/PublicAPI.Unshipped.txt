@@ -1019,7 +1019,9 @@ Microsoft.Maui.Platform.OpenHarmonyWebAuthenticator.AuthenticateAsync(Microsoft.
 Microsoft.Maui.Platform.OpenHarmonyWebAuthenticator.AuthenticateAsync(Microsoft.Maui.Authentication.WebAuthenticatorOptions! webAuthenticatorOptions, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<Microsoft.Maui.Authentication.WebAuthenticatorResult!>!
 Microsoft.Maui.Platform.OpenHarmonyWebViewHandler
 Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.EvaluateJavaScriptAsync(string! script) -> System.Threading.Tasks.Task<string?>!
+Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.GetCookieAsync(string! url) -> System.Threading.Tasks.Task<string?>!
 Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.OpenHarmonyWebViewHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.SetCookie(string! url, string! cookie) -> void
 Microsoft.Maui.Platform.OpenHarmonyWindowHandler
 Microsoft.Maui.Platform.OpenHarmonyWindowHandler.Height.get -> double
 Microsoft.Maui.Platform.OpenHarmonyWindowHandler.OpenHarmonyWindowHandler() -> void

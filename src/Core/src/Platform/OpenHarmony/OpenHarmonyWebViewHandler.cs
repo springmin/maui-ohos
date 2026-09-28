@@ -22,8 +22,14 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// <summary>Shell envelope asking for a Navigating decision on a cancelled load (B6).</summary>
     private const string NavRequestPrefix = "__OHNAV|";
 
+    /// <summary>Shell web-event state carrying ArkWeb history availability ("history|b|f").</summary>
+    private const string HistoryStatePrefix = "history|";
+
     /// <summary>Longest URL the shell may hand over for a decision (bounds the copy).</summary>
     private const int MaxNavUrlLength = 8 * 1024;
+
+    /// <summary>Longest Set-Cookie value the cookie surface accepts (the shell bounds it too).</summary>
+    private const int MaxCookieLength = 8 * 1024;
 
     /// <summary>Longest URL a status line may carry (B7).</summary>
     internal const int MaxLoggedUrlLength = 2048;
@@ -52,6 +58,14 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     private static bool s_messageRegistered;
     private static bool s_messageUnavailable;
     private static int s_nextRequestId;
+
+    /// <summary>
+    /// The <see cref="WebNavigationEvent"/> of the load the shell is about to start: set by
+    /// GoBack/GoForward/Reload and consumed by the next shell page event so Navigating and
+    /// Navigated report Back/Forward/Refresh instead of NewPage. Reset by a new source load and
+    /// by every completion/failure event.
+    /// </summary>
+    private static WebNavigationEvent s_pendingNavigation = WebNavigationEvent.NewPage;
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_web_eval", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int WebEvalNative(string script, int requestId);
@@ -104,9 +118,20 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        // The native Web component is a shell overlay, so it only needs to know it is visible.
-        OpenHarmonyBridge.WebCommand("show");
+        // The native Web component is a shell overlay: place it on the control's frame (the
+        // command also shows it). The values are MAUI DIP, which the shell applies as ArkUI vp.
+        SendPlatformFrame(frame);
     }
+
+    /// <summary>
+    /// Sends the shell overlay frame to the ArkWeb component ("frame", arg "x\ny\nw\nh" in
+    /// MAUI DIP applied as ArkUI vp); a zero width/height keeps that dimension full-window.
+    /// Shared by the WebView, HybridWebView and BlazorWebView handlers, which all render into
+    /// the same shell overlay.
+    /// </summary>
+    internal static void SendPlatformFrame(Rect frame)
+        => OpenHarmonyBridge.WebCommand("frame", FormattableString.Invariant(
+            $"{frame.X:0.###}\n{frame.Y:0.###}\n{frame.Width:0.###}\n{frame.Height:0.###}"));
 
     // MAUI raises the JavaScript commands through IElementHandler.Invoke (Controls.WebView
     // wraps the script in try{JSON.stringify(eval(...))}catch(e){'null'} before calling us).
@@ -121,10 +146,30 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                 // Fire-and-forget evaluation (IWebView.Eval has no result).
                 _ = EvaluateJavaScriptAsyncCore(script);
                 return;
+            case nameof(IWebView.GoBack):
+                SendHistoryCommand("back", WebNavigationEvent.Back);
+                return;
+            case nameof(IWebView.GoForward):
+                SendHistoryCommand("forward", WebNavigationEvent.Forward);
+                return;
+            case nameof(IWebView.Reload):
+                SendHistoryCommand("refresh", WebNavigationEvent.Refresh);
+                return;
             default:
                 base.Invoke(command, args);
                 return;
         }
+    }
+
+    /// <summary>
+    /// Sends an ArkWeb history command (back/forward/refresh) and remembers the matching
+    /// WebNavigationEvent for the next page event. The shell reports the resulting history
+    /// availability afterwards, so the command itself needs no reply.
+    /// </summary>
+    private static void SendHistoryCommand(string op, WebNavigationEvent navigationEvent)
+    {
+        s_pendingNavigation = navigationEvent;
+        OpenHarmonyBridge.WebCommand(op);
     }
 
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
@@ -136,8 +181,37 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// </summary>
     internal static async Task<string?> EvaluateJavaScriptAsyncCore(string script)
     {
-        if (string.IsNullOrEmpty(script) || s_evalUnavailable)
+        if (string.IsNullOrEmpty(script))
         {
+            return null;
+        }
+        return await SendHostRequestAsync(requestId => WebEvalNative(script, requestId) == 0).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one host request through the shared request/result table the shell answers with
+    /// <c>host.notifyWebEvalResult</c> (scripts and cookie reads use the same channel): registers
+    /// the awaiting entry, sends with <paramref name="send"/> (given the request id) and waits up
+    /// to <see cref="s_evalTimeout"/>. A missing host library degrades to null before anything is
+    /// sent; a timeout answers null and removes the entry. Never throws.
+    /// </summary>
+    private static async Task<string?> SendHostRequestAsync(Func<int, bool> send)
+    {
+        if (s_evalUnavailable)
+        {
+            return null;
+        }
+        try
+        {
+            EnsureEvalRegistered();
+            if (s_evalUnavailable)
+            {
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            s_evalUnavailable = true;
             return null;
         }
         int requestId = Interlocked.Increment(ref s_nextRequestId);
@@ -145,20 +219,13 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         s_evalRequests[requestId] = source;
         try
         {
-            EnsureEvalRegistered();
-            if (s_evalUnavailable || WebEvalNative(script, requestId) != 0)
+            if (!send(requestId))
             {
                 s_evalRequests.TryRemove(requestId, out _);
                 return null;
             }
         }
-        catch (DllNotFoundException)
-        {
-            s_evalUnavailable = true;
-            s_evalRequests.TryRemove(requestId, out _);
-            return null;
-        }
-        catch (EntryPointNotFoundException)
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
             s_evalUnavailable = true;
             s_evalRequests.TryRemove(requestId, out _);
@@ -168,7 +235,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         if (completed != source.Task)
         {
             s_evalRequests.TryRemove(requestId, out _);
-            OpenHarmonyBridge.WriteStatus("[maui] web eval request timed out");
+            OpenHarmonyBridge.WriteStatus("[maui] web request timed out");
             return null;
         }
         return await source.Task.ConfigureAwait(false);
@@ -184,6 +251,50 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     /// <summary>True once the host library answered a script evaluation or registration.</summary>
     internal static bool IsJavaScriptBridgeAvailable => !s_evalUnavailable;
+
+    /// <summary>
+    /// Minimal cookie surface: sets an HTTP cookie for an absolute http(s) URL through the
+    /// shell's ArkWeb <c>WebCookieManager.configCookieSync</c>. The value is the Set-Cookie
+    /// header form ("name=value; path=/; ..."). An unsafe URL, an empty value or a value above
+    /// <see cref="MaxCookieLength"/> is dropped; without a host library the command is a no-op.
+    /// This does not touch <see cref="IWebView.Cookies"/> (the cross-platform CookieContainer
+    /// sync is not implemented on this platform).
+    /// </summary>
+    public static void SetCookie(string url, string cookie)
+    {
+        if (!IsCookieUrl(url) || string.IsNullOrEmpty(cookie) ||
+            cookie.Length > MaxCookieLength || ContainsControlCharacter(url) || ContainsControlCharacter(cookie))
+        {
+            return;
+        }
+        OpenHarmonyBridge.WebCommand("cookie", url + "\n" + cookie);
+    }
+
+    /// <summary>
+    /// Minimal cookie surface: reads the cookies the ArkWeb cookie store has for an absolute
+    /// http(s) URL (the shell's <c>WebCookieManager.fetchCookieSync</c>). Answers null for an
+    /// unsafe URL, when no page/host answers within the script timeout, or without a host
+    /// library. The read rides the same request/result channel as the JavaScript evaluation.
+    /// </summary>
+    public static async Task<string?> GetCookieAsync(string url)
+    {
+        if (!IsCookieUrl(url) || ContainsControlCharacter(url))
+        {
+            return null;
+        }
+        return await SendHostRequestAsync(requestId =>
+        {
+            OpenHarmonyBridge.WebCommand("cookieGet", requestId + "\n" + url);
+            return true;
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>True when the cookie surface accepts the URL (absolute http(s) with a host).</summary>
+    internal static bool IsCookieUrl(string url)
+        => !string.IsNullOrEmpty(url)
+            && Uri.TryCreate(url, UriKind.Absolute, out Uri? target)
+            && (target.Scheme == Uri.UriSchemeHttp || target.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrEmpty(target.Host);
 
     /// <summary>The shell answers a script evaluation (host.notifyWebEvalResult).</summary>
     internal static void CompleteEvalResult(int requestId, string result, bool error)
@@ -416,19 +527,72 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// Cancel (IWebView.Navigating returns the cancel flag).
     /// </summary>
     private static bool RaiseNavigating(string url)
+        => RaiseNavigating(url, WebNavigationEvent.NewPage);
+
+    /// <summary>Raises Navigating with the load's event kind (Back/Forward/Refresh for history loads).</summary>
+    private static bool RaiseNavigating(string url, WebNavigationEvent navigationEvent)
     {
         bool allowed = true;
         lock (s_handlers)
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
-                if (handler.VirtualView is { } webView && webView.Navigating(WebNavigationEvent.NewPage, url))
+                if (handler.VirtualView is { } webView && webView.Navigating(navigationEvent, url))
                 {
                     allowed = false;
                 }
             }
         }
         return allowed;
+    }
+
+    /// <summary>
+    /// Mirrors a completed/failed shell load into IWebView.Navigated with the event kind the
+    /// load was started with (Back/Forward/Refresh for history loads, NewPage otherwise) and
+    /// consumes the pending kind.
+    /// </summary>
+    private static void RaiseNavigated(string url, WebNavigationResult result)
+    {
+        WebNavigationEvent navigationEvent = s_pendingNavigation;
+        s_pendingNavigation = WebNavigationEvent.NewPage;
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
+            {
+                handler.VirtualView?.Navigated(navigationEvent, url, result);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies the shell's history state ("history|&lt;back&gt;|&lt;forward&gt;", 1/0 flags) to
+    /// every connected WebView's IWebView.CanGoBack/CanGoForward.
+    /// </summary>
+    private static void ApplyHistoryState(string state)
+    {
+        string[] parts = state.Split('|');
+        if (parts.Length != 3 || !TryParseFlag(parts[1], out bool canGoBack) || !TryParseFlag(parts[2], out bool canGoForward))
+        {
+            return;
+        }
+        s_pendingNavigation = WebNavigationEvent.NewPage;
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
+            {
+                if (handler.VirtualView is { } webView)
+                {
+                    webView.CanGoBack = canGoBack;
+                    webView.CanGoForward = canGoForward;
+                }
+            }
+        }
+    }
+
+    private static bool TryParseFlag(string value, out bool flag)
+    {
+        flag = value == "1";
+        return value is "0" or "1";
     }
 
     /// <summary>
@@ -574,6 +738,8 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     public static void MapSource(OpenHarmonyWebViewHandler handler, IWebView webView)
     {
+        // A source load is a fresh navigation, not a history move.
+        s_pendingNavigation = WebNavigationEvent.NewPage;
         switch (webView.Source)
         {
             case UrlWebViewSource url when !string.IsNullOrEmpty(url.Url):
@@ -602,18 +768,38 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         if (state == "started")
         {
             // A load the shell already asked about (B6) raised Navigating before it started;
-            // do not raise it a second time. App-origin loads never take that path.
+            // do not raise it a second time. App-origin loads never take that path. The event
+            // kind is the one the triggering command set (Back/Forward/Refresh or NewPage).
             if (ConsumeApprovedNavigation(url))
             {
                 return;
             }
-            RaiseNavigating(url);
+            RaiseNavigating(url, s_pendingNavigation);
             return;
+        }
+        if (state.StartsWith(HistoryStatePrefix, StringComparison.Ordinal))
+        {
+            // ArkWeb history availability after a page end/back/forward/refresh; mirrors into
+            // IWebView.CanGoBack/CanGoForward and consumes the pending history kind.
+            ApplyHistoryState(state);
+            return;
+        }
+        if (state == "error")
+        {
+            // A failed main-frame load: clear the overlay (the managed surface shows through)
+            // and report the failure through IWebView.Navigated. The shell reports this outside
+            // the page's control, so a script cannot turn a failure into a success.
+            OpenHarmonyBridge.WebCommand("hide");
+            RaiseNavigated(url, WebNavigationResult.Failure);
+        }
+        else if (state == "finished")
+        {
+            RaiseNavigated(url, WebNavigationResult.Success);
         }
         // Any completion/failure event is the timely-cleanup point for approval entries whose
         // reload never started (MB-1), so they do not linger until the page-driven cap evicts
-        // them. IWebView only exposes Navigating, so completion is logged for now; the URL is
-        // stripped of its query/fragment and truncated (B7) before it reaches the status file.
+        // them. The URL is stripped of its query/fragment and truncated (B7) before it reaches
+        // the status file.
         lock (s_navSync)
         {
             PruneExpiredApprovals(Environment.TickCount64);

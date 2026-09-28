@@ -150,6 +150,14 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         base.DisconnectHandler(platformView);
     }
 
+    public override void PlatformArrange(Rect frame)
+    {
+        base.PlatformArrange(frame);
+        // The ArkWeb component is a shell overlay shared by the web handlers: place it on this
+        // control's frame (the command also shows it).
+        OpenHarmonyWebViewHandler.SendPlatformFrame(frame);
+    }
+
     /// <summary>
     /// Creates the platform <see cref="WebViewManager"/> and starts the Blazor page. Mirrors the
     /// package's platform partials (Tizen/Android/iOS):

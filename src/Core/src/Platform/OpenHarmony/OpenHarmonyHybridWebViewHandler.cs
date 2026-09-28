@@ -228,8 +228,8 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        // The ArkWeb component is a shell overlay, so it only needs to know it is visible.
-        OpenHarmonyBridge.WebCommand("show");
+        // The ArkWeb component is a shell overlay: place it on the control's frame.
+        OpenHarmonyWebViewHandler.SendPlatformFrame(frame);
         // First render: if ConnectHandler ran before the app context was published, this is
         // the point where the shell (and the extracted payload) is definitely available.
         if (IsHybridAssetsRegistrationPending)

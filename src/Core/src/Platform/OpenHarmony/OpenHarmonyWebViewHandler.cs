@@ -4,6 +4,7 @@
 // notifyWebEvalResult pair, and page scripts reach managed code through the shell's dotnetHost
 // proxy (window.__ohosDotNet), which raises JsMessage.
 using System.Collections.Concurrent;
+using System.Net;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
@@ -86,6 +87,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         new PropertyMapper<IWebView, OpenHarmonyWebViewHandler>(ViewMapper)
         {
             [nameof(IWebView.Source)] = MapSource,
+            [nameof(IWebView.Cookies)] = MapCookies,
         };
 
     public OpenHarmonyWebViewHandler() : base(Mapper) { }
@@ -257,17 +259,22 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// shell's ArkWeb <c>WebCookieManager.configCookieSync</c>. The value is the Set-Cookie
     /// header form ("name=value; path=/; ..."). An unsafe URL, an empty value or a value above
     /// <see cref="MaxCookieLength"/> is dropped; without a host library the command is a no-op.
-    /// This does not touch <see cref="IWebView.Cookies"/> (the cross-platform CookieContainer
-    /// sync is not implemented on this platform).
     /// </summary>
-    public static void SetCookie(string url, string cookie)
+    public static void SetCookie(string url, string cookie) => TrySetCookie(url, cookie);
+
+    /// <summary>
+    /// Validating form of <see cref="SetCookie"/> (shared with the CookieContainer sync): true
+    /// when the command reached the shell bridge, false when the pair was rejected.
+    /// </summary>
+    internal static bool TrySetCookie(string url, string cookie)
     {
         if (!IsCookieUrl(url) || string.IsNullOrEmpty(cookie) ||
             cookie.Length > MaxCookieLength || ContainsControlCharacter(url) || ContainsControlCharacter(cookie))
         {
-            return;
+            return false;
         }
         OpenHarmonyBridge.WebCommand("cookie", url + "\n" + cookie);
+        return true;
     }
 
     /// <summary>
@@ -295,6 +302,171 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             && Uri.TryCreate(url, UriKind.Absolute, out Uri? target)
             && (target.Scheme == Uri.UriSchemeHttp || target.Scheme == Uri.UriSchemeHttps)
             && !string.IsNullOrEmpty(target.Host);
+
+    /// <summary>Upper bound on one CookieContainer sync pass (the same bound the shell keeps).</summary>
+    internal const int MaxSyncedCookies = 64;
+
+    /// <summary>
+    /// Cross-platform CookieContainer sync (IWebView.Cookies, the property mapper):
+    /// container -> ArkWeb. Every cookie is written through the shell's configCookieSync with a
+    /// URL rebuilt from the cookie's domain/scheme/path, so the platform store sees the same
+    /// cookies the app set. Answers the number of cookies the bridge accepted (unsafe domains,
+    /// nameless cookies and anything past <see cref="MaxSyncedCookies"/> are skipped).
+    /// </summary>
+    internal static int SyncContainerToPlatform(IWebView? webView)
+    {
+        if (webView?.Cookies is not CookieContainer container)
+        {
+            return 0;
+        }
+        int synced = 0;
+        foreach (Cookie cookie in container.GetAllCookies())
+        {
+            if (synced >= MaxSyncedCookies)
+            {
+                break;
+            }
+            string? url = CookieUrl(cookie);
+            if (url is null || string.IsNullOrEmpty(cookie.Name) || string.IsNullOrEmpty(cookie.Value))
+            {
+                continue;
+            }
+            if (TrySetCookie(url, CookieHeaderValue(cookie)))
+            {
+                synced++;
+            }
+        }
+        return synced;
+    }
+
+    /// <summary>
+    /// The URL the cookie is set for: the scheme follows Secure, the host drops the domain
+    /// cookie's leading dot (host-only cookies carry the host there too), the path defaults
+    /// to "/". Null for a cookie without a usable domain/host.
+    /// </summary>
+    private static string? CookieUrl(Cookie cookie)
+    {
+        string domain = cookie.Domain;
+        if (string.IsNullOrEmpty(domain))
+        {
+            return null;
+        }
+        string host = domain[0] == '.' ? domain[1..] : domain;
+        if (host.Length == 0)
+        {
+            return null;
+        }
+        string path = string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path;
+        if (path[0] != '/')
+        {
+            path = "/" + path;
+        }
+        return (cookie.Secure ? Uri.UriSchemeHttps : Uri.UriSchemeHttp) + "://" + host + path;
+    }
+
+    /// <summary>The Set-Cookie value for one container cookie (name=value plus attributes).</summary>
+    private static string CookieHeaderValue(Cookie cookie)
+    {
+        var builder = new System.Text.StringBuilder(cookie.Name.Length + cookie.Value.Length + 40);
+        builder.Append(cookie.Name).Append('=').Append(cookie.Value);
+        builder.Append("; path=").Append(string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path);
+        if (cookie.Secure)
+        {
+            builder.Append("; secure");
+        }
+        if (cookie.HttpOnly)
+        {
+            builder.Append("; httponly");
+        }
+        if (cookie.Expires != DateTime.MinValue)
+        {
+            builder.Append("; expires=")
+                .Append(cookie.Expires.ToUniversalTime().ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Cross-platform CookieContainer sync (the page-finished event):
+    /// ArkWeb -> container. The shell's fetchCookieSync answer rides the eval-result channel,
+    /// then <see cref="MergeCookieHeader"/> parses the "name=value; ..." header into every
+    /// connected handler's container. Best-effort: a missing host, a timeout or a header the
+    /// container rejects leaves the container as it was.
+    /// </summary>
+    private static void ScheduleCookieRead(string url)
+    {
+        if (!IsCookieUrl(url) || ContainsControlCharacter(url))
+        {
+            return;
+        }
+        _ = ReadCookiesFromPlatformAsync(url);
+    }
+
+    private static async Task ReadCookiesFromPlatformAsync(string url)
+    {
+        try
+        {
+            string? header = await GetCookieAsync(url).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(header))
+            {
+                return;
+            }
+            lock (s_handlers)
+            {
+                foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
+                {
+                    MergeCookieHeader(handler.VirtualView, url, header);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // The sync is opportunistic: a failure must never take the page or app down.
+            OpenHarmonyBridge.WriteStatus($"[maui] web cookie read failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// Parses one shell cookie header ("name=value; name2=value2", the Cookie-header shape
+    /// <c>fetchCookieSync</c> answers) into the webView's CookieContainer for
+    /// <paramref name="url"/>. Each pair is added on its own so one malformed pair cannot drop
+    /// the rest; false when nothing was added (missing container, unsafe URL, empty/oversized/
+    /// control-carrying header, or a header the container rejects).
+    /// </summary>
+    internal static bool MergeCookieHeader(IWebView? webView, string url, string? header)
+    {
+        if (webView?.Cookies is not CookieContainer container || string.IsNullOrEmpty(header) ||
+            header.Length > MaxCookieLength || !IsCookieUrl(url) || ContainsControlCharacter(header))
+        {
+            return false;
+        }
+        var target = new Uri(url, UriKind.Absolute);
+        bool added = false;
+        foreach (string rawPair in header.Split(';'))
+        {
+            string pair = rawPair.Trim();
+            int separator = pair.IndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+            try
+            {
+                container.SetCookies(target, pair);
+                added = true;
+            }
+            catch (CookieException)
+            {
+                // A malformed pair is skipped; the remaining cookies still land.
+            }
+        }
+        if (!added)
+        {
+            OpenHarmonyStatus.Once("web.cookie.merge",
+                "[maui] web cookie header rejected by the CookieContainer");
+        }
+        return added;
+    }
 
     /// <summary>The shell answers a script evaluation (host.notifyWebEvalResult).</summary>
     internal static void CompleteEvalResult(int requestId, string result, bool error)
@@ -736,6 +908,21 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// <summary>Raised when a navigation approval is handed back to the shell (B6 diagnostics).</summary>
     internal static event Action<string, string>? NavigationApprovalSent;
 
+    /// <summary>
+    /// IWebView.Cookies mapper: pushes the app's CookieContainer into the ArkWeb cookie store.
+    /// The container is mutable without a property change, so assigning it (or calling
+    /// UpdateValue("Cookies") after adding cookies) is the sync point; the page-finished event
+    /// mirrors the store back. The count is logged once so a huge container cannot spam.
+    /// </summary>
+    public static void MapCookies(OpenHarmonyWebViewHandler handler, IWebView webView)
+    {
+        int synced = SyncContainerToPlatform(webView);
+        if (synced > 0)
+        {
+            OpenHarmonyBridge.WriteStatus($"[maui] web cookies synced to platform: {synced}");
+        }
+    }
+
     public static void MapSource(OpenHarmonyWebViewHandler handler, IWebView webView)
     {
         // A source load is a fresh navigation, not a history move.
@@ -795,6 +982,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         else if (state == "finished")
         {
             RaiseNavigated(url, WebNavigationResult.Success);
+            // The page is done: mirror the ArkWeb cookie store back into IWebView.Cookies
+            // (best-effort; the container stays authoritative for what the app set).
+            ScheduleCookieRead(url);
         }
         // Any completion/failure event is the timely-cleanup point for approval entries whose
         // reload never started (MB-1), so they do not linger until the page-driven cap evicts

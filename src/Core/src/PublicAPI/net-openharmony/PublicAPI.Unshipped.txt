@@ -1493,6 +1493,7 @@ static Microsoft.Maui.Platform.OpenHarmonyView.CalendarHeight.get -> float
 static Microsoft.Maui.Platform.OpenHarmonyView.ImageDrawn -> System.Action<Microsoft.Maui.Graphics.RectF>?
 static Microsoft.Maui.Platform.OpenHarmonyWebAuthenticator.InstallDefault() -> void
 static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.JsMessage -> System.Action<string!>?
+static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.MapCookies(Microsoft.Maui.Platform.OpenHarmonyWebViewHandler! handler, Microsoft.Maui.IWebView! webView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.MapSource(Microsoft.Maui.Platform.OpenHarmonyWebViewHandler! handler, Microsoft.Maui.IWebView! webView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.OnPageEvent(string! state, string! url) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWindowHandler.MapContent(Microsoft.Maui.Platform.OpenHarmonyWindowHandler! handler, Microsoft.Maui.IWindow! window) -> void

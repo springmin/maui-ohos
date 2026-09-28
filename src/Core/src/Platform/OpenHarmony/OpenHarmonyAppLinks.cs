@@ -21,6 +21,7 @@
 //     with Routing.RegisterRoute and the live window's root is a NavigationPage; otherwise it is
 //     ignored with a status line. A malformed URI, an unregistered route or a failing
 //     navigation is logged and dropped, never thrown into the shell callback.
+using System.Collections.ObjectModel;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Hosting;
 using Microsoft.OpenHarmony.Hosting;
@@ -37,9 +38,12 @@ public static class OpenHarmonyAppLinks
     /// <summary>Most queued activations kept when navigation has not reached a target yet.</summary>
     private const int PendingLimit = 8;
 
+    /// <summary>Most characters one status line may quote from want-derived text.</summary>
+    private const int MaxStatusTextChars = 512;
+
     private static readonly object s_sync = new();
     private static readonly Queue<Activation> s_queue = new();
-    private static readonly List<string> s_allowedHttpsHosts = new();
+    private static readonly SynchronizedHostList s_allowedHttpsHosts = new();
     private static IServiceProvider? s_services;
     private static long s_lastSequence;
     private static bool s_pumping;
@@ -128,7 +132,7 @@ public static class OpenHarmonyAppLinks
             }
             foreach (string host in activation.LinkHosts)
             {
-                if (!string.IsNullOrWhiteSpace(host) && !s_allowedHttpsHosts.Contains(host))
+                if (!string.IsNullOrWhiteSpace(host) && !HostListContains(host))
                 {
                     s_allowedHttpsHosts.Add(host);
                 }
@@ -403,6 +407,22 @@ public static class OpenHarmonyAppLinks
         return false;
     }
 
+    /// <summary>Case-insensitive membership for the seed list (callers hold <see cref="s_sync"/>).</summary>
+    private static bool HostListContains(string host)
+    {
+        lock (s_sync)
+        {
+            for (int i = 0; i < s_allowedHttpsHosts.Count; i++)
+            {
+                if (string.Equals(s_allowedHttpsHosts[i], host, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static void WriteStatus(string message)
     {
         try
@@ -415,15 +435,76 @@ public static class OpenHarmonyAppLinks
         }
     }
 
-    /// <summary>One-line, bounded text for status lines.</summary>
+    /// <summary>
+    /// One-line, bounded text for status lines. A want uri is external input: control
+    /// characters (including newlines the JSON transport decodes back) are replaced with
+    /// spaces so a malicious link cannot inject extra lines into dotnet-status.txt, and a
+    /// surrogate pair is never cut in half.
+    /// </summary>
     private static string Flatten(string? value)
     {
         if (string.IsNullOrEmpty(value))
         {
             return string.Empty;
         }
-        int length = Math.Min(value.Length, 512);
-        return value.Length > 512 ? value[..512] + "..." : value[..length];
+        int length = Math.Min(value.Length, MaxStatusTextChars);
+        char[]? flattened = null;
+        for (int i = 0; i < length; i++)
+        {
+            char c = value[i];
+            if (char.IsControl(c) || c == '\u2028' || c == '\u2029')
+            {
+                flattened ??= value.ToCharArray();
+                flattened[i] = ' ';
+            }
+        }
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        {
+            length--;
+        }
+        string result = flattened is null ? value[..length] : new string(flattened, 0, length);
+        return value.Length > MaxStatusTextChars ? result + "..." : result;
+    }
+
+    /// <summary>
+    /// The app-facing https allow-list: every mutation takes the dispatcher lock, so an app
+    /// extending the list while the activation pump reads it cannot corrupt the backing array
+    /// or make an enumeration throw out of a navigation attempt (the property type stays
+    /// <see cref="IList{T}"/>).
+    /// </summary>
+    private sealed class SynchronizedHostList : Collection<string>
+    {
+        protected override void InsertItem(int index, string item)
+        {
+            lock (s_sync)
+            {
+                base.InsertItem(index, item);
+            }
+        }
+
+        protected override void SetItem(int index, string item)
+        {
+            lock (s_sync)
+            {
+                base.SetItem(index, item);
+            }
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            lock (s_sync)
+            {
+                base.RemoveItem(index);
+            }
+        }
+
+        protected override void ClearItems()
+        {
+            lock (s_sync)
+            {
+                base.ClearItems();
+            }
+        }
     }
 
     /// <summary>One want-derived activation request (shell payload or explicit Activate).</summary>

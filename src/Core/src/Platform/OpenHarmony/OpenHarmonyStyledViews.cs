@@ -284,7 +284,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
     private OpenHarmonyTextRun[]? _formattedRuns;
     private int _formattedGeneration;
     private (int Generation, float MaxWidth, LineBreakMode Mode, int MaxLines, float DefaultFontSize,
-        OpenHarmonyFormattedTextLayout Layout)? _formattedLayout;
+        int FontScaleGeneration, OpenHarmonyFormattedTextLayout Layout)? _formattedLayout;
 
     /// <summary>True when the mapper handed this view a non-empty run set (formatted mode).</summary>
     internal bool HasFormattedRuns => _formattedRuns is { Length: > 0 };
@@ -297,22 +297,25 @@ public class OpenHarmonyTextView : OpenHarmonyView
         _formattedLayout = null;
     }
 
-    /// <summary>Run-aware layout at the given width (cached per run set and break contract).</summary>
+    /// <summary>Run-aware layout at the given width (cached per run set, break contract and font scale).</summary>
     internal OpenHarmonyFormattedTextLayout FormattedLayout(float maxWidth)
     {
         float defaultFontSize = TextFont.Size is > 0 and < float.MaxValue ? (float)TextFont.Size : FontSize;
+        int fontScaleGeneration = OpenHarmonyFontManager.FontScaleGeneration;
         if (_formattedLayout is { } cached &&
             cached.Generation == _formattedGeneration &&
             cached.MaxWidth.Equals(maxWidth) &&
             cached.Mode == LineBreakMode &&
             cached.MaxLines == MaxLines &&
-            cached.DefaultFontSize.Equals(defaultFontSize))
+            cached.DefaultFontSize.Equals(defaultFontSize) &&
+            cached.FontScaleGeneration == fontScaleGeneration)
         {
             return cached.Layout;
         }
         var layout = new OpenHarmonyFormattedTextLayout(_formattedRuns!, LineBreakMode, MaxLines, maxWidth,
             defaultFontSize);
-        _formattedLayout = (_formattedGeneration, maxWidth, LineBreakMode, MaxLines, defaultFontSize, layout);
+        _formattedLayout = (_formattedGeneration, maxWidth, LineBreakMode, MaxLines, defaultFontSize,
+            fontScaleGeneration, layout);
         return layout;
     }
 
@@ -406,6 +409,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
             return;
         }
         float fontSize = TextFont.Size is > 0 and < float.MaxValue ? (float)TextFont.Size : FontSize;
+        float drawFontSize = OpenHarmonyFontManager.ScaleFontSize(fontSize);
         float maxWidth = LineBreakMode == LineBreakMode.NoWrap ? float.PositiveInfinity : width;
         string[] lines = GetLayout(text, fontSize, maxWidth);
         float lineHeight = EffectiveLineHeight(fontSize);
@@ -417,7 +421,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
             _ => top,
         };
         canvas.FontColor = TextColorForDraw;
-        canvas.FontSize = fontSize;
+        canvas.FontSize = drawFontSize;
         bool bold = IsBold(TextFont);
         if (IsItalic(TextFont))
         {
@@ -433,8 +437,8 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 TextAlignment.End => left + width - lineWidth,
                 _ => left,
             };
-            DrawLine(canvas, line, x, y, lineHeight, fontSize, bold);
-            DrawDecorations(canvas, TextDecorations, TextColorForDraw, lineWidth, x, y, lineHeight, fontSize);
+            DrawLine(canvas, line, x, y, lineHeight, fontSize, drawFontSize, bold);
+            DrawDecorations(canvas, TextDecorations, TextColorForDraw, lineWidth, x, y, lineHeight, drawFontSize);
             y += lineHeight;
         }
     }
@@ -485,6 +489,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
     {
         OpenHarmonyTextRun run = segment.Run;
         float fontSize = run.FontSize;
+        float drawFontSize = OpenHarmonyFontManager.ScaleFontSize(fontSize);
         Color color = run.TextColor is { } runColor
             ? (Dimmed ? runColor.WithAlpha(DisabledTextAlpha) : runColor)
             : TextColorForDraw;
@@ -503,7 +508,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
         Color savedColor = canvas.FontColor;
         float savedSize = canvas.FontSize;
         canvas.FontColor = color;
-        canvas.FontSize = fontSize;
+        canvas.FontSize = drawFontSize;
         float segmentWidth = Math.Max(1f, segment.Width);
         if (run.CharacterSpacing == 0)
         {
@@ -511,7 +516,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 HorizontalAlignment.Left, VerticalAlignment.Center);
             if (run.IsBold)
             {
-                canvas.DrawString(segment.Text, x + BoldOffset(fontSize), y, segmentWidth, lineHeight,
+                canvas.DrawString(segment.Text, x + BoldOffset(drawFontSize), y, segmentWidth, lineHeight,
                     HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }
@@ -527,18 +532,19 @@ public class OpenHarmonyTextView : OpenHarmonyView
                     HorizontalAlignment.Left, VerticalAlignment.Center);
                 if (run.IsBold)
                 {
-                    canvas.DrawString(glyph, cx + BoldOffset(fontSize), y, Math.Max(1f, glyphWidth), lineHeight,
+                    canvas.DrawString(glyph, cx + BoldOffset(drawFontSize), y, Math.Max(1f, glyphWidth), lineHeight,
                         HorizontalAlignment.Left, VerticalAlignment.Center);
                 }
                 cx += glyphWidth + (float)run.CharacterSpacing;
             }
         }
-        DrawDecorations(canvas, run.TextDecorations, color, segment.Width, x, y, lineHeight, fontSize);
+        DrawDecorations(canvas, run.TextDecorations, color, segment.Width, x, y, lineHeight, drawFontSize);
         canvas.FontColor = savedColor;
         canvas.FontSize = savedSize;
     }
 
-    private void DrawLine(MauiCanvas canvas, string line, float x, float y, float lineHeight, float fontSize, bool bold)
+    private void DrawLine(MauiCanvas canvas, string line, float x, float y, float lineHeight, float fontSize,
+        float drawFontSize, bool bold)
     {
         if (CharacterSpacing == 0)
         {
@@ -546,7 +552,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 HorizontalAlignment.Left, VerticalAlignment.Center);
             if (bold)
             {
-                canvas.DrawString(line, x + BoldOffset(fontSize), y, Math.Max(1f, MeasureLine(line, fontSize)), lineHeight,
+                canvas.DrawString(line, x + BoldOffset(drawFontSize), y, Math.Max(1f, MeasureLine(line, fontSize)), lineHeight,
                     HorizontalAlignment.Left, VerticalAlignment.Center);
             }
             return;
@@ -565,7 +571,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 HorizontalAlignment.Left, VerticalAlignment.Center);
             if (bold)
             {
-                canvas.DrawString(glyph, cx + BoldOffset(fontSize), y, Math.Max(1f, glyphWidth), lineHeight,
+                canvas.DrawString(glyph, cx + BoldOffset(drawFontSize), y, Math.Max(1f, glyphWidth), lineHeight,
                     HorizontalAlignment.Left, VerticalAlignment.Center);
             }
             cx += glyphWidth + (float)CharacterSpacing;
@@ -619,18 +625,22 @@ public class OpenHarmonyTextView : OpenHarmonyView
 
     private float _naturalLineHeight;
     private float _naturalLineHeightFontSize = -1;
+    private int _naturalLineHeightFontScaleGeneration = -1;
 
     private float EffectiveLineHeight(float fontSize)
     {
-        if (Math.Abs(_naturalLineHeightFontSize - fontSize) > 0.001f)
+        int fontScaleGeneration = OpenHarmonyFontManager.FontScaleGeneration;
+        if (Math.Abs(_naturalLineHeightFontSize - fontSize) > 0.001f ||
+            _naturalLineHeightFontScaleGeneration != fontScaleGeneration)
         {
             float natural = OpenHarmonyLabelHandler.MeasureText("M", fontSize).Height;
             if (natural <= 0)
             {
-                natural = fontSize * 1.35f;
+                natural = OpenHarmonyFontManager.ScaleFontSize(fontSize) * 1.35f;
             }
             _naturalLineHeight = natural;
             _naturalLineHeightFontSize = fontSize;
+            _naturalLineHeightFontScaleGeneration = fontScaleGeneration;
         }
         return LineHeight > 0 ? (float)LineHeight * _naturalLineHeight : _naturalLineHeight;
     }
@@ -649,7 +659,8 @@ public class OpenHarmonyTextView : OpenHarmonyView
 
     private string[] GetLayout(string text, float fontSize, float maxWidth)
     {
-        var key = new TextLayoutKey(text, fontSize, maxWidth, LineBreakMode, MaxLines, CharacterSpacing, LineHeight);
+        var key = new TextLayoutKey(text, fontSize, maxWidth, LineBreakMode, MaxLines, CharacterSpacing, LineHeight,
+            OpenHarmonyFontManager.FontScaleGeneration);
         if (_layouts.TryGetValue(key, out string[]? cached))
         {
             return cached;
@@ -851,9 +862,10 @@ public class OpenHarmonyTextView : OpenHarmonyView
         private readonly int _maxLines;
         private readonly double _characterSpacing;
         private readonly double _lineHeight;
+        private readonly int _fontScaleGeneration;
 
         public TextLayoutKey(string text, float fontSize, float maxWidth, LineBreakMode mode, int maxLines,
-            double characterSpacing, double lineHeight)
+            double characterSpacing, double lineHeight, int fontScaleGeneration)
         {
             _text = text;
             _fontSize = fontSize;
@@ -862,6 +874,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
             _maxLines = maxLines;
             _characterSpacing = characterSpacing;
             _lineHeight = lineHeight;
+            _fontScaleGeneration = fontScaleGeneration;
         }
 
         public bool Equals(TextLayoutKey other)
@@ -871,12 +884,14 @@ public class OpenHarmonyTextView : OpenHarmonyView
                 && _mode == other._mode
                 && _maxLines == other._maxLines
                 && _characterSpacing.Equals(other._characterSpacing)
-                && _lineHeight.Equals(other._lineHeight);
+                && _lineHeight.Equals(other._lineHeight)
+                && _fontScaleGeneration == other._fontScaleGeneration;
 
         public override bool Equals(object? obj) => obj is TextLayoutKey other && Equals(other);
 
         public override int GetHashCode()
-            => HashCode.Combine(_text, _fontSize, _maxWidth, _mode, _maxLines, _characterSpacing, _lineHeight);
+            => HashCode.Combine(_text, _fontSize, _maxWidth, _mode, _maxLines, _characterSpacing, _lineHeight,
+                _fontScaleGeneration);
     }
 }
 

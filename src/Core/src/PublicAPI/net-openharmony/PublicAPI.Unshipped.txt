@@ -1380,6 +1380,8 @@ static Microsoft.Maui.Platform.OpenHarmonyFlashlight.InstallDefault() -> void
 static Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.MapContent(Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler! handler, Microsoft.Maui.Controls.FlyoutPage! flyoutPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.MapIsPresented(Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler! handler, Microsoft.Maui.Controls.FlyoutPage! flyoutPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyFontManager.RegisterFont(string! family, string! path) -> void
+static Microsoft.Maui.Platform.OpenHarmonyFontManager.SetSystemFontScale(float scale) -> void
+static Microsoft.Maui.Platform.OpenHarmonyFontManager.SystemFontScale.get -> float
 static Microsoft.Maui.Platform.OpenHarmonyFrameHandler.MapBorder(Microsoft.Maui.Platform.OpenHarmonyFrameHandler! handler, Microsoft.Maui.Controls.Frame! frame) -> void
 static Microsoft.Maui.Platform.OpenHarmonyGattCharacteristic.operator !=(Microsoft.Maui.Platform.OpenHarmonyGattCharacteristic left, Microsoft.Maui.Platform.OpenHarmonyGattCharacteristic right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyGattCharacteristic.operator ==(Microsoft.Maui.Platform.OpenHarmonyGattCharacteristic left, Microsoft.Maui.Platform.OpenHarmonyGattCharacteristic right) -> bool

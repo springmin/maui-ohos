@@ -829,7 +829,7 @@ public class OpenHarmonyView
         canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
         canvas.FillColor = Colors.DimGray;
         canvas.FillRectangle(panelX, frame.Y, width, frame.Height);
-        canvas.FontSize = 26;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
         canvas.FontColor = Colors.White;
         for (int i = 0; i < FlyoutItems.Count; i++)
         {
@@ -944,7 +944,7 @@ public class OpenHarmonyView
         DateTime lastMonth = new(CalendarMaximum.Year, CalendarMaximum.Month, 1);
         DateTime shownMonth = new(CalendarYear, CalendarMonth, 1);
         canvas.FontColor = shownMonth > firstMonth ? Colors.White : s_calendarDisabled;
-        canvas.FontSize = 26;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
         canvas.DrawString("<", previousX, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
         canvas.FontColor = shownMonth < lastMonth ? Colors.White : s_calendarDisabled;
         canvas.DrawString(">", nextX, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
@@ -954,7 +954,7 @@ public class OpenHarmonyView
 
         // Weekday row (Monday first), matching CalendarHit's row geometry.
         canvas.FontColor = s_calendarDisabled;
-        canvas.FontSize = 20;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(20);
         for (int column = 0; column < 7; column++)
         {
             canvas.DrawString(s_calendarWeekdays[column], ColumnX(column), y + CalendarHeaderHeight,
@@ -968,7 +968,7 @@ public class OpenHarmonyView
         DateTime today = DateTime.Today;
         DateTime min = CalendarMinimum.Date;
         DateTime max = CalendarMaximum.Date;
-        canvas.FontSize = 22;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(22);
         for (int day = 1; day <= days; day++)
         {
             int cell = leading + day - 1;
@@ -1536,7 +1536,7 @@ public class OpenHarmonyView
         if (IsTextEntry && string.IsNullOrEmpty(text))
         {
             canvas.FontColor = PlaceholderColor ?? Colors.Gray;
-            canvas.FontSize = FontSize;
+            canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
             float origin = TextOriginX(Placeholder ?? string.Empty);
             float available = Math.Max(8f, frame.X + frame.Width - 12 - origin);
             canvas.DrawString(Placeholder ?? string.Empty, origin, frame.Y, available, frame.Height,
@@ -1551,7 +1551,7 @@ public class OpenHarmonyView
         if (!string.IsNullOrEmpty(text))
         {
             canvas.FontColor = TextColorForDraw;
-            canvas.FontSize = FontSize;
+            canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
             if (IsTextEntry)
             {
                 if (IsFocused)
@@ -1600,10 +1600,15 @@ public class OpenHarmonyView
     private string? _charWidthsText;
     private float _charWidthsFontSize;
 
-    /// <summary>Per-character widths (cached per text/font size) for caret hit testing.</summary>
+    /// <summary>
+    /// Per-character widths (cached per text and drawn font size) for caret hit testing. The
+    /// cache key is the scaled size, so a system font scale change recomputes instead of serving
+    /// old widths.
+    /// </summary>
     private float[] CharWidths(string text)
     {
-        if (_charWidths is not null && _charWidthsText == text && Math.Abs(_charWidthsFontSize - FontSize) < 0.01f)
+        float drawFontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
+        if (_charWidths is not null && _charWidthsText == text && Math.Abs(_charWidthsFontSize - drawFontSize) < 0.01f)
         {
             return _charWidths;
         }
@@ -1614,13 +1619,13 @@ public class OpenHarmonyView
         {
             string prefix = text[..(i + 1)];
             float prefixWidth;
-            if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(prefix, FontSize, out int measured, out int _) && measured > 0)
+            if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(prefix, drawFontSize, out int measured, out int _) && measured > 0)
             {
                 prefixWidth = measured;
             }
             else
             {
-                prefixWidth = prefix.Length * FontSize * 0.55f;
+                prefixWidth = prefix.Length * drawFontSize * 0.55f;
             }
             widths[i] = Math.Max(0f, prefixWidth - previous);
             previous = prefixWidth;
@@ -1628,7 +1633,7 @@ public class OpenHarmonyView
         }
         _charWidths = widths;
         _charWidthsText = text;
-        _charWidthsFontSize = FontSize;
+        _charWidthsFontSize = drawFontSize;
         return widths;
     }
 
@@ -1870,24 +1875,26 @@ public class OpenHarmonyView
             canvas.FillRectangle(startX, frame.Y + 6, endX - startX, frame.Height - 12);
         }
         float available = Math.Max(8f, frame.X + frame.Width - 12 - startX);
+        float drawFontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
         canvas.FontColor = TextColorForDraw;
-        canvas.FontSize = FontSize;
+        canvas.FontSize = drawFontSize;
         canvas.DrawString(composition, startX, frame.Y, available, frame.Height,
             HorizontalAlignment.Left, VerticalAlignment.Center);
         canvas.StrokeColor = Colors.DodgerBlue;
         canvas.StrokeSize = 2;
         float underlineWidth = Math.Min(available, Math.Max(8f, MeasureTextWidth(composition)));
-        float underlineY = frame.Y + frame.Height / 2f + FontSize * 0.55f;
+        float underlineY = frame.Y + frame.Height / 2f + drawFontSize * 0.55f;
         canvas.DrawLine(startX, underlineY, startX + underlineWidth, underlineY);
     }
 
     private float MeasureTextWidth(string value)
     {
-        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(value, FontSize, out int measured, out int _) && measured > 0)
+        float drawFontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
+        if (Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.MeasureText(value, drawFontSize, out int measured, out int _) && measured > 0)
         {
             return measured;
         }
-        return value.Length * FontSize * 0.55f;
+        return value.Length * drawFontSize * 0.55f;
     }
 
     private static readonly Color s_imagePlaceholderFill = Color.FromArgb("#FFE8E8E8");
@@ -2077,7 +2084,7 @@ public class OpenHarmonyView
     private void DrawPicker(MauiCanvas canvas, RectF frame)
     {
         canvas.FontColor = TextColor;
-        canvas.FontSize = FontSize;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
         string text = Text ?? string.Empty;
         // The value starts at the field's start edge; the chevron sits at the trailing edge.
         canvas.DrawString(text, frame.X + 12, frame.Y, frame.Width - 44, frame.Height,
@@ -2118,7 +2125,7 @@ public class OpenHarmonyView
         canvas.StrokeColor = Colors.Gray;
         canvas.StrokeSize = 1;
         canvas.DrawRectangle(x, y, width, height);
-        canvas.FontSize = FontSize;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
         // Only rows the surface can show are drawn. A long dropdown (a picker with hundreds of
         // items) otherwise pays one native text draw per item on every frame, and the canvas
         // clips every row below the surface anyway, so the pixels are unchanged.
@@ -2196,7 +2203,7 @@ public class OpenHarmonyView
             }
         }
         canvas.FontColor = Colors.White;
-        canvas.FontSize = 28;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(28);
         canvas.DrawString(TitleText ?? string.Empty, frame.X + 56, frame.Y, frame.Width - 112, TitleBarHeight,
             HorizontalAlignment.Center, VerticalAlignment.Center);
     }
@@ -2211,7 +2218,7 @@ public class OpenHarmonyView
             return;
         }
         float tabWidth = frame.Width / TabTitles.Count;
-        canvas.FontSize = FontSize;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
         for (int i = 0; i < TabTitles.Count; i++)
         {
             // Tabs run from the start edge: index 0 is the physical left tab in LTR, the right
@@ -2227,10 +2234,10 @@ public class OpenHarmonyView
                 Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
                     icon, (int)(tabX + (tabWidth - width) / 2f), (int)(barY + 6), width, height);
                 canvas.FontColor = active ? Colors.DodgerBlue : Colors.Gray;
-                canvas.FontSize = 18;
+                canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(18);
                 canvas.DrawString(TabTitles[i], tabX, barY + 6 + iconSize, tabWidth, TabBarHeight - iconSize - 8,
                     HorizontalAlignment.Center, VerticalAlignment.Center);
-                canvas.FontSize = FontSize;
+                canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
                 continue;
             }
             canvas.FontColor = active ? Colors.DodgerBlue : Colors.Gray;
@@ -2297,7 +2304,7 @@ public class OpenHarmonyView
         canvas.FillColor = Background ?? Colors.DimGray;
         canvas.FillRoundedRectangle(frame.X, y, frame.Width, height, 6);
         canvas.FontColor = TextColor;
-        canvas.FontSize = 26;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
         // Decrement is the start half, increment the end half: physical left/right in LTR,
         // swapped in RTL (matching OnTouch's half split).
         canvas.DrawString(FlowRightToLeft ? "+" : "-", frame.X, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
@@ -2322,7 +2329,7 @@ public class OpenHarmonyView
         if (!string.IsNullOrEmpty(Text))
         {
             canvas.FontColor = TextColor;
-            canvas.FontSize = FontSize;
+            canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(FontSize);
             if (FlowRightToLeft)
             {
                 canvas.DrawString(Text, frame.X, frame.Y, Math.Max(1f, cx - side / 2 - frame.X), frame.Height,
@@ -2347,7 +2354,7 @@ public class OpenHarmonyView
 
     private void DrawSwipePanel(MauiCanvas canvas, RectF frame)
     {
-        canvas.FontSize = 24;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(24);
         for (int i = 0; i < SwipeItems.Count; i++)
         {
             RectF item = SwipeItemRect(i);
@@ -2383,10 +2390,10 @@ public class OpenHarmonyView
             }
         }
         canvas.FontColor = NavBarTextColor;
-        canvas.FontSize = 30;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(30);
         canvas.DrawString(NavTitle ?? string.Empty, frame.X + NavBackWidth, frame.Y,
             frame.Width - NavBackWidth * 2, NavBarHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
-        canvas.FontSize = 26;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
         for (int i = 0; i < ToolbarItems.Count; i++)
         {
             RectF item = ToolbarItemRect(i);

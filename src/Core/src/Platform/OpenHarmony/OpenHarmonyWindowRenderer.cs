@@ -196,15 +196,15 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas.FillColor = Colors.DimGray;
         _canvas.FillRoundedRectangle(box.X, box.Y, box.Width, box.Height, 12);
         _canvas.FontColor = Colors.White;
-        _canvas.FontSize = 30;
+        _canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(30);
         RectF title = OpenHarmonyAlertHost.TitleRect;
         _canvas.DrawString(alert.Title ?? string.Empty, title.X, title.Y, title.Width, title.Height,
             HorizontalAlignment.Left, VerticalAlignment.Center);
-        _canvas.FontSize = 24;
+        _canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(24);
         RectF message = OpenHarmonyAlertHost.MessageRect;
         _canvas.DrawString(alert.Message ?? string.Empty, message.X, message.Y, message.Width, message.Height,
             HorizontalAlignment.Left, VerticalAlignment.Top);
-        _canvas.FontSize = 26;
+        _canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
         if (alert.Kind == OpenHarmonyAlertKind.ActionSheet)
         {
             for (int i = 0; i < alert.Options.Count; i++)

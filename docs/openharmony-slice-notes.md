@@ -293,3 +293,39 @@ requires the frame to follow `CurrentPage`. The pixel suite is unchanged and gre
 Not covered here (follow-up): `OpenHarmonyAccessibility.PushChildren` has its own children walk
 with the same omission, so the accessibility shadow tree of a TabbedPage does not include the
 current page's subtree.
+## System font scale (`OpenHarmonyFontManager.SystemFontScale`)
+
+OpenHarmony reports the user's font size setting as a scale factor; the native platforms apply
+it at the text layer (Android sp-sized `TextView`s, iOS `UIFontMetrics`). This slice draws all
+text itself, so the scale is applied in managed code at the one boundary every text path shares
+(T21):
+
+* **Publishing the value.** `OpenHarmonyFontManager.SetSystemFontScale(float)` stores the
+  scale; `SystemFontScale` reads it. A non-finite or non-positive value resets the scale to 1,
+  everything else clamps to 0.5..3. MAUI font values stay logical (a `Label.FontSize` of 20 is
+  still 20; `GetFont` returns the requested font unchanged), and the pipeline multiplies by the
+  scale when it measures or draws - the same split Android makes between sp text and the
+  logical value the app set. The host is expected to re-arrange and redraw after publishing a
+  changed value (the configuration-change path); the value alone cannot relayout the tree.
+* **One scaled boundary.** Every logical size reaches the canvas through
+  `OpenHarmonyFontManager.ScaleFontSize`: `OpenHarmonyLabelHandler.MeasureText` scales the
+  native measurement and its arithmetic fallback, the plain and `FormattedText` run drawing in
+  `OpenHarmonyTextView` scales `canvas.FontSize` (and the synthetic bold offset and decoration
+  metrics), the entry/editor/searchbar text, placeholder, IME composition and per-character
+  caret metrics scale in `OpenHarmonyView`, and the slice's self-drawn chrome (picker value and
+  dropdown rows, calendar header/weekday/day labels, tab captions, title bar, navigation bar
+  toolbar, stepper, swipe panel, flyout rows, alerts, tooltips) scales its fixed sizes through
+  the same helper. At the default scale of 1 the multiplier is identity, so the existing output
+  is unchanged.
+* **Caches follow the scale.** Text measurements are cached per (text, logical size, typeface
+  generation) in `OpenHarmonyLabelHandler`; the key now also carries the font-scale generation,
+  and the view-level line-break, formatted-layout, natural-line-height and per-character caches
+  carry the same generation (or key on the scaled size), so a scale change can never serve
+  metrics computed for the previous size.
+* **Limits (recorded).** The scale is a single process-wide value (the platform's own font size
+  setting is process-wide); the slice does not subscribe to the system configuration change
+  itself - the app host / shell half that reads `Configuration.fontSizeScale` and calls
+  `SetSystemFontScale` plus a re-arrange is still to be wired (the public setter is the seam).
+  Character spacing, paddings, row heights and other pixel geometry stay physical; only text
+  metrics scale. The diagnostics overlay (a debug tool that draws type names) keeps its fixed
+  18 px labels.

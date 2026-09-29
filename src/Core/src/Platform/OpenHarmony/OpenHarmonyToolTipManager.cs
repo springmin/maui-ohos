@@ -723,7 +723,7 @@ internal static class OpenHarmonyToolTipManager
         canvas.StrokeSize = 1;
         canvas.DrawRoundedRectangle(rect.X, rect.Y, rect.Width, rect.Height, 8);
         canvas.FontColor = PopupTextColor;
-        canvas.FontSize = PopupFontSize;
+        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(PopupFontSize);
         canvas.DrawString(text, rect.X + PopupPadding, rect.Y + PopupPadding, rect.Width - PopupPadding * 2,
             rect.Height - PopupPadding * 2, HorizontalAlignment.Left, VerticalAlignment.Center);
         Draws++;
@@ -736,7 +736,8 @@ internal static class OpenHarmonyToolTipManager
         float maxTextWidth = PopupMaxWidth - PopupPadding * 2;
         float textWidth;
         float textHeight;
-        if (HostCanvas.MeasureText(text, PopupFontSize, out int measuredWidth, out int measuredHeight) && measuredWidth > 0)
+        float drawFontSize = OpenHarmonyFontManager.ScaleFontSize(PopupFontSize);
+        if (HostCanvas.MeasureText(text, drawFontSize, out int measuredWidth, out int measuredHeight) && measuredWidth > 0)
         {
             int lines = Math.Max(1, (int)Math.Ceiling(measuredWidth / maxTextWidth));
             textWidth = Math.Min(maxTextWidth, measuredWidth);
@@ -744,11 +745,11 @@ internal static class OpenHarmonyToolTipManager
         }
         else
         {
-            float advance = PopupFontSize * 0.55f;
+            float advance = drawFontSize * 0.55f;
             int charsPerLine = Math.Max(1, (int)(maxTextWidth / advance));
             int lines = Math.Max(1, (int)Math.Ceiling(text.Length / (double)charsPerLine));
             textWidth = Math.Min(maxTextWidth, Math.Max(1, text.Length) * advance);
-            textHeight = lines * PopupFontSize * 1.35f;
+            textHeight = lines * drawFontSize * 1.35f;
         }
         return (textWidth + PopupPadding * 2, textHeight + PopupPadding * 2);
     }

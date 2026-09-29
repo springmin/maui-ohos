@@ -375,3 +375,32 @@ group headers/footers were unexpressible (T12).
   template it could draw a header/footer with). Headers are not collapsible like the
   `CollectionView`'s group headers, and the carousel still has no page animation (`ScrollTo`
   jumps, reported once when animated).
+
+## Shell current page in the compositor and accessibility walks
+
+The W6A re-scan of the rendering surface found the same class of gap for `Shell` that FIX-TABBED
+found for `TabbedPage`: with a Shell as the render root, the headless probe sampled the renderer's
+base fill (`#000000`) where the current page's content belongs, while the same page as a bare root
+painted its own fill (`#FF0000`). The shell handler already realizes and arranges the page
+(`OpenHarmonyShellHandler.MapShell` / `ArrangeContent`), but neither walk visited it: rc.1's
+`Shell` is not an `ILayout` or an `IContentView`, and the `ChildEnumerator` had no Shell case, so
+drawing, hit-testing and animation probing stopped at the chrome and bottom bar the platform view
+paints itself. `OpenHarmonyAccessibility.PushChildren` carried the identical omission, so
+assistive technology never saw the page either.
+
+Both walks now yield `Shell.CurrentPage` exactly like `TabbedPage.CurrentPage` - the same
+`!ReferenceEquals(..., _presentedContent)` guard, chained right after the tabbed-page phase and
+before the flyout phases (the accessibility builder mirrors it next to its tabbed-page branch) -
+so the current page participates in drawing, hit-testing, the ordered (ZIndex) walk and the
+published shadow tree, and all of them follow an item switch.
+
+Pinned by four interaction checks in `ohos-workload/test/maui-platform-verify` (485 -> 489,
+floor 465 -> 469): `shell draw current` renders a two-item Shell through a text-recording canvas
+and requires the current page's label in the frame with the other page's label absent (both pages
+are materialized up front through direct `ShellContent.Content`, so the check fails on the pre-fix
+slice for the walk and not for lazy creation), `shell a11y current` requires the current page's
+subtree in the published tree, and the `after switch` pair taps the second bottom-bar item and
+requires both walks to follow `CurrentItem`/`CurrentPage`. The pixel suite
+(`ohos-workload/test/headless-render`) gains a control (the page as a bare root paints red) plus
+`shell current page draws under the shell` (red) and `shell item switch repaints the new page`
+(lime); the pre-fix slice fails the two shell checks against the canvas fill.

@@ -758,6 +758,15 @@ public static partial class OpenHarmonyAccessibility
         {
             s_buildChildren.Add(tabPage);
         }
+        // The same mirroring for a shell: the compositor's ChildEnumerator yields its CurrentPage,
+        // so the shadow tree publishes what the frame draws. rc.1's Shell is not an IContentView,
+        // so the presented-content branch below cannot reach the page it presents either.
+        if (view is Microsoft.Maui.Controls.Shell shell &&
+            shell.CurrentPage is IView shellPage &&
+            !ReferenceEquals(shellPage, (view as IContentView)?.PresentedContent))
+        {
+            s_buildChildren.Add(shellPage);
+        }
         if (view is IContentView contentView && contentView.PresentedContent is IView presented && !ReferenceEquals(presented, view))
         {
             s_buildChildren.Add(presented);

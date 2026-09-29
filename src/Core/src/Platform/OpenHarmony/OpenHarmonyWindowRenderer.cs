@@ -262,14 +262,14 @@ public sealed class OpenHarmonyWindowRenderer
 
     /// <summary>
     /// Child views of a view: layout children, content-view content and the visible page of a
-    /// navigation, tabbed or flyout page.
+    /// navigation, tabbed, shell or flyout page.
     /// </summary>
     /// <remarks>
     /// The sequence is produced by the allocation-free <see cref="ChildEnumerator"/> struct instead
     /// of an iterator method: the frame path walks every node of the tree (drawing, hit-testing,
     /// animation probing), and a C# iterator allocated a state machine plus the layout's interface
     /// enumerator per node per walk, which the Debug build measured at ~180 B per node per frame.
-    /// The order, the reference-identity comparisons (presented content vs. navigation/tabbed
+    /// The order, the reference-identity comparisons (presented content vs. navigation/tabbed/shell
     /// page) and the laziness (later branches are only read once the earlier ones are exhausted, so
     /// a hit-test that stops at a view outside the point never touches its page/flyout state) are
     /// exactly those of the iterator this replaces.
@@ -345,16 +345,26 @@ public sealed class OpenHarmonyWindowRenderer
                         return true;
                     }
                     goto case 4;
-                case 4: // flyout page detail (always visible)
+                case 4: // the current page of a shell (unless already presented above)
                     _phase = 5;
+                    if (_view is Microsoft.Maui.Controls.Shell shell &&
+                        shell.CurrentPage is IView shellPage &&
+                        !ReferenceEquals(shellPage, _presentedContent))
+                    {
+                        _current = shellPage;
+                        return true;
+                    }
+                    goto case 5;
+                case 5: // flyout page detail (always visible)
+                    _phase = 6;
                     if (_view is Microsoft.Maui.Controls.FlyoutPage flyoutPage && flyoutPage.Detail is IView detail)
                     {
                         _current = detail;
                         return true;
                     }
-                    goto case 5;
-                case 5: // flyout page panel (only while presented)
-                    _phase = 6;
+                    goto case 6;
+                case 6: // flyout page panel (only while presented)
+                    _phase = 7;
                     if (_view is Microsoft.Maui.Controls.FlyoutPage presented &&
                         presented.IsPresented &&
                         presented.Flyout is IView flyoutContent)
@@ -362,8 +372,8 @@ public sealed class OpenHarmonyWindowRenderer
                         _current = flyoutContent;
                         return true;
                     }
-                    goto case 6;
-                case 6: // platform-owned children (collection view items)
+                    goto case 7;
+                case 7: // platform-owned children (collection view items)
                     _viewChildren ??= _view.Handler?.PlatformView is OpenHarmonyView { ViewChildren.Count: > 0 } platform
                         ? platform.ViewChildren
                         : s_noChildren;
@@ -372,7 +382,7 @@ public sealed class OpenHarmonyWindowRenderer
                         _current = _viewChildren[_index++];
                         return true;
                     }
-                    _phase = 7;
+                    _phase = 8;
                     return false;
                 default:
                     return false;

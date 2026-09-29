@@ -1,0 +1,97 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <AssemblyName>Microsoft.Maui.Platform.OpenHarmony</AssemblyName>
+    <RootNamespace>Microsoft.Maui.Platform</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- FIX-INTEROP P2: the slice's P/Invokes are [LibraryImport]; the source generator emits
+         the string-marshalling helpers as unsafe code, so the compile vehicle must allow it
+         (the full-tree build already sets AllowUnsafeBlocks on the net*-openharmony TFM). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The platform bridge (Microsoft.OpenHarmony.Hosting) ships in the OpenHarmony platform
+         workload packs; point this at a built or installed copy when building outside the
+         workload repo. -->
+    <OpenHarmonyHostingAssembly Condition=" '$(OpenHarmonyHostingAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Hosting/bin/Release/net11.0/Microsoft.OpenHarmony.Hosting.dll</OpenHarmonyHostingAssembly>
+    <!-- The slice's graphics backend (Microsoft.OpenHarmony.Maui.Graphics) is built from the
+         workload repo alongside the hosting assembly; same override story as above. -->
+    <OpenHarmonyGraphicsAssembly Condition=" '$(OpenHarmonyGraphicsAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Maui.Graphics/bin/Release/net11.0/Microsoft.OpenHarmony.Maui.Graphics.dll</OpenHarmonyGraphicsAssembly>
+    <!-- The BlazorWebView handler skeleton takes the BlazorWebView package types. The switch
+         lets compile vehicles that build the slice sources without restoring the package (a
+         partial checkout, the ohos-workload verifier harness) skip the file instead of
+         failing; see OpenHarmonyBlazorWebViewHandler.cs. -->
+    <DefineConstants>$(DefineConstants);OPENHARMONY_BLAZOR_WEBVIEW</DefineConstants>
+    <!-- This project is the slice's standalone compile vehicle: in a partial checkout (this one)
+         the fork's root Directory.Build.targets cannot be evaluated because it unconditionally
+         imports eng/AndroidX.targets and eng/NuGetVersions.targets, which the partial checkout
+         does not carry. Skip the root targets import when those files are missing instead of
+         failing; when they are present the import runs exactly as before (no shadowing, the
+         fork's full solve is unchanged). -->
+    <_MauiDirectoryBuildTargetsPath>$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), 'Directory.Build.targets'))</_MauiDirectoryBuildTargetsPath>
+    <ImportDirectoryBuildTargets Condition=" '$(_MauiDirectoryBuildTargetsPath)' != '' and !Exists('$(_MauiDirectoryBuildTargetsPath)/eng/AndroidX.targets') ">false</ImportDirectoryBuildTargets>
+    <!-- Directory.Build.props turns warnings into errors for the shipping MAUI build. Keep that
+         policy here and leave only the diagnostics this compile vehicle knowingly produces and
+         cannot fix without editing the slice sources (owned by the slice work, not this
+         project): CS0618 (the slice deliberately implements the obsolete ListView/Frame
+         handlers), CA2255 (the Essentials entry points are [ModuleInitializer]s), and the
+         CS8604/CS8766/CS8613 nullability mismatches against the platform-less interfaces. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Fork-only compile vehicle: this whitelist is a local concession for this partial
+         checkout and must never travel upstream with the slice. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618;CA2255;CS8604;CS8766;CS8613</WarningsNotAsErrors>
+    <!-- FIX-INTEROP #10: the slice is AOT/trim-analyzed on every build. The full MAUI tree's
+         targets force the trim analyzer off when PublishAot != true, which can hide IL2026/
+         IL3050 in the slice; this standalone vehicle sets the switches explicitly and CI
+         promotes the two IDs to errors:
+           dotnet build Microsoft.Maui.Platform.OpenHarmony.csproj -c Release \
+             -p:IsAotCompatible=true -p:EnableTrimAnalyzer=true -warnaserror:IL2026,IL3050
+         A full-tree build that dropped them can re-enable them the same way on the command
+         line (the properties are not conditioned here). -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <!-- FIX-INTEROP P2: [assembly: DisableRuntimeMarshalling] stays off for now. Every P/Invoke
+         in this slice is [LibraryImport], but the 29 callback registrations pass
+         Marshal.GetFunctionPointerForDelegate thunks, which runtime marshalling disabled
+         refuses. Converting them to [UnmanagedCallersOnly] + delegate* unmanaged is blocked by
+         the interaction harness, which invokes the thunks directly from managed code (clipboard/
+         theme/sensor/... callback probes); managed invocation of an UnmanagedCallersOnly
+         method is invalid. The switch becomes available once the callbacks no longer need
+         managed invocation. -->
+    <!-- The darc feeds only serve the vulnerability audit when the network is up; the standalone
+         vehicle must also restore/build in partial, offline checkouts. The shipping build keeps
+         the audit (NU1900 would otherwise be promoted by TreatWarningsAsErrors). -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- CA1418: OpenHarmony is not in the platform-compatibility analyzer's known-platform list
+         (this vehicle targets plain net11.0, not net*-openharmony); declare the platform
+         explicitly instead of suppressing the rule, mirroring the runtime's sdk-ohos projects. -->
+    <SupportedPlatform Include="openharmony" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Microsoft.Maui.Controls also carries the MAUI implicit global usings
+         (Microsoft.Maui.Controls/Graphics/Devices/... via buildTransitive Globs.props); the
+         slice sources rely on them, exactly like the harness and a real MAUI app do. -->
+    <PackageReference Include="Microsoft.Maui.Controls" Version="11.0.0-rc.1.26451.6" />
+    <PackageReference Include="Microsoft.Maui.Core" Version="11.0.0-rc.1.26451.6" />
+    <PackageReference Include="Microsoft.Maui.Graphics" Version="11.0.0-rc.1.26451.6" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.1.26451.6" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- ABI freeze (R5): the native host entry points keep the `ohos_host_*` symbol prefix and
+         the `OHOS_HOST_APP_CONTEXT` environment variable, and the hosting bridge keeps the
+         Microsoft.OpenHarmony.Hosting names it P/Invokes them through. Those identifiers
+         crossed the ArkTS/NAPI boundary and are baked into published app bundles and shells,
+         so they are the frozen compatibility surface even though everything user-visible uses
+         the OpenHarmony name; renaming them would break already-shipped apps. -->
+    <Reference Include="Microsoft.OpenHarmony.Hosting">
+      <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.OpenHarmony.Maui.Graphics">
+      <HintPath>$(OpenHarmonyGraphicsAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

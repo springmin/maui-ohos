@@ -76,6 +76,24 @@
     <PackageReference Include="Tizen.UIExtensions.NUI" />
     <ProjectReference Include="..\..\Graphics\src\Graphics.Skia\Graphics.Skia.csproj" />
   </ItemGroup>
+  <PropertyGroup Condition="$(TargetFramework.Contains('-openharmony'))">
+    <!-- The OpenHarmony platform workload ships Microsoft.OpenHarmony.Hosting in its ref pack
+         (the net*-openharmony framework reference resolves it), but the slice's graphics
+         backend (Microsoft.OpenHarmony.Maui.Graphics) only travels in the platform runtime
+         pack, which a RID-less library build does not reference. Point at a built copy, with
+         the same override property the standalone slice compile vehicle uses. Only the
+         OpenHarmony TFM evaluates this block. -->
+    <OpenHarmonyGraphicsAssembly Condition=" '$(OpenHarmonyGraphicsAssembly)' == '' ">$(MauiRootDirectory)..\ohos-workload\src\Microsoft.OpenHarmony.Maui.Graphics\bin\Release\net11.0\Microsoft.OpenHarmony.Maui.Graphics.dll</OpenHarmonyGraphicsAssembly>
+  </PropertyGroup>
+  <ItemGroup Condition="$(TargetFramework.Contains('-openharmony'))">
+    <!-- src/Core/src/Platform/OpenHarmony is compiled into Microsoft.Maui only for this TFM
+         (MultiTargeting.targets removes it for every other platform); this is the slice
+         dependency the platform framework reference does not provide. -->
+    <Reference Include="Microsoft.OpenHarmony.Maui.Graphics">
+      <HintPath>$(OpenHarmonyGraphicsAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Essentials\src\Essentials.csproj" />
     <ProjectReference Include="..\..\Graphics\src\Graphics\Graphics.csproj" />

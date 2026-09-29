@@ -1,0 +1,136 @@
+// Managed side of the HUKS bridge: requests are queued with ids and completed by the host's
+// native keystore engine (or, when the device has no libhuks_ndk.z.so, by the ArkTS sink) through
+// ohos_host_keystore_complete. When no answer arrives (tests, headless, older hosts) every call
+// fails fast and callers fall back to the file-based implementation.
+using System.Collections.Concurrent;
+using System.Text;
+using Microsoft.OpenHarmony.Hosting;
+
+namespace Microsoft.Maui.Platform;
+
+internal static partial class OpenHarmonyKeystore
+{
+    private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Rc, string Data)>> s_pending = new();
+    private static int s_nextId;
+    private static bool s_unavailable;
+
+    public static bool IsUnavailable => s_unavailable;
+
+    public static void Complete(int requestId, int rc, string data)
+    {
+        if (s_pending.TryRemove(requestId, out TaskCompletionSource<(int, string)>? source))
+        {
+            source.TrySetResult((rc, data));
+        }
+    }
+
+    public static async Task<byte[]?> EncryptAsync(string alias, byte[] plain, int timeoutMs = 1500)
+    {
+        string? result = await ExecuteAsync("encrypt", alias, Convert.ToBase64String(plain), timeoutMs);
+        return DecodeBase64(result);
+    }
+
+    public static async Task<byte[]?> DecryptAsync(string alias, byte[] cipher, int timeoutMs = 1500)
+    {
+        string? result = await ExecuteAsync("decrypt", alias, Convert.ToBase64String(cipher), timeoutMs);
+        return DecodeBase64(result);
+    }
+
+    /// <summary>
+    /// The shell sink's base64 answer decoded safely: a malformed answer (a broken sink or a
+    /// truncated native result) reads as absent instead of throwing out of a storage call.
+    /// </summary>
+    private static byte[]? DecodeBase64(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+        try
+        {
+            return Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    public static async Task<bool> EnsureKeyAsync(string alias, int timeoutMs = 1500)
+        => await ExecuteAsync("generate", alias, string.Empty, timeoutMs) is not null;
+
+    public static async Task<bool> DeleteKeyAsync(string alias, int timeoutMs = 1500)
+        => await ExecuteAsync("delete", alias, string.Empty, timeoutMs) is not null;
+
+    /// <summary>
+    /// True when the host library reports the native HUKS engine (libhuks_ndk.z.so) on this
+    /// device: the value key is generated and kept by the system keystore. False (off-device,
+    /// reduced image, older host) means the store keeps the documented per-install file key.
+    /// The answer is a device capability and is cached for the process lifetime.
+    /// </summary>
+    public static bool IsAvailable
+    {
+        get
+        {
+            if (s_available is bool cached)
+            {
+                return cached;
+            }
+            bool available;
+            try
+            {
+                available = KeystoreAvailable() == 1;
+            }
+            catch
+            {
+                // No host library (tests/desktop) or a host without the export: there is no
+                // keystore, and a status getter never throws.
+                available = false;
+            }
+            s_available = available;
+            return available;
+        }
+    }
+
+    private static bool? s_available;
+
+    private static async Task<string?> ExecuteAsync(string op, string alias, string dataBase64, int timeoutMs)
+    {
+        if (s_unavailable)
+        {
+            return null;
+        }
+        int id = Interlocked.Increment(ref s_nextId);
+        var source = new TaskCompletionSource<(int, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        s_pending[id] = source;
+        try
+        {
+            RequestNative(id, op, alias, dataBase64);
+        }
+        catch
+        {
+            s_pending.TryRemove(id, out _);
+            s_unavailable = true;
+            return null;
+        }
+        Task completed = await Task.WhenAny(source.Task, Task.Delay(timeoutMs));
+        if (completed != source.Task)
+        {
+            s_pending.TryRemove(id, out _);
+            s_unavailable = true;
+            return null;
+        }
+        (int rc, string data) = await source.Task;
+        if (rc != 0)
+        {
+            return null;
+        }
+        return data;
+    }
+
+    [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_request", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf8)]
+    private static partial void RequestNative(int requestId, string op, string alias, string dataBase64);
+
+    [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_available")]
+    private static partial int KeystoreAvailable();
+}

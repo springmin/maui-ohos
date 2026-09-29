@@ -65,6 +65,16 @@
     <Compile Remove="**\Tizen\**\*.cs" />
     <None Include="**\Tizen\**\*.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
   </ItemGroup>
+  <ItemGroup Condition=" '$(_MauiTargetPlatformIsOpenHarmony)' != 'True' ">
+    <!-- The platform slice (src/Core/src/Platform/OpenHarmony) is compiled into the project
+         only for the net*-openharmony TFM, like the Tizen/Android platform folders. Every
+         other TFM removes it, so the slice's Microsoft.OpenHarmony.* dependencies can never
+         leak into a platform build that does not have the workload. -->
+    <Compile Remove="**\**\*.OpenHarmony.cs" />
+    <None Include="**\**\*.OpenHarmony.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
+    <Compile Remove="**\OpenHarmony\**\*.cs" />
+    <None Include="**\OpenHarmony\**\*.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Remove="bin\**;obj\**" />
     <None Remove="bin\**;obj\**" />
@@ -104,6 +114,11 @@
   <!-- Tizen -->
   <PropertyGroup Condition=" '$(_MauiTargetPlatformIsTizen)' == 'True' ">
     <DefineConstants>$(DefineConstants);TIZEN</DefineConstants>
+  </PropertyGroup>
+
+  <!-- OpenHarmony -->
+  <PropertyGroup Condition=" '$(_MauiTargetPlatformIsOpenHarmony)' == 'True' ">
+    <DefineConstants>$(DefineConstants);OPENHARMONY</DefineConstants>
   </PropertyGroup>
 
   <!-- Windows -->

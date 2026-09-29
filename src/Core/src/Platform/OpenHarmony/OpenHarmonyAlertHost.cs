@@ -1,0 +1,162 @@
+// Alert overlay state: the alert manager stores what should be shown and the renderer draws it
+// (scrim + dialog box + buttons) and routes button taps back through the completion callbacks.
+using Microsoft.Maui.Graphics;
+
+namespace Microsoft.Maui.Platform;
+
+internal enum OpenHarmonyAlertKind
+{
+    Alert,
+    ActionSheet,
+    Prompt,
+}
+
+internal sealed class OpenHarmonyAlertState
+{
+    public required string? Title { get; init; }
+    public required string? Message { get; init; }
+    public required string? Accept { get; init; }
+    public required string? Cancel { get; init; }
+    public required Action<bool> Complete { get; init; }
+    public OpenHarmonyAlertKind Kind { get; init; } = OpenHarmonyAlertKind.Alert;
+    /// <summary>Action sheet entries (both option buttons and the cancel title).</summary>
+    public IReadOnlyList<string> Options { get; init; } = Array.Empty<string>();
+    public Action<string>? CompleteOption { get; init; }
+    public Action<string?>? CompleteText { get; init; }
+    public string PromptText { get; set; } = string.Empty;
+}
+
+internal static class OpenHarmonyAlertHost
+{
+    public static OpenHarmonyAlertState? Current { get; private set; }
+
+    public static double Width { get; private set; }
+    public static double Height { get; private set; }
+
+    public static bool IsVisible => Current is not null;
+
+    public static event Action? Changed;
+
+    public static void Show(OpenHarmonyAlertState state)
+    {
+        Current = state;
+        Changed?.Invoke();
+    }
+
+    public static void Hide()
+    {
+        Current = null;
+        Changed?.Invoke();
+    }
+
+    public static void SetSurface(double width, double height)
+    {
+        Width = width;
+        Height = height;
+    }
+
+    /// <summary>Dialog geometry (shared by drawing and hit testing).</summary>
+    public static RectF BoxRect
+    {
+        get
+        {
+            float width = (float)Math.Min(640, Math.Max(320, Width - 160));
+            float height = 260;
+            return new RectF((float)((Width - width) / 2), (float)((Height - height) / 2), width, height);
+        }
+    }
+
+    /// <summary>Title row of the dialog (shared by drawing and the accessibility shadow tree).</summary>
+    public static RectF TitleRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            return new RectF(box.X + 20, box.Y + 8, box.Width - 40, 48);
+        }
+    }
+
+    /// <summary>Message body of the dialog (drawing and the accessibility shadow tree).</summary>
+    public static RectF MessageRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            return new RectF(box.X + 20, box.Y + 60, box.Width - 40, box.Height - 140);
+        }
+    }
+
+    /// <summary>Prompt text field (drawing and the accessibility shadow tree).</summary>
+    public static RectF PromptRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            return new RectF(box.X + 20, box.Y + 110, box.Width - 40, 56);
+        }
+    }
+
+    /// <summary>Row rects of an action sheet (options then cancel).</summary>
+    public static RectF OptionRect(int index)
+    {
+        RectF box = BoxRect;
+        float rowHeight = 64;
+        return new RectF(box.X, box.Y + 56 + index * rowHeight, box.Width, rowHeight);
+    }
+
+    public static int OptionIndexAt(float x, float y)
+    {
+        if (Current is not { Kind: OpenHarmonyAlertKind.ActionSheet } sheet)
+        {
+            return -1;
+        }
+        for (int i = 0; i < sheet.Options.Count; i++)
+        {
+            if (OptionRect(i).Contains(x, y))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public static RectF PromptAcceptRect => AcceptRect;
+
+    public static void PromptAppend(string text)
+    {
+        if (Current is { Kind: OpenHarmonyAlertKind.Prompt } prompt)
+        {
+            prompt.PromptText += text;
+            Changed?.Invoke();
+        }
+    }
+
+    public static void PromptBackspace()
+    {
+        if (Current is { Kind: OpenHarmonyAlertKind.Prompt } prompt && prompt.PromptText.Length > 0)
+        {
+            prompt.PromptText = prompt.PromptText[..^1];
+            Changed?.Invoke();
+        }
+    }
+
+    public static RectF AcceptRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            float buttonWidth = 160;
+            return new RectF(box.Right - buttonWidth - 16, box.Bottom - 64, buttonWidth, 48);
+        }
+    }
+
+    public static RectF CancelRect
+    {
+        get
+        {
+            RectF box = BoxRect;
+            RectF accept = AcceptRect;
+            return new RectF(accept.X - 176, accept.Y, 160, 48);
+        }
+    }
+}

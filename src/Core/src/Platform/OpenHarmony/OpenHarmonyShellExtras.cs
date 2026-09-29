@@ -15,8 +15,9 @@
 //     host.registerShellFlyoutChangedSink, where NULL or "" clears the label. The compositor keeps
 //     drawing the same text as the first/last flyout row (see FlyoutItems in the handler).
 //
-// What still has no bridge: a rich View/DataTemplate flyout section (SectionText returns null for
-// anything but a string/Label) cannot cross either channel.
+// A rich View/DataTemplate flyout section and Shell.ItemTemplate rows do not cross the bridge:
+// they are materialized as real views by OpenHarmonyShellFlyout and drawn by the compositor (the
+// ArkTS panel keeps its flat text labels for string/Label sections).
 //
 // Every native call is probed once with NativeLibrary.TryGetExport (the screen reader's announce
 // probe pattern). Without libopenharmonyhost.so (desktop tests) the managed snapshot below stays

@@ -25,6 +25,13 @@ public sealed class OpenHarmonyWindowRenderer
     /// </summary>
     internal static Action<float, float>? TransformPivotObserved { get; set; }
 
+    /// <summary>
+    /// Test seam: reports every drawn flyout panel (the panel view and the number of rich rows
+    /// drawn into it), so off-device tests can pin that the drawer and its materialized rows
+    /// reached the drawing pass without a rasterizer.
+    /// </summary>
+    internal static Action<OpenHarmonyView, int>? FlyoutPanelDrawn { get; set; }
+
     private readonly MauiCanvas _canvas;
 
     public OpenHarmonyWindowRenderer()
@@ -121,6 +128,12 @@ public sealed class OpenHarmonyWindowRenderer
         foreach (OpenHarmonyView carousel in _carouselViews)
         {
             DrawCarouselIndicator(carousel);
+        }
+        if (_flyoutPanelView is { FlyoutOpen: true } flyoutPanel)
+        {
+            // The shell drawer floats above the content: the panel background/scrim first, then
+            // the rich rows (materialized views, arranged in canvas space by their handler).
+            DrawFlyoutPanel(flyoutPanel);
         }
         if (_popupView is { PopupVisible: true } popup)
         {
@@ -811,6 +824,37 @@ public sealed class OpenHarmonyWindowRenderer
         }
     }
 
+    /// <summary>
+    /// Draws the shell drawer: the panel background/scrim/text rows, then the rich rows as real
+    /// views (T14). The rich rows are arranged in canvas space by their materializer, so they
+    /// draw with the identity map (their own children mirror inside the row box) and are clipped
+    /// to the panel.
+    /// </summary>
+    private void DrawFlyoutPanel(OpenHarmonyView panel)
+    {
+        panel.DrawFlyoutPanel(_canvas);
+        int richRows = 0;
+        if (panel.FlyoutRows.Count > 0)
+        {
+            RectF panelRect = panel.FlyoutPanelRect();
+            if (panelRect.Width > 0 && panelRect.Height > 0)
+            {
+                _canvas.SaveState();
+                _canvas.ClipRectangle(panelRect.X, panelRect.Y, panelRect.Width, panelRect.Height);
+                foreach (OpenHarmonyFlyoutRow row in panel.FlyoutRows)
+                {
+                    if (row.View is { } rowView)
+                    {
+                        DrawView(rowView, OpenHarmonyFlowMap.Identity, panel.FlowRightToLeft);
+                        richRows++;
+                    }
+                }
+                _canvas.RestoreState();
+            }
+        }
+        FlyoutPanelDrawn?.Invoke(panel, richRows);
+    }
+
     private static void ApplyTextSelection(OpenHarmonyView entry, int index)
     {
         // The drag anchor is the cursor position when the press started.
@@ -1200,9 +1244,22 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (_flyoutPanelView is { FlyoutOpen: true } flyoutPanel)
         {
-            if (down || flyoutPanel.InHamburger(x, y))
+            // The release of the tap that opened the drawer lands in the hamburger corner:
+            // consume it (and a press there) before the drawer rows see the touch.
+            if (flyoutPanel.InHamburger(x, y))
             {
-                // Consume the press (and the release of the tap that opened the drawer).
+                return true;
+            }
+            // Rich rows own their content: a button/entry/gesture inside an item template or a
+            // header view handles the touch before the flat row -> shell item selection.
+            if (RouteFlyoutRowTouch(flyoutPanel, down, up, x, y))
+            {
+                return true;
+            }
+            if (down)
+            {
+                // The press belongs to the drawer even when no row content handled it; the row
+                // selection is decided on the release (the flat fallback below).
                 return true;
             }
             if (up)
@@ -1415,6 +1472,38 @@ public sealed class OpenHarmonyWindowRenderer
         EndGraphicsCapture();
         graphics.GraphicsCancelInteraction?.Invoke();
         return true;
+    }
+
+    /// <summary>
+    /// Routes a touch inside the shell drawer into the rich row under the point (T14). The row
+    /// views are arranged in canvas space, so they hit-test with the identity map; the panel's
+    /// resolved direction rides along so a MatchParent row's own children mirror inside the row.
+    /// Returns false when the point is not inside a rich row or its content does not handle the
+    /// touch (the caller then falls back to the flat row -&gt; shell item selection).
+    /// </summary>
+    private bool RouteFlyoutRowTouch(OpenHarmonyView panel, bool down, bool up, float x, float y)
+    {
+        if (panel.FlyoutRows.Count == 0)
+        {
+            return false;
+        }
+        foreach (OpenHarmonyFlyoutRow row in panel.FlyoutRows)
+        {
+            if (row.View is not IView rowView || !row.Frame.Contains(x, y))
+            {
+                continue;
+            }
+            if (down)
+            {
+                // The same press bookkeeping as the content path, so a row's tap does not
+                // inherit the movement of a previous gesture.
+                _downX = x;
+                _downY = y;
+                _moved = false;
+            }
+            return HandleTouchCore(rowView, down, up, x, y, OpenHarmonyFlowMap.Identity, panel.FlowRightToLeft);
+        }
+        return false;
     }
 
     private bool HandleTouchCore(IView view, bool down, bool up, float x, float y,

@@ -11,8 +11,13 @@
 //     every draw, so a dismiss tap cannot leave a locked shell closed).
 //   * FlyoutHeader/FlyoutFooter: a string or Label header/footer is published as the first/last
 //     row of the compositor flyout panel (FlyoutItems, non-selectable - SelectFlyoutRow offsets
-//     the selection so item taps still land on the right shell item). A rich View/DataTemplate
-//     section cannot be drawn by the compositor and is only tracked (OpenHarmonyShellExtras).
+//     the selection so item taps still land on the right shell item) and as text through the
+//     ArkTS section bridge (OpenHarmonyShellExtras). A rich View or a DataTemplate section is
+//     materialized as a real row of the panel (OpenHarmonyShellFlyout): Shell's own resolved
+//     FlyoutHeaderView/FlyoutFooterView is measured/arranged into the drawer and the renderer
+//     draws and hit-tests it. Shell.ItemTemplate rows are materialized the same way, bound to
+//     their ShellItem; a row's own content handles a touch first, the row -> item selection is
+//     the fallback.
 //   * SearchHandler: attach/detach, query, placeholder and visibility are tracked per current
 //     page (and per shell) in OpenHarmonyShellExtras and published through
 //     ohos_host_shell_search_set; the shell's notifyShellSearch edits return through the
@@ -53,6 +58,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
     private SearchHandler? _searchHandler;
     private Microsoft.Maui.Controls.Page? _observedPage;
     private OpenHarmonyShellChrome? _chrome;
+    private OpenHarmonyShellFlyout? _flyout;
 
     /// <summary>
     /// The chrome pieces the compositor can express beyond the title string (a text-producing
@@ -61,6 +67,9 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
     /// </summary>
     private OpenHarmonyShellChrome Chrome =>
         _chrome ??= new OpenHarmonyShellChrome(PlatformView, () => OpenHarmonyBridge.RequestRedraw());
+
+    /// <summary>Rich drawer sections/rows; created on first use (needs the platform view).</summary>
+    private OpenHarmonyShellFlyout Flyout => _flyout ??= new OpenHarmonyShellFlyout(PlatformView);
 
     /// <summary>Header text rows in FlyoutItems; the flyout selection subtracts them.</summary>
     private int _flyoutLeadingRows;
@@ -141,6 +150,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         }
         DetachSearchHandler();
         _chrome?.Detach();
+        _flyout?.Detach();
         base.DisconnectHandler(platformView);
     }
 
@@ -324,9 +334,10 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         // Flyout (hamburger + drawer) shows the shell items.
         ApplyFlyoutBehavior(view, shell);
         // Flyout rows: an optional plain-text header first, then one row per shell item, then an
-        // optional plain-text footer. Rich header/footer views have no row representation and are
-        // only tracked in OpenHarmonyShellExtras (see the bridge contract there).
+        // optional plain-text footer. Rich header/footer views and Shell.ItemTemplate item rows
+        // are materialized into the panel by SyncFlyoutPanel (see OpenHarmonyShellFlyout).
         BuildFlyoutRows(handler, view, shell);
+        handler.SyncFlyoutPanel(shell);
         view.TabIcons.Clear();
         foreach (ShellItem item in shell.Items)
         {
@@ -370,7 +381,27 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
 
     /// <summary>Header/footer rows of the compositor flyout panel (titles/rows only).</summary>
     public static void MapFlyoutSections(OpenHarmonyShellHandler handler, Shell shell)
-        => BuildFlyoutRows(handler, handler.PlatformView, shell);
+    {
+        BuildFlyoutRows(handler, handler.PlatformView, shell);
+        handler.SyncFlyoutPanel(shell);
+    }
+
+    /// <summary>
+    /// Re-materializes/re-arranges the rich drawer rows. Runs on the drawer's draws (the panel
+    /// only exists while open) and after layout: a closed drawer keeps its last rows.
+    /// </summary>
+    private void SyncFlyoutPanel(Shell shell)
+    {
+        // The leading non-selectable rows are the flyout section rows: the handler's row -> item
+        // mapping (SelectFlyoutRow) and the panel's hit-testing share the same row list.
+        Flyout.Sync(shell,
+            OpenHarmonyShellExtras.SectionText(shell.FlyoutHeader),
+            OpenHarmonyShellExtras.SectionText(shell.FlyoutFooter));
+        if (Flyout.IsRich)
+        {
+            _flyoutLeadingRows = PlatformView.FlyoutRows.Count > 0 && PlatformView.FlyoutRows[0].ItemIndex < 0 ? 1 : 0;
+        }
+    }
 
     private static void BuildFlyoutRows(OpenHarmonyShellHandler handler, OpenHarmonyView view, Shell shell)
     {
@@ -478,5 +509,8 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             Math.Max(0, frame.Height - bottom - top));
         content.Measure(contentFrame.Width, contentFrame.Height);
         content.Arrange(contentFrame);
+        // The drawer follows the window: re-arrange its rich rows with the new panel geometry
+        // (no-op while the drawer is closed or the panel is text-only).
+        SyncFlyoutPanel(VirtualView!);
     }
 }

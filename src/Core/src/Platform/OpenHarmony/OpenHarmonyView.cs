@@ -815,13 +815,37 @@ public class OpenHarmonyView
     public Action<int>? FlyoutSelect { get; set; }
     public Action? FlyoutRequested { get; set; }
 
+    // Shell flyout panel geometry (the drawer): one width/inset/gap source shared by the text
+    // layout, the rich-row arrangement (OpenHarmonyShellFlyout) and hit-testing.
+    internal const float FlyoutPanelMaxWidth = 320f;
+    internal const float FlyoutPanelTopInset = 16f;
+    internal const float FlyoutPanelRowInset = 20f;
+    internal const float FlyoutRowHeight = 44f;
+    internal const float FlyoutRowGap = 8f;
+
+    /// <summary>
+    /// Materialized rich rows of the drawer (T14: a View/DataTemplate FlyoutHeader/Footer and
+    /// Shell.ItemTemplate item rows). Empty for a text-only panel, which then keeps the flat
+    /// FlyoutItems geometry below; with rows, the row frames drive drawing and hit-testing so
+    /// header sections can be real views and item rows can be full templates.
+    /// </summary>
+    internal List<OpenHarmonyFlyoutRow> FlyoutRows { get; } = new();
+
+    /// <summary>Physical (canvas space) panel rectangle: docked to the flyout's start edge.</summary>
+    internal RectF FlyoutPanelRect()
+    {
+        RectF frame = CanvasFrame;
+        float width = Math.Min(FlyoutPanelMaxWidth, frame.Width);
+        return new RectF(FlowRightToLeft ? frame.Right - width : frame.X, frame.Y, width, frame.Height);
+    }
+
     /// <summary>Dimming scrim over the covered content: one shared colour, not per-frame.</summary>
     private static readonly Color s_flyoutScrim = Colors.Black.WithAlpha(0.5f);
 
     public void DrawFlyoutPanel(MauiCanvas canvas)
     {
         RectF frame = CanvasFrame;
-        float width = Math.Min(320f, frame.Width);
+        float width = Math.Min(FlyoutPanelMaxWidth, frame.Width);
         // The panel is the flyout's start edge: physical left in LTR, right in RTL; the menu
         // rows keep their vertical geometry and align their text to the panel's start edge.
         float panelX = FlowRightToLeft ? frame.Right - width : frame.X;
@@ -831,11 +855,26 @@ public class OpenHarmonyView
         canvas.FillRectangle(panelX, frame.Y, width, frame.Height);
         canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
         canvas.FontColor = Colors.White;
+        if (FlyoutRows.Count > 0)
+        {
+            // Rich panel: every row has its physical frame; text rows draw their label (rich
+            // rows are drawn by the renderer as real views, after this background pass).
+            foreach (OpenHarmonyFlyoutRow row in FlyoutRows)
+            {
+                if (row.Text is { } text)
+                {
+                    canvas.DrawString(text, row.Frame.X, row.Frame.Y, row.Frame.Width, row.Frame.Height,
+                        FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
+                }
+            }
+            return;
+        }
         for (int i = 0; i < FlyoutItems.Count; i++)
         {
-            float rowY = frame.Y + 16 + i * 52;
-            canvas.DrawString(FlyoutItems[i], panelX + 20, rowY, width - 40, 44,
-                FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
+            float rowY = frame.Y + FlyoutPanelTopInset + i * (FlyoutRowHeight + FlyoutRowGap);
+            canvas.DrawString(FlyoutItems[i], panelX + FlyoutPanelRowInset, rowY, width - 2 * FlyoutPanelRowInset,
+                FlyoutRowHeight, FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+                VerticalAlignment.Center);
         }
     }
 
@@ -843,7 +882,7 @@ public class OpenHarmonyView
     public int FlyoutItemAt(float x, float y)
     {
         RectF frame = CanvasFrame;
-        float width = Math.Min(320f, frame.Width);
+        float width = Math.Min(FlyoutPanelMaxWidth, frame.Width);
         // Outside the panel (toward the covered detail) dismisses the drawer; the covered side
         // is the physical right of an RTL panel.
         bool outside = FlowRightToLeft ? x < frame.Right - width : x > frame.X + width;
@@ -851,12 +890,23 @@ public class OpenHarmonyView
         {
             return -2;
         }
-        float relative = y - frame.Y - 16;
+        if (FlyoutRows.Count > 0)
+        {
+            foreach (OpenHarmonyFlyoutRow row in FlyoutRows)
+            {
+                if (row.Frame.Contains(x, y))
+                {
+                    return row.PanelIndex;
+                }
+            }
+            return -1;
+        }
+        float relative = y - frame.Y - FlyoutPanelTopInset;
         if (relative < 0)
         {
             return -1;
         }
-        int index = (int)(relative / 52);
+        int index = (int)(relative / (FlyoutRowHeight + FlyoutRowGap));
         return index >= 0 && index < FlyoutItems.Count ? index : -1;
     }
 

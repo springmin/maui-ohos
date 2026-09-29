@@ -267,3 +267,29 @@ that contract on the managed canvas:
   physical (the slice's scroll physics are vertical-only). SwipeView reveal geometry stays in
   gesture space (the drag direction picks the side). The alert overlay keeps its fixed
   accept/cancel layout.
+
+## Tabbed page content in the compositor walk (`OpenHarmonyWindowRenderer.ChildEnumerator`)
+
+A device verification round (report conclusion 2 / finding 5.3-3: a TabbedPage demo drew its
+bottom tab bar but a black body) traced the root cause to the compositor's allocation-free
+`ChildEnumerator`: it yielded layout children, the content-view's presented content, the
+`NavigationPage`'s current page and the flyout detail/panel, but had no case for
+`TabbedPage.CurrentPage`, so the selected page's subtree never reached the frame (only the tab
+bar did, because the platform view paints it itself). rc.1's `TabbedPage` is not an
+`IContentView`, so the presented-content phase cannot cover it.
+
+The enumerator now yields `TabbedPage.CurrentPage` exactly like `NavigationPage.CurrentPage` -
+same `!ReferenceEquals(..., _presentedContent)` guard, chained right after the navigation-page
+phase and before the flyout phases - so drawing, hit-testing, animation probing and the ordered
+(ZIndex) walk all see the selected page.
+
+Pinned by two interaction checks in `ohos-workload/test/maui-platform-verify` (452 -> 454,
+floor 432 -> 434): `tabbed draw current` renders a two-page TabbedPage through a
+text-recording canvas and requires the selected page's label in the frame with the unselected
+page's label absent (the pre-fix slice drew neither, which is also the negative control: the
+check fails with the case removed), and `tabbed draw after switch` taps the second tab and
+requires the frame to follow `CurrentPage`. The pixel suite is unchanged and green.
+
+Not covered here (follow-up): `OpenHarmonyAccessibility.PushChildren` has its own children walk
+with the same omission, so the accessibility shadow tree of a TabbedPage does not include the
+current page's subtree.

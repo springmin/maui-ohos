@@ -1345,6 +1345,7 @@ static Microsoft.Maui.Platform.OpenHarmonyContacts.FindAsync(string? namePrefix 
 static Microsoft.Maui.Platform.OpenHarmonyContacts.IsSupported.get -> bool
 static Microsoft.Maui.Platform.OpenHarmonyContacts.Parse(string? payload) -> System.Collections.Generic.IReadOnlyList<Microsoft.Maui.Platform.OpenHarmonyContact>!
 static Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler.MapDate(Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler! handler, Microsoft.Maui.IDatePicker! picker) -> void
+static Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler.MapIsOpen(Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler! handler, Microsoft.Maui.IDatePicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler.MapTextColor(Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler! handler, Microsoft.Maui.IDatePicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyDeviceDisplay.InstallDefault() -> void
 static Microsoft.Maui.Platform.OpenHarmonyDeviceDisplay.Instance.get -> Microsoft.Maui.Platform.OpenHarmonyDeviceDisplay!
@@ -1448,6 +1449,7 @@ static Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler.MapBarBackground
 static Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler.MapBarTextColor(Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler! handler, Microsoft.Maui.Controls.NavigationPage! navigationPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler.MapCurrentPage(Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler! handler, Microsoft.Maui.Controls.NavigationPage! navigationPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyNotifications.Show(string! title, string! text, int id = 0) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapIsOpen(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapItems(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapSelectedIndex(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapTitle(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
@@ -1513,6 +1515,7 @@ static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapThumbColor(Microsoft.
 static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapTrackColor(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void
 static Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler.MapPages(Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler! handler, Microsoft.Maui.Controls.TabbedPage! tabbedPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.InstallDefault() -> void
+static Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler.MapIsOpen(Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler! handler, Microsoft.Maui.ITimePicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler.MapTextColor(Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler! handler, Microsoft.Maui.ITimePicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler.MapTime(Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler! handler, Microsoft.Maui.ITimePicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyView.AnimationAngle.get -> float

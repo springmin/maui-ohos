@@ -17,6 +17,7 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
             [nameof(IDatePicker.Format)] = MapDate,
             [nameof(IDatePicker.MinimumDate)] = MapCalendarRange,
             [nameof(IDatePicker.MaximumDate)] = MapCalendarRange,
+            [nameof(IDatePicker.IsOpen)] = MapIsOpen,
             [nameof(ITextStyle.TextColor)] = MapTextColor,
         };
 
@@ -25,7 +26,7 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
     protected override OpenHarmonyView CreatePlatformView()
     {
         var view = new OpenHarmonyView { IsPicker = true, IsCalendar = true, Background = Colors.DimGray, FontSize = 26 };
-        view.Tap = () => OpenCalendar(view, (VirtualView?.Date ?? DateTime.Today).Date);
+        view.Tap = () => ShowCalendar(view, (VirtualView?.Date ?? DateTime.Today).Date);
         view.CalendarPreviousMonth = () => ShiftCalendarMonth(view, -1);
         view.CalendarNextMonth = () => ShiftCalendarMonth(view, +1);
         view.CalendarSelectDay = selected =>
@@ -44,10 +45,39 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
             view.CalendarYear = date.Year;
             view.CalendarMonth = date.Month;
             view.CalendarSelectedDay = date.Day;
-            view.PopupVisible = false;
-            OpenHarmonyBridge.RequestRedraw();
+            HideCalendar(view);
         };
+        // The renderer invokes this when a touch outside the calendar dismisses it.
+        view.PopupClosed = () => HideCalendar(view);
         return view;
+    }
+
+    /// <summary>Opens the calendar on the date's month and mirrors the state onto IsOpen.</summary>
+    private void ShowCalendar(OpenHarmonyView view, DateTime date)
+    {
+        OpenCalendar(view, date);
+        SyncIsOpen(open: true);
+    }
+
+    /// <summary>Closes the calendar and mirrors the state onto the date picker's IsOpen.</summary>
+    private void HideCalendar(OpenHarmonyView view)
+    {
+        view.PopupVisible = false;
+        SyncIsOpen(open: false);
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
+    /// Writes the platform calendar state back to the picker: the property change raises
+    /// Opened/Closed on the control and re-enters MapIsOpen, which then sees the calendar
+    /// already in the requested state (so the sync terminates).
+    /// </summary>
+    private void SyncIsOpen(bool open)
+    {
+        if (VirtualView is { } picker && picker.IsOpen != open)
+        {
+            picker.IsOpen = open;
+        }
     }
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
@@ -162,6 +192,24 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
         if ((picker as ITextStyle)?.TextColor is { } color)
         {
             handler.PlatformView.TextColor = color;
+        }
+    }
+
+    /// <summary>
+    /// Maps IDatePicker.IsOpen: true opens the calendar on the picker's date, false closes it
+    /// (the same paths as a field tap and a day selection). The control raises Opened/Closed
+    /// itself when the value changes; a platform open/close writes IsOpen back through the
+    /// shared sync methods.
+    /// </summary>
+    public static void MapIsOpen(OpenHarmonyDatePickerHandler handler, IDatePicker picker)
+    {
+        if (picker.IsOpen)
+        {
+            handler.ShowCalendar(handler.PlatformView, (picker.Date ?? DateTime.Today).Date);
+        }
+        else
+        {
+            handler.HideCalendar(handler.PlatformView);
         }
     }
 }

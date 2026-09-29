@@ -14,6 +14,7 @@ public sealed class OpenHarmonyTimePickerHandler : OpenHarmonyViewHandler<ITimeP
         {
             [nameof(ITimePicker.Time)] = MapTime,
             [nameof(ITimePicker.Format)] = MapTime,
+            [nameof(ITimePicker.IsOpen)] = MapIsOpen,
             [nameof(ITextStyle.TextColor)] = MapTextColor,
         };
 
@@ -25,8 +26,7 @@ public sealed class OpenHarmonyTimePickerHandler : OpenHarmonyViewHandler<ITimeP
         view.Tap = () =>
         {
             RebuildItems();
-            view.PopupVisible = true;
-            OpenHarmonyBridge.RequestRedraw();
+            ShowPopup(view);
         };
         view.PopupSelect = index =>
         {
@@ -41,10 +41,40 @@ public sealed class OpenHarmonyTimePickerHandler : OpenHarmonyViewHandler<ITimeP
                 }
                 MapTime(this, picker);
             }
-            view.PopupVisible = false;
-            OpenHarmonyBridge.RequestRedraw();
+            HidePopup(view);
         };
+        // The renderer invokes this when a touch outside the dropdown dismisses it.
+        view.PopupClosed = () => HidePopup(view);
         return view;
+    }
+
+    /// <summary>Opens the half-hour dropdown and mirrors the state onto the picker's IsOpen.</summary>
+    private void ShowPopup(OpenHarmonyView view)
+    {
+        view.PopupVisible = true;
+        SyncIsOpen(open: true);
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>Closes the dropdown and mirrors the state onto the picker's IsOpen.</summary>
+    private void HidePopup(OpenHarmonyView view)
+    {
+        view.PopupVisible = false;
+        SyncIsOpen(open: false);
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
+    /// Writes the platform popup state back to the picker: the property change raises Opened/
+    /// Closed on the control and re-enters MapIsOpen, which then sees the popup already in the
+    /// requested state (so the sync terminates).
+    /// </summary>
+    private void SyncIsOpen(bool open)
+    {
+        if (VirtualView is { } picker && picker.IsOpen != open)
+        {
+            picker.IsOpen = open;
+        }
     }
 
     private void RebuildItems()
@@ -73,6 +103,24 @@ public sealed class OpenHarmonyTimePickerHandler : OpenHarmonyViewHandler<ITimeP
         if ((picker as ITextStyle)?.TextColor is { } color)
         {
             handler.PlatformView.TextColor = color;
+        }
+    }
+
+    /// <summary>
+    /// Maps ITimePicker.IsOpen: true opens the half-hour dropdown (the same path as a field
+    /// tap), false closes it. The control raises Opened/Closed itself when the value changes; a
+    /// platform open/close writes IsOpen back through the shared sync methods.
+    /// </summary>
+    public static void MapIsOpen(OpenHarmonyTimePickerHandler handler, ITimePicker picker)
+    {
+        if (picker.IsOpen)
+        {
+            handler.RebuildItems();
+            handler.ShowPopup(handler.PlatformView);
+        }
+        else
+        {
+            handler.HidePopup(handler.PlatformView);
         }
     }
 }

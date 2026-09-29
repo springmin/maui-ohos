@@ -14,6 +14,7 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
             [nameof(IPicker.SelectedIndex)] = MapSelectedIndex,
             [nameof(IPicker.Title)] = MapTitle,
             [nameof(IPicker.TitleColor)] = MapTitleColor,
+            [nameof(IPicker.IsOpen)] = MapIsOpen,
         };
 
     public OpenHarmonyPickerHandler() : base(Mapper) { }
@@ -21,11 +22,7 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
     protected override OpenHarmonyView CreatePlatformView()
     {
         var view = new OpenHarmonyView { IsPicker = true, Background = Colors.DimGray, FontSize = 26 };
-        view.Tap = () =>
-        {
-            view.PopupVisible = true;
-            OpenHarmonyBridge.RequestRedraw();
-        };
+        view.Tap = () => OpenPopup(view);
         view.PopupSelect = index =>
         {
             if (VirtualView is { } picker && index >= 0 && index < picker.Items.Count)
@@ -38,11 +35,40 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
                 }
                 MapSelectedIndex(this, picker);
             }
-            view.PopupVisible = false;
-            view.PopupClosed?.Invoke();
-            OpenHarmonyBridge.RequestRedraw();
+            ClosePopup(view);
         };
+        // The renderer invokes this when a touch outside the dropdown dismisses it.
+        view.PopupClosed = () => ClosePopup(view);
         return view;
+    }
+
+    /// <summary>Opens the dropdown and mirrors the state onto the picker's IsOpen.</summary>
+    private void OpenPopup(OpenHarmonyView view)
+    {
+        view.PopupVisible = true;
+        SyncIsOpen(open: true);
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>Closes the dropdown and mirrors the state onto the picker's IsOpen.</summary>
+    private void ClosePopup(OpenHarmonyView view)
+    {
+        view.PopupVisible = false;
+        SyncIsOpen(open: false);
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
+    /// Writes the platform popup state back to the picker: the property change raises Opened/
+    /// Closed on the control and re-enters MapIsOpen, which then sees the popup already in the
+    /// requested state (so the sync terminates).
+    /// </summary>
+    private void SyncIsOpen(bool open)
+    {
+        if (VirtualView is { } picker && picker.IsOpen != open)
+        {
+            picker.IsOpen = open;
+        }
     }
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
@@ -97,6 +123,23 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
         if (picker.TitleColor is { } color)
         {
             handler.PlatformView.TextColor = color;
+        }
+    }
+
+    /// <summary>
+    /// Maps IPicker.IsOpen: true opens the dropdown (the same path as a field tap), false
+    /// closes it. The control raises Opened/Closed itself when the value changes; a platform
+    /// open/close writes IsOpen back through the shared sync methods.
+    /// </summary>
+    public static void MapIsOpen(OpenHarmonyPickerHandler handler, IPicker picker)
+    {
+        if (picker.IsOpen)
+        {
+            handler.OpenPopup(handler.PlatformView);
+        }
+        else
+        {
+            handler.ClosePopup(handler.PlatformView);
         }
     }
 }

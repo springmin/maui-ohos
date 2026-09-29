@@ -290,9 +290,18 @@ page's label absent (the pre-fix slice drew neither, which is also the negative 
 check fails with the case removed), and `tabbed draw after switch` taps the second tab and
 requires the frame to follow `CurrentPage`. The pixel suite is unchanged and green.
 
-Not covered here (follow-up): `OpenHarmonyAccessibility.PushChildren` has its own children walk
-with the same omission, so the accessibility shadow tree of a TabbedPage does not include the
-current page's subtree.
+The accessibility walk has its own children builder (`OpenHarmonyAccessibility.PushChildren`) with
+the same omission, so the shadow tree of a TabbedPage did not include the selected page either.
+It now pushes `TabbedPage.CurrentPage` with the same presented-content reference guard, mirroring
+the compositor walk: the accessibility tree contains exactly the selected page's subtree and
+follows a `CurrentPage` switch.
+
+Pinned by two more interaction checks in `ohos-workload/test/maui-platform-verify` (468 -> 470,
+floor 448 -> 450): `tabbed a11y current` publishes the shadow tree for the two-page TabbedPage and
+requires the selected page's label node in it with the unselected page's label absent (the
+pre-fix slice publishes neither, so the check fails with the branch removed), and `tabbed a11y
+after switch` taps the second tab and requires the tree to follow `CurrentPage`.
+
 ## System font scale (`OpenHarmonyFontManager.SystemFontScale`)
 
 OpenHarmony reports the user's font size setting as a scale factor; the native platforms apply

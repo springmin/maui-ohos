@@ -748,6 +748,16 @@ public static partial class OpenHarmonyAccessibility
         {
             s_buildChildren.Add(currentPage);
         }
+        // The compositor's ChildEnumerator yields a tabbed page's selected page exactly like a
+        // navigation page's current page (with the same presented-content reference guard); the
+        // shadow tree mirrors that walk so assistive technology sees what the frame draws. rc.1's
+        // TabbedPage is not an IContentView, so the presented-content branch cannot cover it.
+        if (view is Microsoft.Maui.Controls.TabbedPage tabbed &&
+            tabbed.CurrentPage is IView tabPage &&
+            !ReferenceEquals(tabPage, (view as IContentView)?.PresentedContent))
+        {
+            s_buildChildren.Add(tabPage);
+        }
         if (view is IContentView contentView && contentView.PresentedContent is IView presented && !ReferenceEquals(presented, view))
         {
             s_buildChildren.Add(presented);

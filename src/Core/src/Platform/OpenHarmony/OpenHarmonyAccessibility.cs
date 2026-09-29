@@ -541,6 +541,8 @@ public static partial class OpenHarmonyAccessibility
             // are appended after it as the only focusable region (the focus trap).
             OpenHarmonyAlertState? alert = OpenHarmonyAlertHost.Current;
             bool changed = Visit(root, previous, alert is not null);
+            s_walkRoot = null;
+            s_titleBarView = null;
             (int modalRootId, bool modalChanged) = AppendAlertNodes(previous, alert);
             changed |= modalChanged || modalRootId != previous.ModalRootId;
             if (!changed)
@@ -615,6 +617,27 @@ public static partial class OpenHarmonyAccessibility
     private static readonly List<IView?> s_buildViews = new();
     private static readonly Stack<(IView View, int ParentId)> s_buildPending = new();
     private static readonly List<IView> s_buildChildren = new();
+    // The walk in progress (N4): the render root and the window TitleBar row's view, so the
+    // title bar can be seeded as the root's first child. Only Refresh/Visit touch them, under
+    // s_buildLock, and they are cleared when the walk ends.
+    private static IView? s_walkRoot;
+    private static IView? s_titleBarView;
+
+    /// <summary>
+    /// The visible Window.TitleBar row's view for a render root, or null when the window has no
+    /// TitleBar (or it is hidden). The row is a logical child of the window, so the accessibility
+    /// walk reaches it through the window handler rather than through the page tree (N4).
+    /// </summary>
+    private static IView? ResolveTitleBarView(IView root)
+    {
+        if (root is not Microsoft.Maui.Controls.VisualElement element ||
+            element.Window is not { Handler: OpenHarmonyWindowHandler windowHandler } ||
+            windowHandler.TitleBar is not { IsVisible: true } titleBar)
+        {
+            return null;
+        }
+        return titleBar.View;
+    }
 
     /// <summary>
     /// Builds the node for one position, reusing the previous frame's immutable record when every
@@ -701,6 +724,10 @@ public static partial class OpenHarmonyAccessibility
 
     private static bool Visit(IView root, Frame previous, bool modal)
     {
+        // N4: the Window.TitleBar row is a logical child of the window, not of the page the walk
+        // starts from, so it is seeded as the render root's first child (it is the topmost row).
+        s_walkRoot = root;
+        s_titleBarView = ResolveTitleBarView(root);
         // The view walk covers the content nodes only; the previous frame's alert nodes (appended
         // at ModalRootId) are not positions the walk can produce, so the length check compares
         // against the previous content count alone.
@@ -736,6 +763,12 @@ public static partial class OpenHarmonyAccessibility
     private static void PushChildren(IView view, int id)
     {
         s_buildChildren.Clear();
+        // N4: the window TitleBar row leads the render root's children, matching the frame order
+        // (the bar is the topmost row); its own subtree is pushed by the regular walk below.
+        if (s_titleBarView is { } titleBarView && ReferenceEquals(view, s_walkRoot))
+        {
+            s_buildChildren.Add(titleBarView);
+        }
         if (view is ILayout layout)
         {
             // Indexed access over IList<IView>: a foreach would allocate the interface enumerator.

@@ -126,12 +126,18 @@ public sealed class OpenHarmonyWindowRenderer
         if (showsTitleBar)
         {
             // The window title bar is chrome above the page: arranged into the top row, drawn
-            // after the content, with the back affordance over its leading slot.
+            // after the content, with the back affordance over its leading slot and the system
+            // caption buttons (when the shell hands them over) over its trailing slot.
             titleBar!.Measure(width);
             titleBar.Arrange(new Rect(0, 0, width, titleBarHeight));
             DrawView(titleBar.View, OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(titleBar.View));
             titleBar.DrawBackAffordance(_canvas);
+            titleBar.DrawSystemButtons(_canvas);
         }
+        // N6: app-managed window decorations follow a visible TitleBar row - the shell's own decor
+        // steps aside and comes back exactly with it. Gated on the shell's decor sink so a
+        // fullscreen phone window never asks (and keeps its system decorations).
+        OpenHarmonyWindowDecoration.EnsureAppManaged(showsTitleBar && OpenHarmonyWindowDecoration.Available);
         foreach (OpenHarmonyView carousel in _carouselViews)
         {
             DrawCarouselIndicator(carousel);
@@ -1208,15 +1214,33 @@ public sealed class OpenHarmonyWindowRenderer
         // The Window.TitleBar row is window chrome above the page tree: a touch that lands on it
         // resolves against the TitleBar subtree, and the leading slot maps onto the window's back
         // affordance. The slot wins over the app's leading content, like the navigation bar's
-        // back region wins over its children.
+        // back region wins over its children. When the shell reports app-managed decorations (N6),
+        // the trailing caption buttons dispatch minimize/maximize/close - release-inside semantics
+        // like a native caption - and a press no template child consumed starts the window move.
         if (ResolveTitleBar(root) is { IsVisible: true } titleBar && titleBar.Contains(x, y))
         {
             if (down && titleBar.ShowsBack && titleBar.InBackButton(x, y) && titleBar.BackTapped())
             {
                 return true;
             }
+            if (titleBar.HitSystemButton(x, y) is { } decorButton)
+            {
+                if (down)
+                {
+                    titleBar.PressDecorButton(decorButton);
+                }
+                else if (up)
+                {
+                    titleBar.ReleaseDecorButton(x, y);
+                }
+                return true;
+            }
             bool rowHandled = HandleTouchCore(titleBar.View, down, up, x, y,
                 OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(titleBar.View));
+            if (down && !rowHandled && titleBar.InDragRegion(x, y))
+            {
+                titleBar.StartWindowDrag();
+            }
             // A press on the row never leaks into the page underneath.
             return rowHandled || down || up;
         }
@@ -1517,6 +1541,7 @@ public sealed class OpenHarmonyWindowRenderer
     internal bool HandleCancel(float x, float y)
     {
         _pointerDown = false;
+        ResolveTitleBar(_lastRoot)?.CancelDecorPress();
         if (_graphicsTarget is not { } graphics)
         {
             return false;

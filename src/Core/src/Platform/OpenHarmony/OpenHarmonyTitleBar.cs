@@ -29,6 +29,19 @@ internal sealed class OpenHarmonyTitleBarRow
     /// <summary>Width of the leading back slot, matching the shell/navigation back region.</summary>
     internal const float BackButtonWidth = 56f;
 
+    /// <summary>Width of one caption button at the trailing edge (system minimize/maximize/close).</summary>
+    internal const float SystemButtonWidth = 46f;
+
+    /// <summary>The caption buttons in trailing-to-leading draw/hit order (close outermost).</summary>
+    private static readonly OpenHarmonyWindowDecorCommand[] s_systemButtons =
+    {
+        OpenHarmonyWindowDecorCommand.Close,
+        OpenHarmonyWindowDecorCommand.ToggleMaximize,
+        OpenHarmonyWindowDecorCommand.Minimize,
+    };
+
+    private OpenHarmonyWindowDecorCommand? _pressedDecorButton;
+
     private readonly IWindow _window;
     private readonly ITitleBar _titleBar;
     private readonly IView _view;
@@ -90,6 +103,83 @@ internal sealed class OpenHarmonyTitleBarRow
 
     /// <summary>True when the point falls inside the arranged row.</summary>
     internal bool Contains(float x, float y) => Frame.Width > 0 && Frame.Contains(x, y);
+
+    /// <summary>
+    /// True when the shell reports app-managed decorations (its decor sink is registered), so the
+    /// row draws the system caption buttons; off-device and on a fullscreen phone window this is
+    /// false and the app title bar keeps the whole band for its own content.
+    /// </summary>
+    internal bool ShowsSystemButtons => OpenHarmonyWindowDecoration.Available;
+
+    /// <summary>
+    /// The caption button at the point, or null outside them. The buttons claim the trailing edge
+    /// (physical right in LTR, left in RTL, mirroring the platform caption corner): close is
+    /// outermost, then the maximize/restore toggle, then minimize.
+    /// </summary>
+    internal OpenHarmonyWindowDecorCommand? HitSystemButton(float x, float y)
+    {
+        if (!ShowsSystemButtons || Frame.Width <= 0)
+        {
+            return null;
+        }
+        foreach (OpenHarmonyWindowDecorCommand command in s_systemButtons)
+        {
+            if (SystemButtonRect(command).Contains(x, y))
+            {
+                return command;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Remembers the caption button the current press started on (dispatch happens on release).</summary>
+    internal void PressDecorButton(OpenHarmonyWindowDecorCommand command) => _pressedDecorButton = command;
+
+    /// <summary>
+    /// Dispatches the pressed caption command when the release is still inside the same button
+    /// (a release elsewhere cancels, like a native caption button).
+    /// </summary>
+    internal bool ReleaseDecorButton(float x, float y)
+    {
+        OpenHarmonyWindowDecorCommand? pressed = _pressedDecorButton;
+        _pressedDecorButton = null;
+        if (pressed is { } command && HitSystemButton(x, y) == command)
+        {
+            return OpenHarmonyWindowDecoration.Execute(command);
+        }
+        return false;
+    }
+
+    /// <summary>Drops a press without dispatching (a canceled gesture).</summary>
+    internal void CancelDecorPress() => _pressedDecorButton = null;
+
+    /// <summary>
+    /// True when a press at the point should start the window move: inside the row and not on the
+    /// leading back slot or a caption button. The renderer only asks after the TitleBar's own
+    /// subtree declined the press, so interactive template content keeps its input.
+    /// </summary>
+    internal bool InDragRegion(float x, float y)
+        => Contains(x, y) && !(ShowsBack && InBackButton(x, y)) && HitSystemButton(x, y) is null;
+
+    /// <summary>Starts the window move through the shell (op 3; drag continues until the release).</summary>
+    internal bool StartWindowDrag()
+        => OpenHarmonyWindowDecoration.Execute(OpenHarmonyWindowDecorCommand.StartMoving);
+
+    /// <summary>The caption button rectangle in canvas space (trailing edge; see HitSystemButton).</summary>
+    private RectF SystemButtonRect(OpenHarmonyWindowDecorCommand command)
+    {
+        bool rightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(_view);
+        int index = command switch
+        {
+            OpenHarmonyWindowDecorCommand.Close => 0,
+            OpenHarmonyWindowDecorCommand.ToggleMaximize => 1,
+            _ => 2,
+        };
+        float x = rightToLeft
+            ? (float)Frame.X + index * SystemButtonWidth
+            : (float)Frame.Right - (index + 1) * SystemButtonWidth;
+        return new RectF(x, (float)Frame.Y, SystemButtonWidth, (float)Frame.Height);
+    }
 
     /// <summary>Measures the TitleBar for the given width; the row height is fixed (see Height).</summary>
     internal void Measure(double width)
@@ -169,6 +259,46 @@ internal sealed class OpenHarmonyTitleBarRow
         {
             canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
             canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+        }
+    }
+
+    /// <summary>
+    /// Draws the system caption buttons over the arranged row when the shell reports app-managed
+    /// decorations: minimize (a bar), maximize/restore (the shell decides the toggle; the glyph is
+    /// the maximize square) and close (an X), at the trailing edge. Drawn after the TitleBar
+    /// subtree, like the back affordance.
+    /// </summary>
+    internal void DrawSystemButtons(MauiCanvas canvas)
+    {
+        if (!ShowsSystemButtons)
+        {
+            return;
+        }
+        canvas.StrokeColor = (_titleBar as Microsoft.Maui.Controls.TitleBar)?.ForegroundColor ?? Colors.White;
+        canvas.StrokeSize = 1.6f;
+        foreach (OpenHarmonyWindowDecorCommand command in s_systemButtons)
+        {
+            RectF rect = SystemButtonRect(command);
+            float cx = rect.X + rect.Width / 2;
+            float cy = rect.Y + rect.Height / 2;
+            switch (command)
+            {
+                case OpenHarmonyWindowDecorCommand.Minimize:
+                    canvas.DrawLine(cx - 6, cy, cx + 6, cy);
+                    break;
+                case OpenHarmonyWindowDecorCommand.ToggleMaximize:
+                    // A stroked square (four lines): the headless rasterizer's DrawRectangle
+                    // approximation fills with FillColor, the stroke paths stay colour-true.
+                    canvas.DrawLine(cx - 6, cy - 6, cx + 6, cy - 6);
+                    canvas.DrawLine(cx + 6, cy - 6, cx + 6, cy + 6);
+                    canvas.DrawLine(cx + 6, cy + 6, cx - 6, cy + 6);
+                    canvas.DrawLine(cx - 6, cy + 6, cx - 6, cy - 6);
+                    break;
+                default:
+                    canvas.DrawLine(cx - 6, cy - 6, cx + 6, cy + 6);
+                    canvas.DrawLine(cx + 6, cy - 6, cx - 6, cy + 6);
+                    break;
+            }
         }
     }
 }

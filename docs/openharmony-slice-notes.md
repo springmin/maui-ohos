@@ -46,9 +46,14 @@ Zero-reference interfaces, status documented once (no silent gaps):
     (modal stack, NavigationPage stack, presented flyout, Shell stack - the slice's mirror of
     Controls' internal Window.CanConsumeBackNavigation), the row draws the shell chrome's
     chevron there and a tap invokes IWindow.BackButtonClicked (a custom OnBackButtonPressed
-    override still wins). Still open: the ArkUI shell keeps its own window decorations, so
-    system minimize/maximize/close buttons and drag regions are not mapped onto the row, and
-    the row is not yet part of the accessibility shadow tree.
+    override still wins). The row also carries the window's system decorations when the shell
+    runs with app-managed decorations (N6): the trailing caption buttons (close, maximize/
+    restore toggle, minimize; mirrored to the leading edge in RTL) dispatch through the
+    `ohos_host_window_decor` bridge and a press on the title band that no template child
+    consumed starts the shell's `startMoving`; the shell hands the decor over only for a
+    SessionManager-capable non-fullscreen window (it registers the decor sink and hides its own
+    title bar on the app's request), so a fullscreen phone window keeps its system decorations
+    and the row draws no caption buttons.
 
   * IKeyboardAccelerator (the per-element collection). rc.1 exposes the interface
     (Modifiers/Key) and the Microsoft.Maui.Controls.KeyboardAccelerator object, but the only

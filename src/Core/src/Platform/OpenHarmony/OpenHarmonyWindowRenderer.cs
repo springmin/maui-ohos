@@ -783,7 +783,7 @@ public sealed class OpenHarmonyWindowRenderer
         {
             return;
         }
-        int count = OpenHarmonyCarouselViewHandler.MaterializeItems(view).Count;
+        int count = OpenHarmonyCarouselViewHandler.MaterializeSlides(view).Count;
         if (count <= 1)
         {
             return;

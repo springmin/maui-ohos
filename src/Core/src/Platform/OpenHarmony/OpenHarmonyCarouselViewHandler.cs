@@ -1,8 +1,9 @@
 // CarouselView handler for OpenHarmony: shows the current item and pages on a horizontal
 // swipe (no page animation yet). PeekAreaInsets materializes the neighbouring slides inside the
 // platform view's clipped scroll path; Loop wraps the position and Position/CurrentItem are kept
-// in sync. A grouped ItemsSource (elements are collections) is materialized to its items with a
-// one-time status note - the carousel has no group concept, so headers/footers cannot be drawn.
+// in sync. A grouped ItemsSource (elements are collections) is materialized to its items; when
+// the group templates from OpenHarmonyCarouselView are set, a slide is emitted for every group's
+// header and footer too, so the grouping is expressible instead of only reported.
 // IsSwipeEnabled(false) pins the carousel; IsBounceEnabled has no compositor animation
 // and is reported once instead of pretending.
 using Microsoft.Maui.Controls;
@@ -88,9 +89,10 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         base.PlatformArrange(frame);
         // The compositor arranges the tree on every frame, and a frame that neither moved nor
         // resized cannot change what the slides look like: every input that does (ItemsSource,
-        // ItemTemplate, Position, CurrentItem, Loop, PeekAreaInsets) rebuilds through its mapper or
-        // event, so an unchanged arrange keeps the existing slides instead of disconnecting and
-        // recreating one handler-bearing view per frame.
+        // ItemTemplate, group templates, Position, CurrentItem, Loop, PeekAreaInsets) rebuilds
+        // through its mapper, attached-property callback or event, so an unchanged arrange keeps
+        // the existing slides instead of disconnecting and recreating one handler-bearing view
+        // per frame.
         if (_arranged && _arrangedFrame == frame)
         {
             return;
@@ -118,13 +120,13 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
             PlatformView.IsScrollView = false;
             return;
         }
-        List<object?> items = MaterializeItems(carousel);
-        if (items.Count == 0)
+        List<CarouselSlide> slides = MaterializeSlides(carousel);
+        if (slides.Count == 0)
         {
             PlatformView.IsScrollView = false;
             return;
         }
-        int position = Math.Clamp(carousel.Position, 0, items.Count - 1);
+        int position = Math.Clamp(carousel.Position, 0, slides.Count - 1);
         Thickness peek = carousel.PeekAreaInsets;
         bool peeked = peek.Left != 0 || peek.Right != 0 || peek.Top != 0 || peek.Bottom != 0;
         // The peek strips need the renderer's clip + translate path (IsScrollView); without peeks
@@ -135,7 +137,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         double itemHeight = Math.Max(1, frame.Height - peek.Top - peek.Bottom);
         double itemX = frame.X + peek.Left;
         double itemY = frame.Y + peek.Top;
-        _current = AddSlide(items, carousel, position, itemX, itemY, itemWidth, itemHeight);
+        _current = AddSlide(slides, carousel, position, itemX, itemY, itemWidth, itemHeight);
         if (peeked)
         {
             // The neighbouring slides sit one slide width away and are clipped by the frame, so
@@ -144,38 +146,88 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
             PlatformView.ScrollOffsetY = 0;
             PlatformView.ScrollContentWidth = (float)frame.Width;
             PlatformView.ScrollContentHeight = (float)frame.Height;
-            AddSlide(items, carousel, position - 1, itemX - itemWidth, itemY, itemWidth, itemHeight);
-            AddSlide(items, carousel, position + 1, itemX + itemWidth, itemY, itemWidth, itemHeight);
+            AddSlide(slides, carousel, position - 1, itemX - itemWidth, itemY, itemWidth, itemHeight);
+            AddSlide(slides, carousel, position + 1, itemX + itemWidth, itemY, itemWidth, itemHeight);
         }
     }
 
-    private View? AddSlide(List<object?> items, CarouselView carousel,
+    /// <summary>
+    /// Re-materialises the slides after a group template changed (the attached properties call
+    /// this; the template set also carries the rebuild for a carousel whose handler is not
+    /// connected yet, which simply materialises on connect). CurrentItem follows the slide the
+    /// position now points at, like every other position change.
+    /// </summary>
+    internal void RebuildFromGroupTemplates()
+    {
+        Rebuild();
+        SyncCurrentItem();
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    private View? AddSlide(List<CarouselSlide> slides, CarouselView carousel,
         int index, double x, double y, double width, double height)
     {
-        if (index < 0 || index >= items.Count)
+        if (index < 0 || index >= slides.Count)
         {
             if (!carousel.Loop)
             {
                 return null;
             }
-            index = (index % items.Count + items.Count) % items.Count;
+            index = (index % slides.Count + slides.Count) % slides.Count;
         }
-        object? item = items[index];
-        View? view = null;
-        if (carousel.ItemTemplate?.CreateContent() is View templated)
+        CarouselSlide slide = slides[index];
+        View? view = slide.Kind switch
         {
-            view = templated;
-        }
-        else
+            CarouselSlideKind.GroupHeader => CreateGroupSlide(carousel, isFooter: false),
+            CarouselSlideKind.GroupFooter => CreateGroupSlide(carousel, isFooter: true),
+            _ => null,
+        };
+        if (view is null)
         {
-            view = new Label { Text = item?.ToString() ?? string.Empty, FontSize = 30, TextColor = Colors.White };
+            // An item slide, or a group slide whose template did not materialise a view: the
+            // group object goes through the item template (or the text fallback), so a broken
+            // group template still shows the slide instead of an empty page.
+            if (carousel.ItemTemplate?.CreateContent() is View templated)
+            {
+                view = templated;
+            }
+            else
+            {
+                view = new Label { Text = slide.Data?.ToString() ?? string.Empty, FontSize = 30, TextColor = Colors.White };
+            }
         }
-        view.BindingContext = item;
+        view.BindingContext = slide.Data;
         OpenHarmonyHandlerConnector.ConnectTree(view);
         view.Measure(width, height);
         view.Arrange(new Rect(x, y, width, height));
         PlatformView.ViewChildren.Add(view);
         return view;
+    }
+
+    /// <summary>
+    /// A group header/footer slide: the group template's own view, bound to the group object (a
+    /// Label template included - its bindings resolve to the group like any item template).
+    /// Null when the template did not materialise a view (reported once; the caller falls back
+    /// to the item template) or was cleared between materialisation and render.
+    /// </summary>
+    private static View? CreateGroupSlide(CarouselView carousel, bool isFooter)
+    {
+        DataTemplate? template = isFooter
+            ? OpenHarmonyCarouselView.GetGroupFooterTemplate(carousel)
+            : OpenHarmonyCarouselView.GetGroupHeaderTemplate(carousel);
+        if (template is null)
+        {
+            return null;
+        }
+        if (template.CreateContent() is View view)
+        {
+            return view;
+        }
+        OpenHarmonyStatus.Once(
+            isFooter ? "carousel.groupfooter.view" : "carousel.groupheader.view",
+            "CarouselView group " + (isFooter ? "footer" : "header") +
+            " template must create a View; the group is drawn through the item template instead");
+        return null;
     }
 
     /// <summary>Infinite constraints arrive from stack layouts; fall back to HeightRequest.</summary>
@@ -188,34 +240,58 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         return double.IsFinite(heightConstraint) ? heightConstraint : 200;
     }
 
-    private static int Count(CarouselView carousel) => MaterializeItems(carousel).Count;
+    private static int Count(CarouselView carousel) => MaterializeSlides(carousel).Count;
 
-    // Page-indicator slide list. The renderer asks for the slide count on every frame, and a
-    // rebuild asks for the list itself; materialising the ItemsSource is O(N) per call (plus the
-    // grouping scan), so the list is cached per carousel (a weak key: the entry never keeps a
-    // carousel alive) and handed out again while it is still the list the carousel shows: the
-    // source reference is unchanged and - when the source is an ICollection - its element count
-    // is unchanged, so an Add/Remove/Reset or a reassigned ItemsSource materialises fresh. A
-    // grouped source (the count is the sum over the groups, which the outer collection's count
-    // cannot predict) and a plain IEnumerable (every enumeration may differ) are never cached.
-    // The returned list is read-only by contract: every caller only reads Count/index/items.
+    // Slide list. The renderer asks for the slide count on every frame, and a rebuild asks for
+    // the list itself; materialising the ItemsSource is O(N) per call (plus the grouping scan),
+    // so the list is cached per carousel (a weak key: the entry never keeps a carousel alive)
+    // and handed out again while it is still the list the carousel shows: the source reference
+    // is unchanged and - when the source is an ICollection - its element count is unchanged, so
+    // an Add/Remove/Reset or a reassigned ItemsSource materialises fresh. A grouped source (the
+    // slide count is the sum over the groups, which the outer collection's count cannot predict,
+    // and the group templates add header/footer slides on top) and a plain IEnumerable (every
+    // enumeration may differ) are never cached. The returned list is read-only by contract:
+    // every caller only reads Count/index/slides.
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ItemsView, SlideCache> s_slides = new();
 
     private sealed class SlideCache
     {
         public object? Source;
         public int SourceCount = -1;
-        public List<object?> Items = new();
+        public List<CarouselSlide> Slides = new();
+    }
+
+    /// <summary>One slide of the carousel: an item, or a group header/footer.</summary>
+    internal readonly struct CarouselSlide
+    {
+        public CarouselSlide(object? data, CarouselSlideKind kind)
+        {
+            Data = data;
+            Kind = kind;
+        }
+
+        /// <summary>The data bound to the slide: the item, or the group for header/footer slides.</summary>
+        public object? Data { get; }
+
+        public CarouselSlideKind Kind { get; }
+    }
+
+    internal enum CarouselSlideKind
+    {
+        Item,
+        GroupHeader,
+        GroupFooter,
     }
 
     /// <summary>
-    /// The slides the carousel pages through. CarouselView has no grouping API in this MAUI
-    /// version (it derives from <c>ItemsView</c>), so a grouped data source - every element is
-    /// itself a non-string collection, the shape CollectionView uses for groups - is
-    /// materialised into its items: each item gets a slide and group headers/footers cannot be
-    /// drawn, which is reported once instead of silently binding a group object.
+    /// The slides the carousel pages through. A grouped data source - every element is itself a
+    /// non-string collection, the shape CollectionView uses for groups - is materialised into its
+    /// items. When OpenHarmonyCarouselView.GroupHeaderTemplate/GroupFooterTemplate is set, a
+    /// header/footer slide (bound to the group object) is emitted around every group; without
+    /// them group headers/footers cannot be drawn (CarouselView has no group templates of its
+    /// own), which is reported once instead of silently binding a group object.
     /// </summary>
-    internal static List<object?> MaterializeItems(ItemsView itemsView)
+    internal static List<CarouselSlide> MaterializeSlides(ItemsView itemsView)
     {
         object? source = itemsView.ItemsSource;
         SlideCache? cached = null;
@@ -224,7 +300,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
             && ReferenceEquals(found.Source, source)
             && found.SourceCount == collection.Count)
         {
-            return found.Items;
+            return found.Slides;
         }
         if (source is System.Collections.ICollection)
         {
@@ -240,25 +316,53 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         }
         if (items.Count == 0 || !items.All(IsGroup))
         {
-            StoreSlides(itemsView, source, cached, items);
-            return items;
+            var slides = new List<CarouselSlide>(items.Count);
+            foreach (object? item in items)
+            {
+                slides.Add(new CarouselSlide(item, CarouselSlideKind.Item));
+            }
+            StoreSlides(itemsView, source, cached, slides);
+            return slides;
         }
-        OpenHarmonyStatus.Once("carousel.grouped",
-            "CarouselView.ItemsSource is grouped (every item is a collection): each group's items " +
-            "are shown as slides; group headers/footers cannot be expressed by this carousel");
-        var flattened = new List<object?>();
+        CarouselView? carousel = itemsView as CarouselView;
+        DataTemplate? headerTemplate = carousel is null ? null : OpenHarmonyCarouselView.GetGroupHeaderTemplate(carousel);
+        DataTemplate? footerTemplate = carousel is null ? null : OpenHarmonyCarouselView.GetGroupFooterTemplate(carousel);
+        var grouped = new List<CarouselSlide>();
+        if (headerTemplate is null && footerTemplate is null)
+        {
+            OpenHarmonyStatus.Once("carousel.grouped",
+                "CarouselView.ItemsSource is grouped (every item is a collection): each group's items " +
+                "are shown as slides; set OpenHarmonyCarouselView.GroupHeaderTemplate/GroupFooterTemplate " +
+                "to draw the group headers/footers as slides");
+            foreach (object? group in items)
+            {
+                foreach (object? item in (System.Collections.IEnumerable)group!)
+                {
+                    grouped.Add(new CarouselSlide(item, CarouselSlideKind.Item));
+                }
+            }
+            return grouped;
+        }
         foreach (object? group in items)
         {
+            if (headerTemplate is not null)
+            {
+                grouped.Add(new CarouselSlide(group, CarouselSlideKind.GroupHeader));
+            }
             foreach (object? item in (System.Collections.IEnumerable)group!)
             {
-                flattened.Add(item);
+                grouped.Add(new CarouselSlide(item, CarouselSlideKind.Item));
+            }
+            if (footerTemplate is not null)
+            {
+                grouped.Add(new CarouselSlide(group, CarouselSlideKind.GroupFooter));
             }
         }
-        return flattened;
+        return grouped;
     }
 
     /// <summary>Caches a materialised slide list while the source is still the same collection.</summary>
-    private static void StoreSlides(ItemsView itemsView, object? source, SlideCache? cached, List<object?> items)
+    private static void StoreSlides(ItemsView itemsView, object? source, SlideCache? cached, List<CarouselSlide> slides)
     {
         if (source is not System.Collections.ICollection current)
         {
@@ -267,7 +371,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         SlideCache entry = cached ?? new SlideCache();
         entry.Source = source;
         entry.SourceCount = current.Count;
-        entry.Items = items;
+        entry.Slides = slides;
         if (cached is null)
         {
             s_slides.Add(itemsView, entry);
@@ -284,9 +388,9 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         {
             return;
         }
-        List<object?> items = MaterializeItems(carousel);
-        object? item = items.Count > 0
-            ? items[Math.Clamp(carousel.Position, 0, items.Count - 1)]
+        List<CarouselSlide> slides = MaterializeSlides(carousel);
+        object? item = slides.Count > 0
+            ? slides[Math.Clamp(carousel.Position, 0, slides.Count - 1)].Data
             : null;
         if (Equals(carousel.CurrentItem, item))
         {
@@ -312,9 +416,9 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         }
         int index = 0;
         bool found = false;
-        foreach (object? item in MaterializeItems(carousel))
+        foreach (CarouselSlide slide in MaterializeSlides(carousel))
         {
-            if (Equals(item, carousel.CurrentItem))
+            if (Equals(slide.Data, carousel.CurrentItem))
             {
                 found = true;
                 break;
@@ -342,8 +446,8 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         {
             return;
         }
-        List<object?> items = MaterializeItems(carousel);
-        if (items.Count == 0)
+        List<CarouselSlide> slides = MaterializeSlides(carousel);
+        if (slides.Count == 0)
         {
             return;
         }
@@ -356,9 +460,9 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
         {
             index = 0;
             bool found = false;
-            foreach (object? item in items)
+            foreach (CarouselSlide slide in slides)
             {
-                if (Equals(item, args.Item))
+                if (Equals(slide.Data, args.Item))
                 {
                     found = true;
                     break;
@@ -370,7 +474,7 @@ public sealed class OpenHarmonyCarouselViewHandler : OpenHarmonyViewHandler<Caro
                 return;
             }
         }
-        if (index < 0 || index >= items.Count || index == carousel.Position)
+        if (index < 0 || index >= slides.Count || index == carousel.Position)
         {
             return;
         }

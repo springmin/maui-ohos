@@ -338,3 +338,40 @@ text itself, so the scale is applied in managed code at the one boundary every t
   Character spacing, paddings, row heights and other pixel geometry stay physical; only text
   metrics scale. The diagnostics overlay (a debug tool that draws type names) keeps its fixed
   18 px labels.
+
+## CarouselView group slides (`OpenHarmonyCarouselView`, `OpenHarmonyCarouselViewHandler`)
+
+`CarouselView` derives from `ItemsView`, not from `GroupableItemsView`, so this MAUI version has
+no grouping API on it (no `IsGrouped`, no `GroupHeaderTemplate`/`GroupFooterTemplate`). A
+grouped `ItemsSource` - every element is a non-string collection, the shape the `CollectionView`
+groups use - was therefore flattened to its item slides with a one-time status note and the
+group headers/footers were unexpressible (T12).
+
+* **The platform templates.** `OpenHarmonyCarouselView` adds two attached bindable properties in
+  `Microsoft.Maui.Platform`: `GroupHeaderTemplate` and `GroupFooterTemplate` (`Get`/`Set` pair,
+  null clears). They are the carousel's half of the `CollectionView` group API: set on a
+  `CarouselView` (code-behind or XAML with the platform namespace), they claim the slide stream.
+  Setting or clearing one re-materialises a connected carousel through
+  `OpenHarmonyCarouselViewHandler.RebuildFromGroupTemplates` (rebuild + `CurrentItem` sync +
+  redraw) and materialises on connect when set before the handler exists.
+* **The slide stream.** The old `MaterializeItems` (flattened items) becomes `MaterializeSlides`,
+  returning `CarouselSlide` records (`Data` + `Kind`: `Item`, `GroupHeader`, `GroupFooter`).
+  Without templates a grouped source keeps the legacy flatten and the `carousel.grouped` note.
+  With a header and/or footer template set, every group emits a header slide and/or footer slide
+  around its items in source order; the slide carries the group object as `Data`. The
+  non-grouped cache is unchanged (source reference + `ICollection.Count`); grouped sources are
+  never cached (their slide count is not the outer count). `Position`/`CurrentItem`/`ScrollTo`
+  and the page-indicator dots count the same stream, so `Position` indexes slides - with group
+  templates that index includes the header/footer slides - and `CurrentItem` mirrors the slide
+  at `Position` (for a header/footer slide, the group).
+* **Realising a group slide.** An item slide goes through `ItemTemplate` (fallback: label with
+  the item's text). A header/footer slide goes through its group template: the materialised view
+  itself is the slide, bound to the group object, so template bindings resolve against the group
+  (a `Label` template included). A template that materialises content which is not a `View` is
+  reported once through the status channel and the group falls through the item template (or the
+  text fallback), keeping the slide visible.
+* **Limits (recorded).** The templates are platform extensions: stock MAUI has no property to
+  set, so an app that never opts in keeps the legacy flatten (by design - the carousel has no
+  template it could draw a header/footer with). Headers are not collapsible like the
+  `CollectionView`'s group headers, and the carousel still has no page animation (`ScrollTo`
+  jumps, reported once when animated).

@@ -172,6 +172,7 @@ Microsoft.Maui.Platform.OpenHarmonyCalendarEvent.Start.get -> System.DateTimeOff
 Microsoft.Maui.Platform.OpenHarmonyCalendarEvent.Start.init -> void
 Microsoft.Maui.Platform.OpenHarmonyCalendarEvent.Title.get -> string!
 Microsoft.Maui.Platform.OpenHarmonyCalendarEvent.Title.init -> void
+Microsoft.Maui.Platform.OpenHarmonyCarouselView
 Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler
 Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.OpenHarmonyCarouselViewHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler
@@ -1319,6 +1320,12 @@ static Microsoft.Maui.Platform.OpenHarmonyCalendar.ListUpcomingAsync(int days = 
 static Microsoft.Maui.Platform.OpenHarmonyCalendar.Parse(string? payload) -> System.Collections.Generic.IReadOnlyList<Microsoft.Maui.Platform.OpenHarmonyCalendarEvent>!
 static Microsoft.Maui.Platform.OpenHarmonyCalendarEvent.operator !=(Microsoft.Maui.Platform.OpenHarmonyCalendarEvent left, Microsoft.Maui.Platform.OpenHarmonyCalendarEvent right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyCalendarEvent.operator ==(Microsoft.Maui.Platform.OpenHarmonyCalendarEvent left, Microsoft.Maui.Platform.OpenHarmonyCalendarEvent right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyCarouselView.GetGroupFooterTemplate(Microsoft.Maui.Controls.BindableObject! target) -> Microsoft.Maui.Controls.DataTemplate?
+static Microsoft.Maui.Platform.OpenHarmonyCarouselView.GetGroupHeaderTemplate(Microsoft.Maui.Controls.BindableObject! target) -> Microsoft.Maui.Controls.DataTemplate?
+static readonly Microsoft.Maui.Platform.OpenHarmonyCarouselView.GroupFooterTemplateProperty -> Microsoft.Maui.Controls.BindableProperty!
+static readonly Microsoft.Maui.Platform.OpenHarmonyCarouselView.GroupHeaderTemplateProperty -> Microsoft.Maui.Controls.BindableProperty!
+static Microsoft.Maui.Platform.OpenHarmonyCarouselView.SetGroupFooterTemplate(Microsoft.Maui.Controls.BindableObject! target, Microsoft.Maui.Controls.DataTemplate? value) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCarouselView.SetGroupHeaderTemplate(Microsoft.Maui.Controls.BindableObject! target, Microsoft.Maui.Controls.DataTemplate? value) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.MapCurrentItem(Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler! handler, Microsoft.Maui.Controls.CarouselView! carousel) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.MapIsBounceEnabled(Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler! handler, Microsoft.Maui.Controls.CarouselView! carousel) -> void
 static Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.MapItems(Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler! handler, Microsoft.Maui.Controls.CarouselView! carousel) -> void

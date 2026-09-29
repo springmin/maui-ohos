@@ -66,6 +66,13 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// <summary>Creates the platform view of a group footer row.</summary>
     public Func<string, View>? footerViewFactory;
 
+    /// <summary>
+    /// Creates the group footer row as the template's own View, bound to the group (when the
+    /// handler's GroupFooterTemplate materialises a full view instead of a plain Label). Null
+    /// keeps the text row produced by the footer factories above.
+    /// </summary>
+    public Func<object?, View?>? groupFooterViewFactory;
+
     /// <summary>True when the grouped source draws a footer row after every group.</summary>
     public bool groupFootersEnabled;
 
@@ -946,7 +953,7 @@ internal sealed class OpenHarmonyItemListMaterializer
         }
         else if (isFooter)
         {
-            view = CreateFooterView(FooterText(index, footerTextFactory));
+            view = CreateFooterView(index);
         }
         else
         {
@@ -957,7 +964,10 @@ internal sealed class OpenHarmonyItemListMaterializer
         }
         if (BindRowContext)
         {
-            view.BindingContext = isHeader || isFooter ? null : item;
+            // Group header/footer rows carry the group object (the text rows draw their text
+            // directly, so the context is only observable on template content; the item rows
+            // carry the item).
+            view.BindingContext = item;
         }
         SetRowTap(index, view);
         ArrangeRow(index, view);
@@ -1056,6 +1066,21 @@ internal sealed class OpenHarmonyItemListMaterializer
         View view = headerViewFactory?.Invoke(text) ?? new Label { Text = text, FontSize = 24 };
         OpenHarmonyHandlerConnector.ConnectTree(view);
         return view;
+    }
+
+    /// <summary>
+    /// Group footer row: the GroupFooterTemplate's own view when it materialises a full View
+    /// (the factory binds it to the group), else the plain text row built from the template's
+    /// Label text (or the group's own text).
+    /// </summary>
+    private View CreateFooterView(int index)
+    {
+        if (groupFooterViewFactory?.Invoke(_data[index]) is { } templated)
+        {
+            OpenHarmonyHandlerConnector.ConnectTree(templated);
+            return templated;
+        }
+        return CreateFooterView(FooterText(index, footerTextFactory));
     }
 
     private View CreateFooterView(string text)

@@ -99,6 +99,7 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
             _materializer.headerViewFactory = HeaderView;
             _materializer.footerTextFactory = FooterText;
             _materializer.footerViewFactory = FooterView;
+            _materializer.groupFooterViewFactory = CreateGroupFooterView;
             _materializer.groupFootersEnabled = HasGroupFooters(collection);
             _materializer.UpdateMode = collection.ItemsUpdatingScrollMode;
             _materializer.GroupHeaderTapToCollapse = _groupHeaderTogglesCollapse;
@@ -207,14 +208,36 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
     {
         if (VirtualView?.GroupFooterTemplate is { } template)
         {
-            if (template.CreateContent() is Label label)
+            object? content = template.CreateContent();
+            if (content is Label label)
             {
                 label.BindingContext = group;
                 return label.Text ?? string.Empty;
             }
+            if (content is View)
+            {
+                // Materialised as the row view itself by CreateGroupFooterView.
+                return string.Empty;
+            }
             return ReportFooterViewUnsupported();
         }
         return group?.ToString() ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Group footer view: a GroupFooterTemplate that materialises a full View (not just a
+    /// Label) becomes the footer row, bound to the group so its bindings resolve. Label
+    /// templates keep the text path (they render as the plain footer text row).
+    /// </summary>
+    private View? CreateGroupFooterView(object? group)
+    {
+        if (VirtualView?.GroupFooterTemplate is { } template && template.CreateContent() is View view and not Label)
+        {
+            view.BindingContext = group;
+            OpenHarmonyHandlerConnector.ConnectTree(view);
+            return view;
+        }
+        return null;
     }
 
     /// <summary>True when the grouped source should draw a footer row after every group.</summary>
@@ -224,7 +247,7 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
     private static string ReportFooterViewUnsupported()
     {
         OpenHarmonyStatus.Once("collection.groupfooter.view",
-            "GroupFooterTemplate must create a Label; its text is drawn as the group footer row");
+            "GroupFooterTemplate must create a View or Label; the template content is not drawn as the group footer row");
         return string.Empty;
     }
 

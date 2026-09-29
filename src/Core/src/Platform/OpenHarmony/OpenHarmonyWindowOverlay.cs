@@ -3,7 +3,7 @@
 // MAUI's overlay contract: an IWindowOverlay (normally a Microsoft.Maui.WindowOverlay subclass) is
 // attached with IWindow.AddOverlay, initialized by the platform, drawn above the page content and
 // optionally allowed to consume touches. Verified against Microsoft.Maui.Controls
-// 11.0.0-rc.1.26451.6: Window.AddOverlay calls overlay.Initialize() and Window.RemoveOverlay calls
+// 11.0.0-rc.2.26478.12: Window.AddOverlay calls overlay.Initialize() and Window.RemoveOverlay calls
 // overlay.Deinitialize(), independently of the window handler.
 //
 // The slice has no platform view per overlay - the whole tree is drawn by

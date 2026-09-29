@@ -73,10 +73,10 @@
     <!-- Microsoft.Maui.Controls also carries the MAUI implicit global usings
          (Microsoft.Maui.Controls/Graphics/Devices/... via buildTransitive Globs.props); the
          slice sources rely on them, exactly like the harness and a real MAUI app do. -->
-    <PackageReference Include="Microsoft.Maui.Controls" Version="11.0.0-rc.1.26451.6" />
-    <PackageReference Include="Microsoft.Maui.Core" Version="11.0.0-rc.1.26451.6" />
-    <PackageReference Include="Microsoft.Maui.Graphics" Version="11.0.0-rc.1.26451.6" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.1.26451.6" />
+    <PackageReference Include="Microsoft.Maui.Controls" Version="11.0.0-rc.2.26478.12" />
+    <PackageReference Include="Microsoft.Maui.Core" Version="11.0.0-rc.2.26478.12" />
+    <PackageReference Include="Microsoft.Maui.Graphics" Version="11.0.0-rc.2.26478.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.2.26478.12" />
   </ItemGroup>
   <ItemGroup>
     <!-- ABI freeze (R5): the native host entry points keep the `ohos_host_*` symbol prefix and

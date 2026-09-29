@@ -2,7 +2,7 @@
 //
 // The Microsoft.AspNetCore.Components.WebView.Maui package restores from the configured
 // dotnet-public feed at the same version the slice pins for Microsoft.Maui.Core
-// (11.0.0-rc.1.26451.6) and ships a plain net11.0 lib, but the slice project does not take that
+// (11.0.0-rc.2.26478.12) and ships a plain net11.0 lib, but the slice project does not take that
 // package reference yet, so this file deliberately has no compile-time dependency on the Blazor
 // types. It is the path half milestone 2 needs: BlazorWebView serves app content from the app
 // origin (BlazorWebViewHandler.AppOrigin, https://0.0.0.0/) out of a content root (the directory

@@ -796,6 +796,13 @@ public class OpenHarmonyView
     public bool ShowsBack { get; set; }
     public const float TitleBarHeight = 56f;
 
+    /// <summary>
+    /// Materialized rich Shell.TitleView row (T15): the shell chrome measures/arranges the
+    /// resolved non-Label view into the title band and the renderer draws and hit-tests it.
+    /// Null while the bar keeps the text title path (see OpenHarmonyShellChrome).
+    /// </summary>
+    internal OpenHarmonyShellTitleViewRow? ShellTitleViewRow { get; set; }
+
     public bool InBackButton(float x, float y)
     {
         RectF frame = CanvasFrame;

@@ -32,6 +32,13 @@ public sealed class OpenHarmonyWindowRenderer
     /// </summary>
     internal static Action<OpenHarmonyView, int>? FlyoutPanelDrawn { get; set; }
 
+    /// <summary>
+    /// Test seam: reports every drawn rich Shell.TitleView row (T15: the arranged view and its
+    /// canvas-space band), so off-device tests can pin that the materialized row reached the
+    /// drawing pass without a rasterizer.
+    /// </summary>
+    internal static Action<IView, RectF>? ShellTitleViewDrawn { get; set; }
+
     private readonly MauiCanvas _canvas;
 
     public OpenHarmonyWindowRenderer()
@@ -618,6 +625,13 @@ public sealed class OpenHarmonyWindowRenderer
             }
             platform.DrawShadow(_canvas);
             platform.Draw(_canvas);
+            if (platform.ShellTitleViewRow is { } shellTitleView)
+            {
+                // T15: the rich Shell.TitleView is arranged in canvas space by the chrome;
+                // draw it over the bar (its own content replaces the title text), clipped to
+                // the band so a descendant cannot spill into the page content.
+                DrawShellTitleView(shellTitleView, platform.FlowRightToLeft);
+            }
             if (platform.PopupVisible)
             {
                 // Drawn last so the dropdown floats above the rest of the tree.
@@ -832,6 +846,24 @@ public sealed class OpenHarmonyWindowRenderer
             _canvas.FillColor = i == position ? Colors.White : Colors.Gray;
             _canvas.FillCircle(startX + i * spacing, y, i == position ? 6f : 4f);
         }
+    }
+
+    /// <summary>
+    /// Draws a materialized rich Shell.TitleView row (T15) as a real view. The chrome arranged
+    /// it in canvas space, so it draws with the identity map; the band clip keeps the row's
+    /// content inside the bar.
+    /// </summary>
+    private void DrawShellTitleView(OpenHarmonyShellTitleViewRow row, bool parentRightToLeft)
+    {
+        if (row.Frame.Width <= 0 || row.Frame.Height <= 0)
+        {
+            return;
+        }
+        _canvas.SaveState();
+        _canvas.ClipRectangle(row.Frame.X, row.Frame.Y, row.Frame.Width, row.Frame.Height);
+        DrawView(row.View, OpenHarmonyFlowMap.Identity, parentRightToLeft);
+        _canvas.RestoreState();
+        ShellTitleViewDrawn?.Invoke(row.View, row.Frame);
     }
 
     /// <summary>
@@ -1189,6 +1221,16 @@ public sealed class OpenHarmonyWindowRenderer
             return rowHandled || down || up;
         }
 
+        // T15: a rich Shell.TitleView owns the touches that land on its band (its own content
+        // first). Outside the band the shell chrome (back affordance, hamburger, toolbar items,
+        // tab bar) stays reachable through the normal path.
+        if (ResolveShellTitleView(root) is { ShellTitleViewRow: { } shellTitleRow } shellView &&
+            shellTitleRow.Frame.Contains(x, y) &&
+            RouteShellTitleViewTouch(shellView, shellTitleRow, down, up, x, y))
+        {
+            return true;
+        }
+
         // Pointer gestures (pointer recognizers receive enter/press on touch down, release/exit on up).
         if (down || up)
         {
@@ -1491,6 +1533,46 @@ public sealed class OpenHarmonyWindowRenderer
     /// Returns false when the point is not inside a rich row or its content does not handle the
     /// touch (the caller then falls back to the flat row -&gt; shell item selection).
     /// </summary>
+    /// <summary>
+    /// The nearest shell platform view on the root's ancestor chain that carries a rich
+    /// Shell.TitleView row (T15), or null. The host's touch root can be the current page
+    /// (modal-aware), so the walk climbs to the shell that arranged the title view.
+    /// </summary>
+    private static OpenHarmonyView? ResolveShellTitleView(IView? root)
+    {
+        for (Element? element = root as Element; element is not null; element = element.Parent)
+        {
+            if (element is IView view &&
+                view.Handler?.PlatformView is OpenHarmonyView { ShellTitleViewRow: not null } platform)
+            {
+                return platform;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Routes a touch that landed on the rich Shell.TitleView band into the materialized view
+    /// (its own content handles it first, like a flyout row).
+    /// </summary>
+    private bool RouteShellTitleViewTouch(OpenHarmonyView shell, OpenHarmonyShellTitleViewRow row,
+        bool down, bool up, float x, float y)
+    {
+        if (row.View is not IView view)
+        {
+            return false;
+        }
+        if (down)
+        {
+            // The same press bookkeeping as the content path, so a title-view tap does not
+            // inherit the movement of a previous gesture.
+            _downX = x;
+            _downY = y;
+            _moved = false;
+        }
+        return HandleTouchCore(view, down, up, x, y, OpenHarmonyFlowMap.Identity, shell.FlowRightToLeft);
+    }
+
     private bool RouteFlyoutRowTouch(OpenHarmonyView panel, bool down, bool up, float x, float y)
     {
         if (panel.FlyoutRows.Count == 0)

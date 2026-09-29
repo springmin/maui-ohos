@@ -1,13 +1,16 @@
-// Shell chrome the compositor can express beyond the title string: a text-producing TitleView
-// and the current page's ToolbarItems.
+// Shell chrome the compositor can express beyond the title string: the TitleView and the
+// current page's ToolbarItems.
 //
-// TitleView (the Shell.TitleView / NavigationPage.TitleView attached property, a View): the
-// compositor title bar draws text, so a visible Label publishes its Text as the bar title. A
-// rich view (Image/SearchBar/layout) has no representation in the text compositor; the page
-// title stays in the bar and the gap is noted once (OpenHarmonyShellChrome.LogRichTitleViewOnce)
-// instead of silently showing the wrong thing. The value is re-read on every chrome sync, and
-// the shell handler calls that sync from the renderer's per-draw ChromeRefresh, so a Label text
-// change is picked up on the next frame.
+// TitleView (the Shell.TitleView attached property, a View): a visible Label publishes its
+// Text as the bar title (the compositor bar's fast text path). Any other visible view (T15:
+// Image, SearchBar, Button, a layout of runs) is materialized as a real row: the chrome
+// connects the view's handlers, measures it into the band between the leading back slot and
+// the trailing toolbar slot, arranges it there and hands it to OpenHarmonyView.ShellTitleViewRow;
+// the renderer draws it over the bar (its own content replaces the title text) and hit-tests it,
+// so a button/entry/gesture inside the title view works. An absent or hidden title view is
+// treated as absent: the page (then shell item) title stays in the bar. The value is re-read on
+// every chrome sync, and the shell handler calls that sync from the renderer's per-draw
+// ChromeRefresh, so a change is picked up on the next frame.
 //
 // ToolbarItems: the current page's collection is mirrored into OpenHarmonyView.ToolbarItems the
 // same way OpenHarmonyNavigationPageHandler mirrors it for NavigationPage: the bar draws one
@@ -15,17 +18,37 @@
 // item's Command with its CommandParameter). The mirror compares the page, the item count and
 // the item texts before rebuilding, because the shell chrome sync runs on every draw.
 using Microsoft.Maui.Controls;
+using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
+/// <summary>
+/// Materialized rich Shell.TitleView row (T15): the resolved non-Label view and the canvas-space
+/// band the chrome arranged it into. The renderer draws the row over the title bar and routes
+/// touches in the band into the view. Null while the bar keeps the text title path.
+/// </summary>
+internal sealed class OpenHarmonyShellTitleViewRow
+{
+    /// <summary>The app's TitleView (handlers are connected by the chrome's sync).</summary>
+    public required View View { get; init; }
+
+    /// <summary>Canvas-space band the row was arranged into (empty before the first sync).</summary>
+    public RectF Frame { get; set; }
+}
+
 internal sealed class OpenHarmonyShellChrome
 {
-    private static bool s_richTitleViewLogged;
+    /// <summary>
+    /// Leading/trailing slots the bar reserves for the back chevron (or hamburger) and the
+    /// toolbar items; the rich title view is arranged between them, like the title text.
+    /// </summary>
+    internal const float TitleViewInset = 56f;
 
     private readonly OpenHarmonyView _view;
     private readonly Action _refresh;
     private Page? _toolbarPage;
+    private OpenHarmonyShellTitleViewRow? _titleViewRow;
 
     public OpenHarmonyShellChrome(OpenHarmonyView view, Action refresh)
     {
@@ -33,53 +56,86 @@ internal sealed class OpenHarmonyShellChrome
         _refresh = refresh;
     }
 
-    /// <summary>Re-reads the title and the current page's toolbar items from the shell.</summary>
+    /// <summary>Re-reads the title view and the current page's toolbar items from the shell.</summary>
     public void Apply(Shell shell)
     {
-        _view.TitleText = ResolveTitleText(shell);
+        ApplyTitleView(shell);
         UpdateToolbar(shell.CurrentPage);
     }
 
-    /// <summary>Clears the mirrored toolbar and releases the page reference.</summary>
+    /// <summary>Clears the mirrored toolbar and releases the title view row.</summary>
     public void Detach()
     {
         _toolbarPage = null;
         _view.ToolbarItems.Clear();
+        _titleViewRow = null;
+        _view.ShellTitleViewRow = null;
     }
 
     /// <summary>
-    /// The compositor title: a visible Label title view's Text when there is one, else the page
-    /// title (then the shell item title). A non-text title view is noted once.
+    /// Publishes the bar title. A visible Label keeps the text path (its Text becomes the bar
+    /// title, else the page title); any other visible view is materialized as the rich row
+    /// (T15). An absent or hidden title view falls back to the page (then shell item) title.
     /// </summary>
-    private static string ResolveTitleText(Shell shell)
+    private void ApplyTitleView(Shell shell)
     {
         View? titleView = shell.CurrentPage is { } page ? Shell.GetTitleView(page) : null;
         titleView ??= Shell.GetTitleView(shell);
-        if (titleView is Label { IsVisible: true, Text: { Length: > 0 } text })
+        // Visibility is an explicit IView implementation on the Controls base in rc.1.
+        if (titleView is null || ((IView)titleView).Visibility != Visibility.Visible)
         {
-            return text;
+            _view.TitleText = PageTitle(shell);
+            ClearTitleViewRow();
+            return;
         }
-        if (titleView is not null)
+        if (titleView is Label label)
         {
-            LogRichTitleViewOnce();
+            _view.TitleText = string.IsNullOrEmpty(label.Text) ? PageTitle(shell) : label.Text;
+            ClearTitleViewRow();
+            return;
         }
-        return shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
+        // A rich title view replaces the title text with real content; the bar background, the
+        // back affordance and the tab bar stay.
+        _view.TitleText = string.Empty;
+        ArrangeTitleView(titleView);
     }
 
     /// <summary>
-    /// One status note per process: the title bar draws a single text run, so a TitleView that
-    /// is not a Label cannot be rendered (the page title remains the bar's text).
+    /// Measures and arranges the rich title view into the bar's band. Runs on every chrome
+    /// sync - the band follows the shell's frame and the flow map, and a text/size change in
+    /// the view must be picked up on the next frame - and reuses the row object so the
+    /// per-draw path allocates nothing.
     /// </summary>
-    private static void LogRichTitleViewOnce()
+    private void ArrangeTitleView(View titleView)
     {
-        if (s_richTitleViewLogged)
+        RectF frame = _view.CanvasFrame;
+        float width = Math.Max(1f, frame.Width - 2 * TitleViewInset);
+        OpenHarmonyHandlerConnector.ConnectTree(titleView);
+        titleView.Measure(width, OpenHarmonyView.TitleBarHeight);
+        if (!ReferenceEquals(_titleViewRow?.View, titleView))
         {
-            return;
+            _titleViewRow = new OpenHarmonyShellTitleViewRow { View = titleView };
+            _view.ShellTitleViewRow = _titleViewRow;
         }
-        s_richTitleViewLogged = true;
-        OpenHarmonyBridge.WriteStatus(
-            "[maui] shell title view: the compositor title bar draws text only, so a rich TitleView is not rendered; the page title stays in the bar (a visible Label title view publishes its text)");
+        // The band is the bar height: the view's own alignment decides where its content sits
+        // inside it (Fill stretches, Center centers), matching how a TitleView fills a bar.
+        _titleViewRow.Frame = new RectF(frame.X + TitleViewInset, frame.Y, width, OpenHarmonyView.TitleBarHeight);
+        titleView.Arrange(new Rect(_titleViewRow.Frame.X, _titleViewRow.Frame.Y,
+            _titleViewRow.Frame.Width, _titleViewRow.Frame.Height));
     }
+
+    private void ClearTitleViewRow()
+    {
+        if (_titleViewRow is not null)
+        {
+            _titleViewRow = null;
+            _view.ShellTitleViewRow = null;
+        }
+    }
+
+    /// <summary>The page title, then the shell item title: the bar text without a title view.</summary>
+    private static string PageTitle(Shell shell)
+        => shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
 
     /// <summary>
     /// Mirrors <paramref name="page"/>'s ToolbarItems into the platform bar. Rebuilds only when

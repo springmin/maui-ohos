@@ -353,6 +353,12 @@ public sealed class OpenHarmonyMauiAppHost
     public bool HandleTouch(bool down, bool up, float x, float y, int pointerId)
     {
         EnsureInputWired();
+        // N5: an active overlay that disables touch passthrough owns the press/release; the page
+        // tree underneath is skipped so a control there never also receives the gesture.
+        if (OpenHarmonyWindowOverlayHost.ShouldConsumeTouch(down, up))
+        {
+            return true;
+        }
         return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y, pointerId);
     }
 
@@ -360,6 +366,10 @@ public sealed class OpenHarmonyMauiAppHost
     public bool HandleCancel(float x, float y)
     {
         EnsureInputWired();
+        if (OpenHarmonyWindowOverlayHost.ShouldConsumeCancel())
+        {
+            return true;
+        }
         return _renderer.HandleCancel(x, y);
     }
 
@@ -642,7 +652,9 @@ public sealed class OpenHarmonyMauiAppHost
     /// <summary>Handles a move of one pointer (the shell's touch stream carries the id).</summary>
     public bool HandleMove(float x, float y, int pointerId) => HandleMoveCore(x, y, pointerId);
 
-    private bool HandleMoveCore(float x, float y, int pointerId) => _renderer.HandleMove(x, y, pointerId);
+    // N5: a move that belongs to a suppressed press stays with the overlay.
+    private bool HandleMoveCore(float x, float y, int pointerId)
+        => OpenHarmonyWindowOverlayHost.ShouldConsumeMove() || _renderer.HandleMove(x, y, pointerId);
 
     public string Describe() => RootView is IView content ? _renderer.Describe(content) : "(no window content)";
 

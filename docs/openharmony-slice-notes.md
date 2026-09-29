@@ -66,10 +66,14 @@ Zero-reference interfaces, status documented once (no silent gaps):
     (OpenHarmonyWindowHandler.MapContent, the Tizen hook), the overlay host draws it next to
     IWindow.Overlays, and a frame-tick signature check requests a redraw when an adorner was
     added or removed (Controls' Invalidate is a no-op on the platform-less build, so the host
-    cannot be asked directly; one frame of latency). Remaining gap: the element selector's
-    tap-to-select never fires for the package overlay because its Tapped raiser is internal to
-    Microsoft.Maui, and the diagnostics overlay does not suppress touch passthrough (recorded
-    flags only, like OpenHarmonyWindowOverlay's documented limitation).
+    cannot be asked directly; one frame of latency). The diagnostics overlay now honors the
+    IWindowOverlay passthrough contract (N5): while an active overlay sets
+    DisableUITouchEventPassthrough - which Controls' overlay does when EnableElementSelector turns
+    its element picker on - the app host consumes the touch stream (press/release pair plus the
+    moves between them) before the page tree routes, so picking an element cannot also activate a
+    control underneath; clearing the flag restores pass-through. Remaining gap: the element
+    selector's tap-to-select still never fires for the package overlay because its Tapped raiser
+    is internal to Microsoft.Maui, and only the slice's OpenHarmonyWindowOverlay can raise Tapped.
 
 ## Bluetooth GATT (`OpenHarmonyBluetoothGatt`)
 

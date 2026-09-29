@@ -27,19 +27,19 @@
 //
 // Documented limitations of this implementation (once, no silent gaps):
 //
-//   * Touch passthrough cannot be suppressed. OpenHarmonyBridge.Touch is a multicast event and
-//     the slice's single tree entry point (OpenHarmonyMauiAppHost.HandleTouch ->
-//     OpenHarmonyWindowRenderer.HandleTouch) runs regardless of what the overlay reports, so
-//     DisableUITouchEventPassthrough/EnableDrawableTouchHandling are recorded and visible to an
-//     app but do not stop a control underneath from also receiving the touch. Real suppression
-//     needs the host (or renderer) to ask the overlay host first and skip the tree when the
-//     overlay consumes the event. Tapped is raised on every touch-up while the overlay is
-//     visible and initialized (the whole surface is the overlay's view, matching the other
-//     platforms), with the elements whose Contains(point) is true - possibly none.
+//   * Touch passthrough is suppressed while an active overlay asks for the touch stream:
+//     IWindowOverlay.DisableUITouchEventPassthrough (which Controls' VisualDiagnosticsOverlay
+//     sets when its element selector turns on) makes the app host consume the down/up pair
+//     here - the down opens a session, move/up/cancel stay with the overlay until the release -
+//     instead of routing it into the page tree, so a control underneath never also receives the
+//     touch. Clearing the flag lets the next press through again. Tapped keeps being raised from
+//     the bridge subscription (OnTouch) for every visible, initialized overlay of this type, with
+//     the elements whose Contains(point) is true - possibly none.
 //
 //   * Tapped can only be raised for OpenHarmonyWindowOverlay. Microsoft.Maui.WindowOverlay's
-//     event raiser is internal to Microsoft.Maui.dll, so a package-derived overlay is drawn but
-//     its Tapped never fires; deriving from OpenHarmonyWindowOverlay gets both.
+//     event raiser is internal to Microsoft.Maui.dll, so a package-derived overlay (the
+//     diagnostics overlay included) is drawn and its passthrough is suppressed, but its Tapped
+//     never fires; deriving from OpenHarmonyWindowOverlay gets both.
 //
 //   * Window.VisualDiagnosticsOverlay (the IAdorner host) is initialized by the window handler
 //     when it attaches to a window - OpenHarmonyWindowHandler.MapContent, the same hook Tizen
@@ -544,6 +544,60 @@ internal static class OpenHarmonyWindowOverlayHost
             return new RectF(0, 0, (float)OpenHarmonyAlertHost.Width, (float)OpenHarmonyAlertHost.Height);
         }
         return new RectF(0, 0, 0, 0);
+    }
+
+    // ---- touch passthrough suppression (N5) -------------------------------------------------
+    // While an active overlay sets IWindowOverlay.DisableUITouchEventPassthrough, the app host
+    // consumes the touch stream here instead of routing it into the page tree (see
+    // OpenHarmonyMauiAppHost.HandleTouch/HandleMove/HandleCancel): the press opens a session,
+    // move/up/cancel stay with the overlay until the release, so the control underneath never
+    // also sees the gesture. The overlay's Tapped raiser keeps running from OnTouch.
+    private static bool s_passthroughSession;
+
+    /// <summary>
+    /// Consumes a press/release when an active overlay disables passthrough; the session keeps
+    /// the following move/up/cancel with the overlay even if the flag flips mid-touch.
+    /// </summary>
+    internal static bool ShouldConsumeTouch(bool down, bool up)
+    {
+        if (down)
+        {
+            s_passthroughSession = PassthroughSuppressionActive();
+            return s_passthroughSession;
+        }
+        if (s_passthroughSession)
+        {
+            if (up)
+            {
+                s_passthroughSession = false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>True while a suppressed press is in progress (move events stay consumed).</summary>
+    internal static bool ShouldConsumeMove() => s_passthroughSession;
+
+    /// <summary>Consumes a canceled gesture that started under suppression and ends the session.</summary>
+    internal static bool ShouldConsumeCancel()
+    {
+        bool consumed = s_passthroughSession;
+        s_passthroughSession = false;
+        return consumed;
+    }
+
+    /// <summary>True when any visible, initialized overlay disables touch passthrough.</summary>
+    private static bool PassthroughSuppressionActive()
+    {
+        foreach (IWindowOverlay overlay in ActiveOverlays())
+        {
+            if (overlay.DisableUITouchEventPassthrough)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void OnTouch(OpenHarmonyTouchEventArgs args)

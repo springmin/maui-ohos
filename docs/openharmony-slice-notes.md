@@ -404,3 +404,36 @@ requires both walks to follow `CurrentItem`/`CurrentPage`. The pixel suite
 (`ohos-workload/test/headless-render`) gains a control (the page as a bare root paints red) plus
 `shell current page draws under the shell` (red) and `shell item switch repaints the new page`
 (lime); the pre-fix slice fails the two shell checks against the canvas fill.
+
+## Map launching (`OpenHarmonyMapLauncher`, `IMap`)
+
+Essentials `Map` (`Microsoft.Maui.ApplicationModel.IMap`) was the last missing Essentials surface
+of the slice (T18): `Map.Default` had no platform implementation, so `OpenAsync`/`TryOpenAsync`
+fell through to the package's reference implementation. The launcher rides the existing ArkTS
+`startAbility` bridge - no new host export or shell sink:
+
+* `OpenHarmonyMapLauncher` builds the Android-shaped `geo:` URI the OpenHarmony ability manager
+  matches to installed map applications (the documented platform map-jump: an implicit
+  `ohos.want.action.viewData` Want carrying `geo:latitude,longitude?q=...`; the slice's existing
+  ability bridge already sends exactly that Want for kind 0, so `OpenHarmonyAbilityBridge.TryOpenUri`
+  is the whole dispatch half). Location form: `geo:{lat},{lng}?q={lat},{lng}`; placemark form:
+  `geo:0,0?q={escaped address}` (Thoroughfare Locality AdminArea PostalCode CountryName, the same
+  five fields MAUI's platforms join, `Uri.EscapeDataString`'d); both append `({escaped name})`
+  from `MapLaunchOptions.Name` when set, like Android. Numbers use the invariant culture.
+* `Map.Default` installation uses the established field-reflection `InstallDefault` pattern
+  (`Map.defaultImplementation`) from a `[ModuleInitializer]`, and `UseOpenHarmony` also registers
+  the singleton as `IMap`, so both `Map.Default` and DI resolution land on the slice.
+* Limits (documented once, no silent gaps): `MapLaunchOptions.NavigationMode` has no `geo:`
+  carrier on OpenHarmony - vendor URIs (`amapuri:`, `baidumap:`, Petal's `maps://`) are not
+  generic - so a non-`None` mode still opens the plain location and the unrepresentable part is
+  reported once through the status channel; `TryOpenAsync` reports whether the ability bridge
+  dispatched the Want, not whether an installed map application matched it (OpenHarmony has no
+  synchronous URI-handler query, the same limit `OpenHarmonyLauncher.CanOpenAsync` records); and
+  off-device every call answers false / a completed task without throwing.
+
+Pinned by three interaction checks in `ohos-workload/test/maui-platform-verify` (501 -> 504,
+floor 481 -> 484): `t18 map defaults` requires `Map.Default` to be the slice singleton and the
+same instance DI resolves; `t18 map uri` pins the three URI shapes (plain, named, escaped
+placemark with a non-`None` navigation mode left in place); `t18 map degraded off-device` pins
+that both `OpenAsync` overloads complete and both `TryOpenAsync` overloads answer false without
+throwing when no host library/shell sink exists.

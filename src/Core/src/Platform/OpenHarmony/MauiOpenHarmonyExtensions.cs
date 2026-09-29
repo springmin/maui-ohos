@@ -135,19 +135,23 @@ public static class MauiOpenHarmonyExtensions
         // both DI resolution and WebAuthenticator.Default (ModuleInitializer field install) off
         // the Essentials reference-assembly exception (see OpenHarmonyWebAuthenticator.cs).
         builder.Services.AddSingleton<Microsoft.Maui.Authentication.IWebAuthenticator>(OpenHarmonyWebAuthenticator.Instance);
-        // Communication / capture / geocoding: the statics (Email.Default, Sms.Default,
-        // PhoneDialer.Default, Screenshot.Default, Geocoding.Default) resolve from these
-        // registrations when the app is built, exactly like Clipboard/Connectivity above.
+        // Communication / capture / geocoding / map: the statics (Email.Default, Sms.Default,
+        // PhoneDialer.Default, Screenshot.Default, Geocoding.Default, Map.Default) resolve from
+        // these registrations when the app is built, exactly like Clipboard/Connectivity above.
         var email = OpenHarmonyEmail.Instance;
         var sms = OpenHarmonySms.Instance;
         var phoneDialer = OpenHarmonyPhoneDialer.Instance;
         var screenshot = OpenHarmonyScreenshot.Instance;
         var geocoding = new OpenHarmonyGeocoding();
+        var mapLauncher = OpenHarmonyMapLauncher.Instance;
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.Communication.IEmail>(email);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.Communication.ISms>(sms);
         builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.Communication.IPhoneDialer>(phoneDialer);
         builder.Services.AddSingleton<Microsoft.Maui.Media.IScreenshot>(screenshot);
         builder.Services.AddSingleton<Microsoft.Maui.Devices.Sensors.IGeocoding>(geocoding);
+        // Map: the module initializer installs Map.Default from the same singleton; the
+        // registration keeps an app that resolves IMap from DI on the slice implementation.
+        builder.Services.AddSingleton<Microsoft.Maui.ApplicationModel.IMap>(mapLauncher);
         InstallEssentials();
         // Generic focus hook for non-text views (the shared ViewHandler Focus/Unfocus commands)
         // and the internal hardware-key surface; MAUI rc.1 has no key contract, so the key

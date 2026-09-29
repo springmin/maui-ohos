@@ -469,6 +469,12 @@ Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapComponentOverlay = 2 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapKitImportable = 1 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.None = 0 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.InstallDefault() -> void
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.OpenAsync(double latitude, double longitude, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.OpenAsync(Microsoft.Maui.Devices.Sensors.Placemark! placemark, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.TryOpenAsync(double latitude, double longitude, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.TryOpenAsync(Microsoft.Maui.Devices.Sensors.Placemark! placemark, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task<bool>!
 Microsoft.Maui.Platform.OpenHarmonyMapMarker
 Microsoft.Maui.Platform.OpenHarmonyMapMarker.<Clone>$() -> Microsoft.Maui.Platform.OpenHarmonyMapMarker!
 Microsoft.Maui.Platform.OpenHarmonyMapMarker.Deconstruct(out string! Id, out double Latitude, out double Longitude, out string! Title) -> void
@@ -1579,6 +1585,7 @@ static readonly Microsoft.Maui.Platform.OpenHarmonyLabelHandler.Mapper -> Micros
 static readonly Microsoft.Maui.Platform.OpenHarmonyLauncher.Instance -> Microsoft.Maui.Platform.OpenHarmonyLauncher!
 static readonly Microsoft.Maui.Platform.OpenHarmonyLayoutHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.ILayout!, Microsoft.Maui.Platform.OpenHarmonyLayoutHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyListViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.ListView!, Microsoft.Maui.Platform.OpenHarmonyListViewHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyMapLauncher.Instance -> Microsoft.Maui.Platform.OpenHarmonyMapLauncher!
 static readonly Microsoft.Maui.Platform.OpenHarmonyMagnetometer.Instance -> Microsoft.Maui.Platform.OpenHarmonyMagnetometer!
 static readonly Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.NavigationPage!, Microsoft.Maui.Platform.OpenHarmonyNavigationPageHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyOrientationSensor.Instance -> Microsoft.Maui.Platform.OpenHarmonyOrientationSensor!

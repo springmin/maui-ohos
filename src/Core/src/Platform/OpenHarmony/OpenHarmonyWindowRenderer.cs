@@ -100,19 +100,22 @@ public sealed class OpenHarmonyWindowRenderer
         // Hover resolution happens on moves, which carry no root; the render root is the fallback
         // and the touch path overwrites it with the host's exact root (modal-aware).
         _lastRoot = content;
+        // The flow walk starts at the render root: its logical parents are outside the walk, so
+        // the resolved direction comes from the nearest explicit ancestor (LTR without one).
+        bool contentRightToLeft = OpenHarmonyFlowDirection.IsRightToLeftRoot(content);
         _canvas.FillColor = BackgroundColor;
         _canvas.FillRectangle(0, 0, width, height);
         _popupView = null;
         _flyoutPanelView = null;
         _carouselViews.Clear();
-        DrawView(content);
+        DrawView(content, OpenHarmonyFlowMap.Identity, contentRightToLeft);
         if (showsTitleBar)
         {
             // The window title bar is chrome above the page: arranged into the top row, drawn
             // after the content, with the back affordance over its leading slot.
             titleBar!.Measure(width);
             titleBar.Arrange(new Rect(0, 0, width, titleBarHeight));
-            DrawView(titleBar.View);
+            DrawView(titleBar.View, OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(titleBar.View));
             titleBar.DrawBackAffordance(_canvas);
         }
         foreach (OpenHarmonyView carousel in _carouselViews)
@@ -164,7 +167,7 @@ public sealed class OpenHarmonyWindowRenderer
             IView view = stack.Pop();
             if (view.Handler?.PlatformView is OpenHarmonyView platform)
             {
-                RectF frame = platform.Frame;
+                RectF frame = platform.CanvasFrame;
                 if (frame.Width > 0 && frame.Height > 0)
                 {
                     _canvas.DrawRectangle(frame.X, frame.Y, frame.Width, frame.Height);
@@ -489,12 +492,27 @@ public sealed class OpenHarmonyWindowRenderer
         return path;
     }
 
-    private void DrawView(IView view)
+    /// <summary>
+    /// Logical (MAUI) frame of a view, in the coordinates the walk's flow map consumes. The
+    /// platform view's <see cref="OpenHarmonyView.Frame"/> stays logical too; its CanvasFrame is
+    /// the mapped rectangle the compositor draws and hit-tests.
+    /// </summary>
+    private static RectF LogicalFrameOf(IView view) => view.Frame is Rect frame
+        ? new RectF((float)frame.X, (float)frame.Y, (float)frame.Width, (float)frame.Height)
+        : default;
+
+    /// <summary>
+    /// Draws one view and its subtree. <paramref name="map"/> is the flow map of this view's
+    /// logical-to-canvas space; <paramref name="parentRightToLeft"/> is its parent's resolved
+    /// direction (MatchParent inheritance; see <see cref="OpenHarmonyFlowDirection"/>).
+    /// </summary>
+    private void DrawView(IView view, in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (view.Visibility != Visibility.Visible)
         {
             return;
         }
+        bool flowRightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(view, parentRightToLeft);
         // The transform must cover the view AND its subtree (a page fade has to carry the
         // page's content), and it must not leak into the next sibling. ICanvas.SaveState
         // restores the transform; alpha is a backend field outside that stack, so it is
@@ -505,6 +523,7 @@ public sealed class OpenHarmonyWindowRenderer
         bool clipped = false;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
+            platform.SetFlowContext(map, flowRightToLeft);
             // View transforms (animations set these): opacity, translation, scale, rotation.
             if (platform.ShowsTitleBar)
             {
@@ -532,7 +551,7 @@ public sealed class OpenHarmonyWindowRenderer
                     // Rotation and scale pivot at the view's anchor (AnchorX/AnchorY, 0.5 by
                     // default = the frame centre); the anchor is not clamped, matching the
                     // platform semantics where an anchor outside the frame is legal.
-                    RectF frame = platform.Frame;
+                    RectF frame = platform.CanvasFrame;
                     float anchorX = frame.X + (float)view.AnchorX * frame.Width;
                     float anchorY = frame.Y + (float)view.AnchorY * frame.Height;
                     TransformPivotObserved?.Invoke(anchorX, anchorY);
@@ -551,7 +570,7 @@ public sealed class OpenHarmonyWindowRenderer
             // transformed view clips in its transformed space.
             if (view.Clip is { } clip)
             {
-                RectF clipFrame = platform.Frame;
+                RectF clipFrame = platform.CanvasFrame;
                 if (clipFrame.Width > 0 && clipFrame.Height > 0)
                 {
                     PathF clipPath = ClipPathFor(clip, clipFrame);
@@ -578,6 +597,7 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 _carouselViews.Add(platform);
             }
+            OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
             if (platform.IsFlyoutPage)
             {
                 // Detail fills the window; the flyout is an overlay clipped to its panel. Only the
@@ -601,16 +621,19 @@ public sealed class OpenHarmonyWindowRenderer
                 }
                 if (flyoutDetail is not null)
                 {
-                    DrawView(flyoutDetail);
+                    DrawView(flyoutDetail, childMap, flowRightToLeft);
                 }
                 if (platform.FlyoutPresented && flyoutContent is not null)
                 {
-                    RectF flyoutFrame = platform.Frame;
+                    RectF flyoutFrame = platform.CanvasFrame;
                     _canvas.FillColor = s_flyoutScrim;
                     _canvas.FillRectangle(flyoutFrame.X, flyoutFrame.Y, flyoutFrame.Width, flyoutFrame.Height);
                     _canvas.SaveState();
-                    _canvas.ClipRectangle(flyoutFrame.X, flyoutFrame.Y, platform.FlyoutWidth, flyoutFrame.Height);
-                    DrawView(flyoutContent);
+                    // The flyout panel is the start edge: physical left in LTR, right in RTL.
+                    float panelWidth = platform.FlyoutWidth;
+                    float panelX = flowRightToLeft ? flyoutFrame.Right - panelWidth : flyoutFrame.X;
+                    _canvas.ClipRectangle(panelX, flyoutFrame.Y, panelWidth, flyoutFrame.Height);
+                    DrawView(flyoutContent, childMap, flowRightToLeft);
                     _canvas.RestoreState();
                 }
                 RestoreViewState(_canvas, transformed, previousAlpha, clipped);
@@ -620,20 +643,28 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 // Clip to the viewport and translate the content by the scroll offsets.
                 _canvas.SaveState();
-                _canvas.ClipRectangle(platform.Frame.X, platform.Frame.Y, platform.Frame.Width, platform.Frame.Height);
+                RectF scrollFrame = platform.CanvasFrame;
+                _canvas.ClipRectangle(scrollFrame.X, scrollFrame.Y, scrollFrame.Width, scrollFrame.Height);
                 _canvas.Translate(-platform.ScrollOffsetX, -platform.ScrollOffsetY);
                 foreach (IView child in ChildrenInZOrder(view))
                 {
-                    DrawView(child);
+                    DrawView(child, childMap, flowRightToLeft);
                 }
                 _canvas.RestoreState();
                 RestoreViewState(_canvas, transformed, previousAlpha, clipped);
                 return;
             }
+            foreach (IView child in ChildrenInZOrder(view))
+            {
+                DrawView(child, childMap, flowRightToLeft);
+            }
+            RestoreViewState(_canvas, transformed, previousAlpha, clipped);
+            return;
         }
+        OpenHarmonyFlowMap noPlatformChildMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            DrawView(child);
+            DrawView(child, noPlatformChildMap, flowRightToLeft);
         }
         RestoreViewState(_canvas, transformed, previousAlpha, clipped);
     }
@@ -746,7 +777,7 @@ public sealed class OpenHarmonyWindowRenderer
         {
             return;
         }
-        RectF frame = carousel.Frame;
+        RectF frame = carousel.CanvasFrame;
         float spacing = 16f;
         float startX = frame.X + (frame.Width - count * spacing) / 2f + spacing / 2f;
         float y = frame.Y + frame.Height - 16f;
@@ -875,7 +906,8 @@ public sealed class OpenHarmonyWindowRenderer
             return false;
         }
         TouchWalk walk = default;
-        CollectTouchTargets(_lastRoot, x, y, true, TouchTargets.Graphics, ref walk);
+        CollectTouchTargets(_lastRoot, x, y, true, TouchTargets.Graphics, ref walk,
+            OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(_lastRoot!));
         OpenHarmonyView? target = walk.Graphics;
         if (ReferenceEquals(target, _graphicsHover))
         {
@@ -984,7 +1016,8 @@ public sealed class OpenHarmonyWindowRenderer
                 // flat candidate list: the ancestor frames that prune a subtree, and the scroll
                 // offsets that shift it, depend on the path to each view).
                 OpenHarmonyDragAndDrop.Update(session,
-                    _dropCapableSeen ? FindDropTarget(sessionRoot, x, y) : null);
+                    _dropCapableSeen ? FindDropTarget(sessionRoot, x, y,
+                        OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(sessionRoot)) : null);
             }
             return true;
         }
@@ -1012,7 +1045,8 @@ public sealed class OpenHarmonyWindowRenderer
         if (_dragRoot is { } dragRoot)
         {
             OpenHarmonyDragAndDrop.Update(_dragSession,
-                _dropCapableSeen ? FindDropTarget(dragRoot, x, y) : null);
+                _dropCapableSeen ? FindDropTarget(dragRoot, x, y,
+                    OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(dragRoot)) : null);
         }
         return true;
     }
@@ -1084,7 +1118,8 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 return true;
             }
-            bool rowHandled = HandleTouchCore(titleBar.View, down, up, x, y);
+            bool rowHandled = HandleTouchCore(titleBar.View, down, up, x, y,
+                OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(titleBar.View));
             // A press on the row never leaks into the page underneath.
             return rowHandled || down || up;
         }
@@ -1093,7 +1128,8 @@ public sealed class OpenHarmonyWindowRenderer
         if (down || up)
         {
             TouchWalk pointerWalk = default;
-            CollectTouchTargets(root, x, y, true, TouchTargets.Pointer, ref pointerWalk);
+            CollectTouchTargets(root, x, y, true, TouchTargets.Pointer, ref pointerWalk,
+                OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root));
             if (pointerWalk.Pointer is { } pointerView)
             {
                 if (up)
@@ -1134,7 +1170,8 @@ public sealed class OpenHarmonyWindowRenderer
         TouchWalk walk = default;
         if (wanted != TouchTargets.None)
         {
-            CollectTouchTargets(root, x, y, true, wanted, ref walk);
+            CollectTouchTargets(root, x, y, true, wanted, ref walk,
+                OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root));
             if ((wanted & TouchTargets.Popup) != 0)
             {
                 _popupView = walk.Popup;
@@ -1313,7 +1350,8 @@ public sealed class OpenHarmonyWindowRenderer
             if (_dragSession is { } dragSession)
             {
                 // The release completes the drag over the view under the pointer (if any).
-                OpenHarmonyDragAndDrop.Drop(dragSession, _dropCapableSeen ? FindDropTarget(root, x, y) : null);
+                OpenHarmonyDragAndDrop.Drop(dragSession, _dropCapableSeen ? FindDropTarget(root, x, y,
+                    OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root)) : null);
                 _dragSession = null;
                 _dragCandidate = null;
                 _dragRoot = null;
@@ -1348,7 +1386,8 @@ public sealed class OpenHarmonyWindowRenderer
             }
             _dragScrollTarget = null;
         }
-        return HandleTouchCore(root, down, up, x, y) | graphicsHandled;
+        return HandleTouchCore(root, down, up, x, y,
+            OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root)) | graphicsHandled;
     }
 
     /// <summary>
@@ -1367,12 +1406,19 @@ public sealed class OpenHarmonyWindowRenderer
         return true;
     }
 
-    private bool HandleTouchCore(IView view, bool down, bool up, float x, float y)
+    private bool HandleTouchCore(IView view, bool down, bool up, float x, float y,
+        in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
         {
             // Input-transparent view (and, for a cascading layout, its whole subtree).
             return false;
+        }
+        bool flowRightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(view, parentRightToLeft);
+        if (view.Handler?.PlatformView is OpenHarmonyView flowPlatform)
+        {
+            // The frame checks below (clip, text entry, gestures) all run in canvas space.
+            flowPlatform.SetFlowContext(map, flowRightToLeft);
         }
         // A non-cascading transparent layout still routes touches to its children; only its own
         // handlers below are skipped.
@@ -1381,7 +1427,7 @@ public sealed class OpenHarmonyWindowRenderer
         // drawing, which does not paint a clipped-away point.
         if (view.Handler?.PlatformView is OpenHarmonyView clipped
             && view.Clip is not null
-            && !ClipContainsPoint(view, clipped.Frame, x, y))
+            && !ClipContainsPoint(view, clipped.CanvasFrame, x, y))
         {
             return false;
         }
@@ -1418,13 +1464,14 @@ public sealed class OpenHarmonyWindowRenderer
                 }
             }
             // While the panel is open only it receives touches; otherwise only the detail does.
+            OpenHarmonyFlowMap flyoutChildMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
             foreach (IView child in ChildrenOf(view))
             {
                 bool isFlyout = ReferenceEquals(child, (view as Microsoft.Maui.Controls.FlyoutPage)?.Flyout);
                 bool isDetail = !isFlyout;
                 if (flyoutPage.FlyoutPresented ? isFlyout : isDetail)
                 {
-                    handled |= HandleTouchCore(child, down, up, x, y);
+                    handled |= HandleTouchCore(child, down, up, x, y, flyoutChildMap, flowRightToLeft);
                 }
             }
             return handled || (down && flyoutPage.FlyoutPresented);
@@ -1438,12 +1485,13 @@ public sealed class OpenHarmonyWindowRenderer
             childX += container.ScrollOffsetX;
             childY += container.ScrollOffsetY;
         }
+        OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            handled |= HandleTouchCore(child, down, up, childX, childY);
+            handled |= HandleTouchCore(child, down, up, childX, childY, childMap, flowRightToLeft);
         }
         if (!transparent && view.Handler?.PlatformView is OpenHarmonyView { IsTextEntry: true } textEntry && !_moved &&
-            textEntry.Frame.Contains(x, y) && textEntry.IsFocused)
+            textEntry.CanvasFrame.Contains(x, y) && textEntry.IsFocused)
         {
             if (down)
             {
@@ -1483,9 +1531,9 @@ public sealed class OpenHarmonyWindowRenderer
             // A drag never counts as a tap.
             handled |= platform.OnTouch(down, up && !_moved, x, y);
             // Scroll views consume touches inside them (drag scrolling).
-            handled |= platform.IsScrollView && platform.Frame.Contains(x, y);
+            handled |= platform.IsScrollView && platform.CanvasFrame.Contains(x, y);
             // Gesture recognizers run for the deepest view under the finger.
-            if (platform.Frame.Contains(x, y) && OpenHarmonyGestures.HasGestures(view))
+            if (platform.CanvasFrame.Contains(x, y) && OpenHarmonyGestures.HasGestures(view))
             {
                 if (up && !_moved)
                 {
@@ -1540,16 +1588,20 @@ public sealed class OpenHarmonyWindowRenderer
     /// resolve like the recursive originals: the last child that produced a match wins, and the
     /// view itself only matches when no child did.
     /// </summary>
-    private void CollectTouchTargets(IView view, float x, float y, bool positioned, TouchTargets wanted, ref TouchWalk walk)
+    private void CollectTouchTargets(IView view, float x, float y, bool positioned, TouchTargets wanted, ref TouchWalk walk,
+        in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
         {
             // Input-transparent view (cascading layout: its whole subtree).
             return;
         }
+        bool flowRightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(view, parentRightToLeft);
         OpenHarmonyView? platform = view.Handler?.PlatformView as OpenHarmonyView;
         if (platform is not null)
         {
+            // The positional checks below run against the canvas-space frame the map produces.
+            platform.SetFlowContext(map, flowRightToLeft);
             if ((wanted & TouchTargets.Popup) != 0 && walk.Popup is null && platform.PopupVisible)
             {
                 walk.Popup = platform;
@@ -1558,11 +1610,11 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 walk.Flyout = platform;
             }
-            if (positioned && !platform.Frame.Contains(x, y))
+            if (positioned && !platform.CanvasFrame.Contains(x, y))
             {
                 positioned = false;
             }
-            if (positioned && view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y))
+            if (positioned && view.Clip is not null && !ClipContainsPoint(view, platform.CanvasFrame, x, y))
             {
                 // The clip excludes the point from the view and its subtree (the drawing pass
                 // does not paint a clipped-away point either).
@@ -1586,9 +1638,10 @@ public sealed class OpenHarmonyWindowRenderer
         IView? dragBefore = walk.Drag;
         IView? gestureBefore = walk.Gesture;
         OpenHarmonyView? graphicsBefore = walk.Graphics;
+        OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            CollectTouchTargets(child, localX, localY, positioned, wanted, ref walk);
+            CollectTouchTargets(child, localX, localY, positioned, wanted, ref walk, childMap, flowRightToLeft);
         }
         if (!positioned)
         {
@@ -1641,7 +1694,8 @@ public sealed class OpenHarmonyWindowRenderer
     public bool HandlePointerMove(IView root, float x, float y)
     {
         _lastRoot = root;
-        IView? target = FindPointerTarget(root, x, y);
+        IView? target = FindPointerTarget(root, x, y,
+            OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root));
         if (!ReferenceEquals(target, _pointerHover))
         {
             if (_pointerHover is { } previous)
@@ -1659,44 +1713,52 @@ public sealed class OpenHarmonyWindowRenderer
 
     /// <summary>Routes a shell pinch report to the deepest view that owns a pinch recognizer.</summary>
     public bool HandlePinch(IView root, int phase, double scale, float x, float y)
-        => FindPinchTarget(root, x, y) is { } target && OpenHarmonyPinch.Dispatch(target, phase, scale, x, y);
+        => FindPinchTarget(root, x, y, OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root)) is { } target
+            && OpenHarmonyPinch.Dispatch(target, phase, scale, x, y);
 
-    private IView? FindPinchTarget(IView view, float x, float y)
+    private IView? FindPinchTarget(IView view, float x, float y,
+        in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
         {
             return null;
         }
+        bool flowRightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(view, parentRightToLeft);
         IView? found = null;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            if (!platform.Frame.Contains(x, y)
-                || (view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y)))
+            platform.SetFlowContext(map, flowRightToLeft);
+            if (!platform.CanvasFrame.Contains(x, y)
+                || (view.Clip is not null && !ClipContainsPoint(view, platform.CanvasFrame, x, y)))
             {
                 return null;
             }
         }
+        OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            found = FindPinchTarget(child, x, y) ?? found;
+            found = FindPinchTarget(child, x, y, childMap, flowRightToLeft) ?? found;
         }
         return found ?? (!view.InputTransparent && OpenHarmonyPinch.HasPinch(view) ? view : null);
     }
 
     /// <summary>Deepest view containing the point that owns a pointer recognizer.</summary>
-    private IView? FindPointerTarget(IView view, float x, float y)
+    private IView? FindPointerTarget(IView view, float x, float y,
+        in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
         {
             return null;
         }
+        bool flowRightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(view, parentRightToLeft);
         IView? found = null;
         float localX = x;
         float localY = y;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            if (!platform.Frame.Contains(x, y)
-                || (view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y)))
+            platform.SetFlowContext(map, flowRightToLeft);
+            if (!platform.CanvasFrame.Contains(x, y)
+                || (view.Clip is not null && !ClipContainsPoint(view, platform.CanvasFrame, x, y)))
             {
                 return null;
             }
@@ -1706,27 +1768,31 @@ public sealed class OpenHarmonyWindowRenderer
                 localY += platform.ScrollOffsetY;
             }
         }
+        OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            found = FindPointerTarget(child, localX, localY) ?? found;
+            found = FindPointerTarget(child, localX, localY, childMap, flowRightToLeft) ?? found;
         }
         return found ?? (!view.InputTransparent && OpenHarmonyPointer.HasPointer(view) ? view : null);
     }
 
     /// <summary>Deepest view containing the point that owns a usable drop recognizer.</summary>
-    private IView? FindDropTarget(IView view, float x, float y)
+    private IView? FindDropTarget(IView view, float x, float y,
+        in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
         {
             return null;
         }
+        bool flowRightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(view, parentRightToLeft);
         IView? found = null;
         float localX = x;
         float localY = y;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            if (!platform.Frame.Contains(x, y)
-                || (view.Clip is not null && !ClipContainsPoint(view, platform.Frame, x, y)))
+            platform.SetFlowContext(map, flowRightToLeft);
+            if (!platform.CanvasFrame.Contains(x, y)
+                || (view.Clip is not null && !ClipContainsPoint(view, platform.CanvasFrame, x, y)))
             {
                 return null;
             }
@@ -1736,9 +1802,10 @@ public sealed class OpenHarmonyWindowRenderer
                 localY += platform.ScrollOffsetY;
             }
         }
+        OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            found = FindDropTarget(child, localX, localY) ?? found;
+            found = FindDropTarget(child, localX, localY, childMap, flowRightToLeft) ?? found;
         }
         return found ?? (!view.InputTransparent && OpenHarmonyDragAndDrop.HasDrop(view) ? view : null);
     }
@@ -1835,12 +1902,13 @@ public sealed class OpenHarmonyWindowRenderer
 
 /// <summary>
 /// Layout semantics (T5) the compositor reads from the virtual view every frame instead of
-/// storing on the platform view: Clip, AnchorX/AnchorY, InputTransparent and ZIndex. A property
+/// storing on the platform view: Clip, AnchorX/AnchorY, InputTransparent, ZIndex and (T6) the
+/// flow direction, whose resolved value mirrors a whole subtree's placement. A property
 /// change has to request a repaint or the next frame is only drawn when some other input
 /// arrives, exactly like <see cref="OpenHarmonyShadow"/>. The default ViewMapper maps Clip,
-/// AnchorX/AnchorY and InputTransparent to no-ops in this platform-less slice and has no ZIndex
-/// entry at all, so each key gets one wrapper that runs the previous mapping (when one exists)
-/// and then requests a frame. Installed once, from the renderer constructor.
+/// AnchorX/AnchorY, InputTransparent and FlowDirection to no-ops in this platform-less slice and
+/// has no ZIndex entry at all, so each key gets one wrapper that runs the previous mapping (when
+/// one exists) and then requests a frame. Installed once, from the renderer constructor.
 /// </summary>
 internal static class OpenHarmonyLayoutRedraw
 {
@@ -1862,6 +1930,9 @@ internal static class OpenHarmonyLayoutRedraw
         Hook(mapper, nameof(ITransform.AnchorX));
         Hook(mapper, nameof(ITransform.AnchorY));
         Hook(mapper, nameof(IView.InputTransparent));
+        // The flow direction is read per frame by the walk (the resolved direction of every
+        // ancestor changes the whole subtree's placement), so a direction change must repaint.
+        Hook(mapper, nameof(IView.FlowDirection));
     }
 
     private static void Hook(PropertyMapper<IView, IViewHandler> mapper, string key)

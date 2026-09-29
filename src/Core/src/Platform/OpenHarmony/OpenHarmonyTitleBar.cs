@@ -78,8 +78,15 @@ internal sealed class OpenHarmonyTitleBarRow
 
     /// <summary>Hit test for the leading back slot (the shell chrome's InBackButton geometry).</summary>
     internal bool InBackButton(float x, float y)
-        => Frame.Width > 0 && x >= Frame.X && x <= Frame.X + BackButtonWidth &&
-           y >= Frame.Y && y <= Frame.Y + Frame.Height;
+    {
+        // The slot is the row's leading edge: physical left in LTR, right in RTL.
+        bool rightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(_view);
+        bool inSlot = rightToLeft
+            ? x >= Frame.Right - BackButtonWidth && x <= Frame.Right
+            : x >= Frame.X && x <= Frame.X + BackButtonWidth;
+        return Frame.Width > 0 && inSlot &&
+               y >= Frame.Y && y <= Frame.Y + Frame.Height;
+    }
 
     /// <summary>True when the point falls inside the arranged row.</summary>
     internal bool Contains(float x, float y) => Frame.Width > 0 && Frame.Contains(x, y);
@@ -147,12 +154,22 @@ internal sealed class OpenHarmonyTitleBarRow
         {
             return;
         }
-        float cx = (float)Frame.X + 26f;
+        // The chevron sits in the row's leading slot: physical left in LTR, right in RTL.
+        bool rightToLeft = OpenHarmonyFlowDirection.IsRightToLeft(_view);
+        float cx = rightToLeft ? (float)Frame.Right - 26f : (float)Frame.X + 26f;
         float cy = (float)(Frame.Y + Frame.Height / 2);
         canvas.StrokeColor = (_titleBar as Microsoft.Maui.Controls.TitleBar)?.ForegroundColor ?? Colors.White;
         canvas.StrokeSize = 3;
-        canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
-        canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+        if (rightToLeft)
+        {
+            canvas.DrawLine(cx - 9, cy - 11, cx + 4, cy);
+            canvas.DrawLine(cx + 4, cy, cx - 9, cy + 11);
+        }
+        else
+        {
+            canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
+            canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+        }
     }
 }
 

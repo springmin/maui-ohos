@@ -144,7 +144,7 @@ internal static class OpenHarmonyScrollbars
     /// </summary>
     internal static RectF? ThumbRect(OpenHarmonyView view)
     {
-        RectF frame = view.Frame;
+        RectF frame = view.CanvasFrame;
         float viewport = frame.Height;
         float content = view.ScrollContentHeight;
         if (frame.Width <= Thickness + Margin || viewport <= 0f || content <= viewport + 0.5f)
@@ -157,7 +157,10 @@ internal static class OpenHarmonyScrollbars
         float travel = viewport - length;
         float offset = Math.Clamp(view.ScrollOffsetY, 0f, maxOffset);
         float y = frame.Y + (maxOffset > 0f ? travel * (offset / maxOffset) : 0f);
-        float x = frame.Right - Margin - Thickness;
+        // The bar sits at the viewport's trailing edge: physical right in LTR, left in RTL.
+        float x = view.FlowRightToLeft
+            ? frame.X + Margin
+            : frame.Right - Margin - Thickness;
         return new RectF(x, y, Thickness, length);
     }
 

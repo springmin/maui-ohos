@@ -230,3 +230,40 @@ retained). See the packaging doc's P2b-IMG section for the on-device commands.
 Limits: `AspectFit` centers a square only (the platform view does not track intrinsic size
 yet), the placeholder is the documented undecodable fallback, and animated formats are not
 sampled - a still frame is drawn.
+
+## Flow direction / RTL (`OpenHarmonyFlowDirection`, `OpenHarmonyView.CanvasFrame`)
+
+Upstream MAUI leaves RTL layout mirroring to the platform: dotnet/maui#9558 removed the
+cross-platform arrangement mirroring, so Android and iOS flip the platform placement of every
+child whose parent layout is right-to-left, resolve Start/End text alignment against the view's
+own direction and put trailing affordances at the physical leading edge. The slice reproduces
+that contract on the managed canvas:
+
+* **Flow map.** Every compositor walk (drawing, hit-testing, hover/pointer/pinch/drop
+  resolution) carries an `OpenHarmonyFlowMap`, the affine map `x' = Scale * x + Offset` from a
+  view's logical MAUI x coordinate to canvas space. A view whose effective direction is
+  RightToLeft is a mirror boundary: its children's logical offsets are reflected within its
+  physical frame (the native platforms' arrange flip). MatchParent inherits the parent's
+  resolved direction; a walk root whose logical parents are outside the walk resolves from the
+  nearest explicit ancestor and stays left-to-right without one. An LTR tree maps to itself, so
+  the existing output is unchanged.
+* **`Frame` stays logical.** Arrange-time readers (the page/tab/flyout/shell handlers that
+  compute child frames, the list materializer, the item-list viewport math) keep reading the
+  MAUI frame, which is what `IView.Frame` carries on the native platforms. Drawing, clipping,
+  transforms, hit-testing, the focus ring, the accessibility bounds and the scrollbar geometry
+  use `OpenHarmonyView.CanvasFrame`, the walk-mapped rectangle. The walk hands the map and the
+  resolved direction to each platform view once per visit (`SetFlowContext`), so no per-frame
+  parent walk is needed.
+* **Direction-aware surfaces.** Text alignment (Start/End swap; Center/Justify unchanged), the
+  entry's trailing clear button, the navigation/shell back slot and chevron, the toolbar items
+  (trailing actions), the shell flyout hamburger/panel/menu rows, the flyout page panel, the
+  picker dropdown (opens from the field's start edge), the calendar header arrows and the
+  day/weekday columns, tabs, sliders, progress fills, switches, steppers and radio buttons all
+  resolve their start/end edge from the view's own direction in both drawing and hit-testing. A
+  `FlowDirection` change requests a repaint through the shared view-mapper hook
+  (`OpenHarmonyLayoutRedraw`).
+* **Limits (recorded).** The canvas text bridge does no bidi reordering, so RTL text keeps its
+  logical glyph order and only the block's start edge moves. Horizontal scroll offsets stay
+  physical (the slice's scroll physics are vertical-only). SwipeView reveal geometry stays in
+  gesture space (the drag direction picks the side). The alert overlay keeps its fixed
+  accept/cancel layout.

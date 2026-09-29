@@ -569,7 +569,7 @@ internal static class OpenHarmonyScrollPhysics
         }
         if (s_lastScrolled is not { } reference ||
             !reference.TryGetTarget(out OpenHarmonyView? view) ||
-            !view.Frame.Contains(args.X, args.Y))
+            !view.CanvasFrame.Contains(args.X, args.Y))
         {
             return;
         }

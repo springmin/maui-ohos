@@ -627,7 +627,8 @@ public static partial class OpenHarmonyAccessibility
         RectF bounds = default;
         if (view.Handler?.PlatformView is OpenHarmonyView platform)
         {
-            bounds = platform.Frame;
+            // Accessibility publishes canvas-space bounds (the resolved flow direction included).
+            bounds = platform.CanvasFrame;
         }
         string role = RoleOf(view);
         if (view is VisualElement heading && SemanticProperties.GetHeadingLevel(heading) != SemanticHeadingLevel.None && role == "text")

@@ -321,7 +321,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
 
     public override void Draw(MauiCanvas canvas)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (frame.Width <= 0 || frame.Height <= 0)
         {
             return;
@@ -396,7 +396,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
 
     private void DrawTextBlock(MauiCanvas canvas, string text)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float left = frame.X + (float)Padding.Left;
         float top = frame.Y + (float)Padding.Top;
         float width = Math.Max(0f, frame.Width - (float)(Padding.Left + Padding.Right));
@@ -427,7 +427,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
         foreach (string line in lines)
         {
             float lineWidth = MeasureLine(line, fontSize);
-            float x = HorizontalTextAlignment switch
+            float x = ResolveHorizontalTextAlignment(HorizontalTextAlignment) switch
             {
                 TextAlignment.Center => left + (width - lineWidth) / 2f,
                 TextAlignment.End => left + width - lineWidth,
@@ -446,7 +446,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
     /// </summary>
     private void DrawFormattedBlock(MauiCanvas canvas)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float left = frame.X + (float)Padding.Left;
         float top = frame.Y + (float)Padding.Top;
         float width = Math.Max(0f, frame.Width - (float)(Padding.Left + Padding.Right));
@@ -465,7 +465,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
         };
         foreach (OpenHarmonyFormattedLine line in layout.Lines)
         {
-            float x = HorizontalTextAlignment switch
+            float x = ResolveHorizontalTextAlignment(HorizontalTextAlignment) switch
             {
                 TextAlignment.Center => left + (width - line.Width) / 2f,
                 TextAlignment.End => left + width - line.Width,
@@ -895,7 +895,7 @@ public sealed class OpenHarmonyShapeView : OpenHarmonyView
 
     public override void Draw(MauiCanvas canvas)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (frame.Width <= 0 || frame.Height <= 0)
         {
             return;

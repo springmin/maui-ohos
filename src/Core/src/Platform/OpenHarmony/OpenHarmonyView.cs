@@ -321,8 +321,12 @@ public class OpenHarmonyView
     {
         get
         {
-            RectF frame = Frame;
-            return new PointF(frame.X + frame.Width - ClearButtonRadius - 12f, frame.Y + frame.Height / 2f);
+            RectF frame = CanvasFrame;
+            // The clear button sits at the entry's trailing edge: physical right in LTR, left in RTL.
+            float x = FlowRightToLeft
+                ? frame.X + ClearButtonRadius + 12f
+                : frame.X + frame.Width - ClearButtonRadius - 12f;
+            return new PointF(x, frame.Y + frame.Height / 2f);
         }
     }
 
@@ -794,9 +798,13 @@ public class OpenHarmonyView
 
     public bool InBackButton(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
+        // The back slot is the leading edge of the bar: physical left in LTR, right in RTL.
+        bool inSlot = FlowRightToLeft
+            ? x >= frame.Right - 56 && x <= frame.Right
+            : x >= frame.X && x <= frame.X + 56;
         return ShowsTitleBar && ShowsBack &&
-               x >= frame.X && x <= frame.X + 56 &&
+               inSlot &&
                y >= frame.Y && y <= frame.Y + TitleBarHeight;
     }
 
@@ -812,28 +820,34 @@ public class OpenHarmonyView
 
     public void DrawFlyoutPanel(MauiCanvas canvas)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float width = Math.Min(320f, frame.Width);
+        // The panel is the flyout's start edge: physical left in LTR, right in RTL; the menu
+        // rows keep their vertical geometry and align their text to the panel's start edge.
+        float panelX = FlowRightToLeft ? frame.Right - width : frame.X;
         canvas.FillColor = s_flyoutScrim;
         canvas.FillRectangle(frame.X, frame.Y, frame.Width, frame.Height);
         canvas.FillColor = Colors.DimGray;
-        canvas.FillRectangle(frame.X, frame.Y, width, frame.Height);
+        canvas.FillRectangle(panelX, frame.Y, width, frame.Height);
         canvas.FontSize = 26;
         canvas.FontColor = Colors.White;
         for (int i = 0; i < FlyoutItems.Count; i++)
         {
             float rowY = frame.Y + 16 + i * 52;
-            canvas.DrawString(FlyoutItems[i], frame.X + 20, rowY, width - 40, 44,
-                HorizontalAlignment.Left, VerticalAlignment.Center);
+            canvas.DrawString(FlyoutItems[i], panelX + 20, rowY, width - 40, 44,
+                FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
         }
     }
 
     /// <summary>Index of the flyout row at the point (-1 outside the panel, -2 dismiss).</summary>
     public int FlyoutItemAt(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float width = Math.Min(320f, frame.Width);
-        if (x > frame.X + width)
+        // Outside the panel (toward the covered detail) dismisses the drawer; the covered side
+        // is the physical right of an RTL panel.
+        bool outside = FlowRightToLeft ? x < frame.Right - width : x > frame.X + width;
+        if (outside)
         {
             return -2;
         }
@@ -908,10 +922,14 @@ public class OpenHarmonyView
     /// </summary>
     public void DrawCalendar(MauiCanvas canvas)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float x = frame.X;
         float y = frame.Y + frame.Height;
         float width = CalendarWidth;
+        // The day/weekday columns run from the start edge: physical left in LTR, right in RTL
+        // (a mirrored calendar reads Monday-first from the right, like the platform pickers).
+        float ColumnX(int column)
+            => x + (FlowRightToLeft ? 6 - column : column) * width / 7f;
         canvas.FillColor = Colors.Black;
         canvas.FillRectangle(x, y, width, CalendarHeight);
         canvas.StrokeColor = s_calendarDisabled;
@@ -919,14 +937,17 @@ public class OpenHarmonyView
         canvas.DrawRectangle(x, y, width, CalendarHeight);
 
         // Header: < month year >; an edge arrow is greyed when its month is out of range.
+        // Previous is the start edge, next the end edge (swapped by an RTL direction).
+        float previousX = FlowRightToLeft ? x + width - 48 : x + 8;
+        float nextX = FlowRightToLeft ? x + 8 : x + width - 48;
         DateTime firstMonth = new(CalendarMinimum.Year, CalendarMinimum.Month, 1);
         DateTime lastMonth = new(CalendarMaximum.Year, CalendarMaximum.Month, 1);
         DateTime shownMonth = new(CalendarYear, CalendarMonth, 1);
         canvas.FontColor = shownMonth > firstMonth ? Colors.White : s_calendarDisabled;
         canvas.FontSize = 26;
-        canvas.DrawString("<", x + 8, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString("<", previousX, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
         canvas.FontColor = shownMonth < lastMonth ? Colors.White : s_calendarDisabled;
-        canvas.DrawString(">", x + width - 48, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString(">", nextX, y, 40, CalendarHeaderHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
         canvas.FontColor = Colors.White;
         canvas.DrawString(CalendarTitle(), x + 48, y, width - 96, CalendarHeaderHeight,
             HorizontalAlignment.Center, VerticalAlignment.Center);
@@ -936,7 +957,7 @@ public class OpenHarmonyView
         canvas.FontSize = 20;
         for (int column = 0; column < 7; column++)
         {
-            canvas.DrawString(s_calendarWeekdays[column], x + column * width / 7f, y + CalendarHeaderHeight,
+            canvas.DrawString(s_calendarWeekdays[column], ColumnX(column), y + CalendarHeaderHeight,
                 width / 7f, CalendarRowHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
         }
 
@@ -957,7 +978,7 @@ public class OpenHarmonyView
                 break;
             }
             int column = cell % 7;
-            float cellX = x + column * width / 7f;
+            float cellX = ColumnX(column);
             float cellY = y + CalendarHeaderHeight + (row + 1) * CalendarRowHeight;
             DateTime date = new(CalendarYear, CalendarMonth, day);
             bool disabled = date < min || date > max;
@@ -980,7 +1001,7 @@ public class OpenHarmonyView
     /// <summary>Hit test for the calendar: -1 outside, -2 previous, -3 next, 1..31 selectable day.</summary>
     public int CalendarHit(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float left = frame.X;
         float top = frame.Y + frame.Height;
         float width = CalendarWidth;
@@ -990,15 +1011,24 @@ public class OpenHarmonyView
         }
         if (y < top + CalendarHeaderHeight)
         {
-            if (x < left + 48)
+            // Previous is the start edge, next the end edge (swapped by an RTL direction).
+            if (FlowRightToLeft ? x > left + width - 48 : x < left + 48)
             {
                 return -2;
             }
-            return x > left + width - 48 ? -3 : 0;
+            if (FlowRightToLeft ? x < left + 48 : x > left + width - 48)
+            {
+                return -3;
+            }
+            return 0;
         }
         float rowY = y - top - CalendarHeaderHeight;
         int row = (int)(rowY / CalendarRowHeight);
         int column = (int)((x - left) / (width / 7f));
+        if (FlowRightToLeft)
+        {
+            column = 6 - column;
+        }
         if (row < 1 || column < 0 || column > 6)
         {
             return 0;
@@ -1025,15 +1055,23 @@ public class OpenHarmonyView
 
     public bool InFlyoutPanel(float x, float y)
     {
-        RectF frame = Frame;
-        return FlyoutPresented && x >= frame.X && x <= frame.X + FlyoutWidth;
+        RectF frame = CanvasFrame;
+        // The panel is the flyout's start edge: physical left in LTR, right in RTL.
+        return FlyoutPresented &&
+               (FlowRightToLeft
+                   ? x >= frame.Right - FlyoutWidth && x <= frame.Right
+                   : x >= frame.X && x <= frame.X + FlyoutWidth);
     }
 
     public bool InHamburger(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
+        // The hamburger sits in the start edge's top corner: physical left in LTR, right in RTL.
+        bool inCorner = FlowRightToLeft
+            ? x >= frame.Right - HamburgerSize && x <= frame.Right
+            : x >= frame.X && x <= frame.X + HamburgerSize;
         return (IsFlyoutPage && !FlyoutPresented || ShowsHamburger) &&
-               x >= frame.X && x <= frame.X + HamburgerSize &&
+               inCorner &&
                y >= frame.Y && y <= frame.Y + HamburgerSize;
     }
 
@@ -1103,7 +1141,9 @@ public class OpenHarmonyView
     /// <summary>Revealed swipe item rectangle (drawing and hit testing share it).</summary>
     public RectF SwipeItemRect(int index)
     {
-        RectF frame = Frame;
+        // Swipe reveal geometry stays in physical (gesture) space: the drag direction picks the
+        // side, so the flow direction does not move the revealed panel.
+        RectF frame = CanvasFrame;
         float height = frame.Height / Math.Max(1, SwipeItems.Count);
         float x = SwipeOpenToRight ? frame.Right - SwipeItemWidth : frame.X;
         return new RectF(x, frame.Y + index * height, SwipeItemWidth, height);
@@ -1161,8 +1201,12 @@ public class OpenHarmonyView
     /// <summary>Rectangle of a toolbar item (drawing and hit testing share it).</summary>
     public RectF ToolbarItemRect(int index)
     {
-        RectF frame = Frame;
-        return new RectF(frame.Right - (index + 1) * ToolbarItemWidth, frame.Y, ToolbarItemWidth, NavBarHeight);
+        RectF frame = CanvasFrame;
+        // Toolbar items are trailing actions: docked to the physical right in LTR, left in RTL.
+        float x = FlowRightToLeft
+            ? frame.X + index * ToolbarItemWidth
+            : frame.Right - (index + 1) * ToolbarItemWidth;
+        return new RectF(x, frame.Y, ToolbarItemWidth, NavBarHeight);
     }
 
     public int ToolbarItemAt(float x, float y)
@@ -1179,10 +1223,14 @@ public class OpenHarmonyView
 
     public bool InBackRegion(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
+        // The back region is the navigation bar's leading edge: physical left in LTR, right in RTL.
+        bool inSlot = FlowRightToLeft
+            ? x >= frame.Right - NavBackWidth && x <= frame.Right
+            : x >= frame.X && x <= frame.X + NavBackWidth;
         return IsNavigationPage && CanGoBack &&
                y >= frame.Y && y <= frame.Y + NavBarHeight &&
-               x >= frame.X && x <= frame.X + NavBackWidth;
+               inSlot;
     }
 
     // Scroll support
@@ -1239,9 +1287,48 @@ public class OpenHarmonyView
     /// </summary>
     public List<IView> ViewChildren { get; } = new();
 
+    /// <summary>
+    /// The view's logical MAUI frame (window coordinates, before flow-direction mirroring).
+    /// Arrange-time readers (the page/tab/flyout/shell handlers that compute child frames) use
+    /// this, exactly like <c>IView.Frame</c> on the native platforms; drawing and hit-testing use
+    /// <see cref="CanvasFrame"/>.
+    /// </summary>
     public RectF Frame => VirtualView?.Frame is Rect frame
         ? new RectF((float)frame.X, (float)frame.Y, (float)frame.Width, (float)frame.Height)
         : default;
+
+    private OpenHarmonyFlowMap _flowMap = OpenHarmonyFlowMap.Identity;
+
+    /// <summary>
+    /// Effective flow direction resolved by the compositor walk (false without a walk: LTR).
+    /// Drives every start/end surface: text alignment, the clear button, navigation/menu sides,
+    /// the picker dropdown, the calendar arrows and the like.
+    /// </summary>
+    internal bool FlowRightToLeft { get; private set; }
+
+    /// <summary>
+    /// Canvas-space frame: the logical frame mapped through the walk's flow map. Drawing,
+    /// clipping and hit-testing share this one; an unmirrored (LTR) view maps to itself.
+    /// </summary>
+    internal RectF CanvasFrame => _flowMap.Map(Frame);
+
+    /// <summary>Hands the compositor walk's flow map and resolved direction to the view.</summary>
+    internal void SetFlowContext(in OpenHarmonyFlowMap map, bool rightToLeft)
+    {
+        _flowMap = map;
+        FlowRightToLeft = rightToLeft;
+    }
+
+    /// <summary>
+    /// Physical alignment for a MAUI Start/End alignment: right-to-left swaps the two edges
+    /// (Center/Justify are unchanged).
+    /// </summary>
+    internal TextAlignment ResolveHorizontalTextAlignment(TextAlignment alignment) => (alignment, FlowRightToLeft) switch
+    {
+        (TextAlignment.Start, true) => TextAlignment.End,
+        (TextAlignment.End, true) => TextAlignment.Start,
+        _ => alignment,
+    };
 
     /// <summary>
     /// Draws the view's MAUI shadow (<see cref="IView.Shadow"/>) behind its content. The host
@@ -1268,7 +1355,7 @@ public class OpenHarmonyView
                 "OpenHarmony shadow layer carries a single colour, so this shadow was not drawn");
             return;
         }
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (frame.Width <= 0 || frame.Height <= 0)
         {
             return;
@@ -1312,7 +1399,7 @@ public class OpenHarmonyView
 
     public virtual void Draw(MauiCanvas canvas)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (frame.Width <= 0 || frame.Height <= 0)
         {
             return;
@@ -1496,7 +1583,7 @@ public class OpenHarmonyView
             {
                 float padding = CornerRadius > 0 ? 24f : 0f;
                 canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
-                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                    FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }
         if (IsScrollView)
@@ -1585,15 +1672,18 @@ public class OpenHarmonyView
     /// </param>
     internal float TextOriginX(string? measure = null)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         const float padding = 12f;
         float available = Math.Max(0f, frame.Width - padding * 2);
         float measured = Math.Min(MeasureTextWidth(measure ?? DisplayText), available);
+        // Start/End follow the entry's resolved direction: Start is the physical left in LTR
+        // (the right edge in RTL), End the opposite edge; Justify is a single line here and is
+        // drawn like Start.
         return HorizontalTextAlignment switch
         {
             TextAlignment.Center => frame.X + padding + (available - measured) / 2f,
-            TextAlignment.End => frame.X + frame.Width - padding - measured,
-            _ => frame.X + padding,
+            TextAlignment.End => FlowRightToLeft ? frame.X + padding : frame.X + frame.Width - padding - measured,
+            _ => FlowRightToLeft ? frame.X + frame.Width - padding - measured : frame.X + padding,
         };
     }
 
@@ -1700,7 +1790,7 @@ public class OpenHarmonyView
             return 0;
         }
         string text = Text ?? string.Empty;
-        float handleY = SelectionHandleY(Frame);
+        float handleY = SelectionHandleY(CanvasFrame);
         float hitSquared = SelectionHandleTouchRadius * SelectionHandleTouchRadius;
         float dx = x - TextPositionX(text, SelectionStart);
         if (dx * dx + (y - handleY) * (y - handleY) <= hitSquared)
@@ -1928,38 +2018,42 @@ public class OpenHarmonyView
             DrawHamburger(canvas, frame);
             return;
         }
+        // The hamburger and the panel live at the flyout's start edge: physical left in LTR,
+        // right in RTL.
+        float iconX = FlowRightToLeft ? frame.Right - 36f : frame.X + 8f;
         if (!FlyoutPresented)
         {
-            // Hamburger button in the top-left corner of the detail.
             canvas.FillColor = Colors.Black;
-            canvas.FillRoundedRectangle(frame.X + 8, frame.Y + 8, 28, 28, 4);
+            canvas.FillRoundedRectangle(iconX, frame.Y + 8, 28, 28, 4);
             canvas.StrokeColor = Colors.White;
             canvas.StrokeSize = 2;
             for (int line = 0; line < 3; line++)
             {
                 float lineY = frame.Y + 15 + line * 7;
-                canvas.DrawLine(frame.X + 13, lineY, frame.X + 31, lineY);
+                canvas.DrawLine(iconX + 5, lineY, iconX + 23, lineY);
             }
             return;
         }
         float width = Math.Min(FlyoutWidth, frame.Width);
+        float panelX = FlowRightToLeft ? frame.Right - width : frame.X;
         canvas.FillColor = Colors.DimGray;
-        canvas.FillRectangle(frame.X, frame.Y, width, frame.Height);
+        canvas.FillRectangle(panelX, frame.Y, width, frame.Height);
         canvas.StrokeColor = Colors.Gray;
         canvas.StrokeSize = 1;
-        canvas.DrawLine(frame.X + width, frame.Y, frame.X + width, frame.Y + frame.Height);
+        canvas.DrawLine(panelX + width, frame.Y, panelX + width, frame.Y + frame.Height);
     }
 
     private void DrawHamburger(MauiCanvas canvas, RectF frame)
     {
+        float iconX = FlowRightToLeft ? frame.Right - 36f : frame.X + 8f;
         canvas.FillColor = Colors.Black;
-        canvas.FillRoundedRectangle(frame.X + 8, frame.Y + 8, 28, 28, 4);
+        canvas.FillRoundedRectangle(iconX, frame.Y + 8, 28, 28, 4);
         canvas.StrokeColor = Colors.White;
         canvas.StrokeSize = 2;
         for (int line = 0; line < 3; line++)
         {
             float lineY = frame.Y + 15 + line * 7;
-            canvas.DrawLine(frame.X + 13, lineY, frame.X + 31, lineY);
+            canvas.DrawLine(iconX + 5, lineY, iconX + 23, lineY);
         }
     }
 
@@ -1985,11 +2079,12 @@ public class OpenHarmonyView
         canvas.FontColor = TextColor;
         canvas.FontSize = FontSize;
         string text = Text ?? string.Empty;
+        // The value starts at the field's start edge; the chevron sits at the trailing edge.
         canvas.DrawString(text, frame.X + 12, frame.Y, frame.Width - 44, frame.Height,
-            HorizontalAlignment.Left, VerticalAlignment.Center);
+            FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
         canvas.StrokeColor = TextColor;
         canvas.StrokeSize = 2;
-        float cx = frame.X + frame.Width - 20;
+        float cx = FlowRightToLeft ? frame.X + 20 : frame.X + frame.Width - 20;
         float cy = frame.Y + frame.Height / 2f;
         canvas.DrawLine(cx - 8, cy - 4, cx, cy + 5);
         canvas.DrawLine(cx, cy + 5, cx + 8, cy - 4);
@@ -2007,14 +2102,16 @@ public class OpenHarmonyView
             DrawCalendar(canvas);
             return;
         }
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (PopupItems.Count == 0)
         {
             return;
         }
         float width = Math.Max(frame.Width, 220f);
         float height = PopupItems.Count * PopupRowHeight;
-        float x = frame.X;
+        // The dropdown spans from the field's start edge: physical left in LTR (growing right),
+        // the right edge in RTL (growing left). Rows align to the same start edge.
+        float x = FlowRightToLeft ? frame.Right - width : frame.X;
         float y = frame.Y + frame.Height;
         canvas.FillColor = Colors.Black;
         canvas.FillRectangle(x, y, width, height);
@@ -2036,7 +2133,7 @@ public class OpenHarmonyView
             float rowY = y + i * PopupRowHeight;
             canvas.FontColor = i == PopupSelectedIndex ? Colors.DodgerBlue : Colors.White;
             canvas.DrawString(PopupItems[i], x + 16, rowY, width - 32, PopupRowHeight,
-                HorizontalAlignment.Left, VerticalAlignment.Center);
+                FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
         }
     }
 
@@ -2057,14 +2154,18 @@ public class OpenHarmonyView
     /// <summary>Index of the dropdown row at the point (-1 when outside the popup).</summary>
     public int PopupIndexAt(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (!PopupVisible)
         {
             return -1;
         }
         float width = Math.Max(frame.Width, 220f);
         float top = frame.Y + frame.Height;
-        if (x < frame.X || x > frame.X + width || y < top)
+        // The dropdown spans from the field's start edge (see DrawPopup).
+        bool outside = FlowRightToLeft
+            ? x < frame.Right - width || x > frame.Right
+            : x < frame.X || x > frame.X + width;
+        if (outside || y < top)
         {
             return -1;
         }
@@ -2078,12 +2179,21 @@ public class OpenHarmonyView
         canvas.FillRectangle(frame.X, frame.Y, frame.Width, TitleBarHeight);
         if (ShowsBack)
         {
-            float cx = frame.X + 26f;
+            // The back chevron is the bar's leading affordance: physical left in LTR, right in RTL.
+            float cx = FlowRightToLeft ? frame.Right - 26f : frame.X + 26f;
             float cy = frame.Y + TitleBarHeight / 2f;
             canvas.StrokeColor = Colors.White;
             canvas.StrokeSize = 3;
-            canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
-            canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+            if (FlowRightToLeft)
+            {
+                canvas.DrawLine(cx - 9, cy - 11, cx + 4, cy);
+                canvas.DrawLine(cx + 4, cy, cx - 9, cy + 11);
+            }
+            else
+            {
+                canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
+                canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+            }
         }
         canvas.FontColor = Colors.White;
         canvas.FontSize = 28;
@@ -2104,7 +2214,9 @@ public class OpenHarmonyView
         canvas.FontSize = FontSize;
         for (int i = 0; i < TabTitles.Count; i++)
         {
-            float tabX = frame.X + i * tabWidth;
+            // Tabs run from the start edge: index 0 is the physical left tab in LTR, the right
+            // tab in RTL (matching TabIndexAt).
+            float tabX = frame.X + (FlowRightToLeft ? TabTitles.Count - 1 - i : i) * tabWidth;
             bool active = i == SelectedTab;
             if (i < TabIcons.Count && TabIcons[i] is { Length: > 0 } icon)
             {
@@ -2130,7 +2242,7 @@ public class OpenHarmonyView
     /// <summary>Tab index at the point (-1 when outside the tab bar).</summary>
     public int TabIndexAt(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         if (!IsTabbedPage || TabTitles.Count == 0)
         {
             return -1;
@@ -2141,6 +2253,11 @@ public class OpenHarmonyView
         }
         float tabWidth = frame.Width / TabTitles.Count;
         int index = (int)((x - frame.X) / tabWidth);
+        if (FlowRightToLeft)
+        {
+            // Tabs run from the start edge (see DrawTabBar): the physical rightmost slot is index 0.
+            index = TabTitles.Count - 1 - index;
+        }
         return index >= 0 && index < TabTitles.Count ? index : -1;
     }
 
@@ -2181,15 +2298,18 @@ public class OpenHarmonyView
         canvas.FillRoundedRectangle(frame.X, y, frame.Width, height, 6);
         canvas.FontColor = TextColor;
         canvas.FontSize = 26;
-        canvas.DrawString("-", frame.X, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
-        canvas.DrawString("+", frame.X + frame.Width / 2, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
+        // Decrement is the start half, increment the end half: physical left/right in LTR,
+        // swapped in RTL (matching OnTouch's half split).
+        canvas.DrawString(FlowRightToLeft ? "+" : "-", frame.X, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
+        canvas.DrawString(FlowRightToLeft ? "-" : "+", frame.X + frame.Width / 2, y, frame.Width / 2, height, HorizontalAlignment.Center, VerticalAlignment.Center);
         canvas.DrawString($"{StepperValue:0.##}", frame.X, frame.Y - 22, frame.Width, 20, HorizontalAlignment.Center, VerticalAlignment.Center);
     }
 
     private void DrawRadioButton(MauiCanvas canvas, RectF frame)
     {
         float side = Math.Min(Math.Min(frame.Width, frame.Height), 26f);
-        float cx = frame.X + side / 2 + 2;
+        // The circle is the control's leading affordance: physical left in LTR, right in RTL.
+        float cx = FlowRightToLeft ? frame.Right - side / 2 - 2 : frame.X + side / 2 + 2;
         float cy = frame.Y + frame.Height / 2f;
         canvas.StrokeColor = RadioColor;
         canvas.StrokeSize = 2;
@@ -2203,8 +2323,16 @@ public class OpenHarmonyView
         {
             canvas.FontColor = TextColor;
             canvas.FontSize = FontSize;
-            canvas.DrawString(Text, cx + side, frame.Y, frame.Width - side - 4, frame.Height,
-                HorizontalAlignment.Left, VerticalAlignment.Center);
+            if (FlowRightToLeft)
+            {
+                canvas.DrawString(Text, frame.X, frame.Y, Math.Max(1f, cx - side / 2 - frame.X), frame.Height,
+                    HorizontalAlignment.Right, VerticalAlignment.Center);
+            }
+            else
+            {
+                canvas.DrawString(Text, cx + side, frame.Y, frame.Width - side - 4, frame.Height,
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+            }
         }
     }
 
@@ -2237,12 +2365,22 @@ public class OpenHarmonyView
         canvas.FillRectangle(frame.X, frame.Y, frame.Width, NavBarHeight);
         if (CanGoBack)
         {
-            float cx = frame.X + 26f;
+            // The back chevron is the navigation bar's leading affordance: physical left in LTR,
+            // right in RTL (matching InBackRegion).
+            float cx = FlowRightToLeft ? frame.Right - 26f : frame.X + 26f;
             float cy = frame.Y + NavBarHeight / 2f;
             canvas.StrokeColor = NavBarTextColor;
             canvas.StrokeSize = 3;
-            canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
-            canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+            if (FlowRightToLeft)
+            {
+                canvas.DrawLine(cx - 9, cy - 11, cx + 4, cy);
+                canvas.DrawLine(cx + 4, cy, cx - 9, cy + 11);
+            }
+            else
+            {
+                canvas.DrawLine(cx + 9, cy - 11, cx - 4, cy);
+                canvas.DrawLine(cx - 4, cy, cx + 9, cy + 11);
+            }
         }
         canvas.FontColor = NavBarTextColor;
         canvas.FontSize = 30;
@@ -2313,7 +2451,10 @@ public class OpenHarmonyView
             canvas.Alpha = savedAlpha;
         }
         float thumbRadius = radius - 3f;
-        float thumbX = x + radius + (width - radius * 2f) * progress;
+        // Off is the start edge of the track: physical left in LTR, right in RTL.
+        float thumbX = FlowRightToLeft
+            ? x + width - radius - (width - radius * 2f) * progress
+            : x + radius + (width - radius * 2f) * progress;
         canvas.FillColor = SwitchThumbColor;
         canvas.FillCircle(thumbX, y + radius, thumbRadius);
     }
@@ -2327,11 +2468,15 @@ public class OpenHarmonyView
         double span = SliderMaximum - SliderMinimum;
         float fraction = span > 0 ? (float)Math.Clamp((SliderValue - SliderMinimum) / span, 0, 1) : 0f;
         SliderFraction = fraction;
-        float thumbX = left + (right - left) * fraction;
+        // The value grows from the start edge: left in LTR, right in RTL (matching SliderValueFromX).
+        float thumbX = FlowRightToLeft
+            ? right - (right - left) * fraction
+            : left + (right - left) * fraction;
         canvas.FillColor = SliderMaximumTrackColor;
         canvas.FillRoundedRectangle(left, cy - thickness / 2f, right - left, thickness, thickness / 2f);
         canvas.FillColor = SliderMinimumTrackColor;
-        canvas.FillRoundedRectangle(left, cy - thickness / 2f, Math.Max(0f, thumbX - left), thickness, thickness / 2f);
+        float completed = Math.Max(0f, FlowRightToLeft ? right - thumbX : thumbX - left);
+        canvas.FillRoundedRectangle(FlowRightToLeft ? thumbX : left, cy - thickness / 2f, completed, thickness, thickness / 2f);
         canvas.FillColor = SliderThumbColor;
         canvas.FillCircle(thumbX, cy, 11f);
     }
@@ -2345,8 +2490,9 @@ public class OpenHarmonyView
         float filled = (float)(frame.Width * Math.Clamp(Progress, 0, 1));
         if (filled > 0)
         {
+            // The filled portion grows from the start edge: left in LTR, right in RTL.
             canvas.FillColor = ProgressColor;
-            canvas.FillRoundedRectangle(frame.X, y, filled, thickness, thickness / 2f);
+            canvas.FillRoundedRectangle(FlowRightToLeft ? frame.Right - filled : frame.X, y, filled, thickness, thickness / 2f);
         }
     }
 
@@ -2363,17 +2509,19 @@ public class OpenHarmonyView
 
     public bool HitTest(float x, float y)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         return x >= frame.X && x <= frame.X + frame.Width && y >= frame.Y && y <= frame.Y + frame.Height;
     }
 
     /// <summary>Updates the slider value from a touch x inside the view (returns the fraction).</summary>
     public float SliderValueFromX(float x)
     {
-        RectF frame = Frame;
+        RectF frame = CanvasFrame;
         float left = frame.X + 10f;
         float right = frame.X + frame.Width - 10f;
-        float fraction = right > left ? Math.Clamp((x - left) / (right - left), 0f, 1f) : 0f;
+        float physical = right > left ? Math.Clamp((x - left) / (right - left), 0f, 1f) : 0f;
+        // The physical fraction runs left-to-right; an RTL slider's value grows right-to-left.
+        float fraction = FlowRightToLeft ? 1f - physical : physical;
         SliderFraction = fraction;
         return fraction;
     }
@@ -2433,7 +2581,10 @@ public class OpenHarmonyView
                 Pressed = false;
                 if (HitTest(x, y))
                 {
-                    bool increment = x >= Frame.X + Frame.Width / 2;
+                    // Decrement is the start half: left in LTR, right in RTL (matching DrawStepper).
+                    bool increment = FlowRightToLeft
+                        ? x < Frame.X + Frame.Width / 2
+                        : x >= Frame.X + Frame.Width / 2;
                     StepperStep?.Invoke(increment);
                 }
                 return true;

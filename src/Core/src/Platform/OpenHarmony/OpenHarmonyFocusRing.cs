@@ -36,7 +36,7 @@ internal static class OpenHarmonyFocusRing
         {
             return;
         }
-        RectF frame = view.Frame;
+        RectF frame = view.CanvasFrame;
         if (frame.Width <= Thickness * 2f || frame.Height <= Thickness * 2f)
         {
             return;

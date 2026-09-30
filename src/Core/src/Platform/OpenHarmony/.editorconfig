@@ -1,0 +1,28 @@
+# The OpenHarmony platform slice is fork-authored code carried on the MAUI tree.
+# MAUI's folder-scoped analyzer policy (the root .editorconfig and
+# src/Core/src/.editorconfig) elevates several performance CA rules to error for every
+# .cs file under src/Core/src; those settings describe the upstream sources, not this
+# slice. The slice keeps the diagnostics visible (suggestion) and is gated by the
+# cross-repo checks instead: the interaction CI job promotes IL2026/IL3050 to errors
+# over the standalone slice vehicle, and the interaction/pixel/host-export suites
+# compile and exercise these sources.
+[*.cs]
+dotnet_diagnostic.CA1307.severity = suggestion
+dotnet_diagnostic.CA1309.severity = suggestion
+dotnet_diagnostic.CA1311.severity = suggestion
+dotnet_diagnostic.CA1416.severity = suggestion
+dotnet_diagnostic.CA1507.severity = suggestion
+dotnet_diagnostic.CA1805.severity = suggestion
+dotnet_diagnostic.CA1806.severity = suggestion
+dotnet_diagnostic.CA1815.severity = suggestion
+dotnet_diagnostic.CA1822.severity = suggestion
+dotnet_diagnostic.CA1825.severity = suggestion
+dotnet_diagnostic.CA1834.severity = suggestion
+dotnet_diagnostic.CA1845.severity = suggestion
+dotnet_diagnostic.CA1846.severity = suggestion
+dotnet_diagnostic.CA1847.severity = suggestion
+dotnet_diagnostic.CA1859.severity = suggestion
+dotnet_diagnostic.CA1860.severity = suggestion
+dotnet_diagnostic.CA1864.severity = suggestion
+dotnet_diagnostic.CA1865.severity = suggestion
+dotnet_diagnostic.CA2249.severity = suggestion

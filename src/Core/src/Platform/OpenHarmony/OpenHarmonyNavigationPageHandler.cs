@@ -27,6 +27,36 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         return view;
     }
 
+    /// <summary>
+    /// Arranges the current page below the navigation bar. A parent container handler
+    /// (FlyoutPage/TabbedPage ArrangeContent, a tab switch) arranges the navigation page
+    /// through IView.Arrange, which lands here; without this descent the current page's
+    /// subtree never gets a frame and draws nothing (the Home tab black-screen defect).
+    /// The page-aware walks arrange the current page themselves and call back through
+    /// IView.Arrange for the container, which the arrange marker suppresses.
+    /// </summary>
+    public override void PlatformArrange(Rect frame)
+    {
+        base.PlatformArrange(frame);
+        if (VirtualView is not IView navigationPage)
+        {
+            return;
+        }
+        if (OpenHarmonyContentArrange.IsArranging(navigationPage))
+        {
+            return;
+        }
+        Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
+        if (!OpenHarmonySafeArea.IsEmpty(insets) &&
+            OpenHarmonyBridge.Surface is { Width: > 0, Height: > 0 } surface)
+        {
+            OpenHarmonySafeAreaArrange.Arrange(navigationPage, frame,
+                new Rect(0, 0, surface.Width, surface.Height), insets);
+            return;
+        }
+        OpenHarmonyContentArrange.Arrange(navigationPage, frame);
+    }
+
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);

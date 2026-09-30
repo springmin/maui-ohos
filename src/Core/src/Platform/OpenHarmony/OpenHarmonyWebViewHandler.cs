@@ -6,6 +6,8 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -34,6 +36,22 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     /// <summary>Longest URL a status line may carry (B7).</summary>
     internal const int MaxLoggedUrlLength = 2048;
+
+    /// <summary>
+    /// Origin a Blazor WebAssembly site registered through <see cref="RegisterWasmSite"/> is
+    /// served from. It is deliberately not the BlazorWebView app origin
+    /// (<c>https://0.0.0.0/</c>): a WASM site is a self-contained static site with its own
+    /// bootstrap (<c>_framework/blazor.webassembly*.js</c> plus <c>dotnet.js</c> /
+    /// <c>dotnet.native.wasm</c>), so the shell must not inject the Blazor Hybrid bootstrap
+    /// into it. The shell intercepts this origin only while a site is registered.
+    /// </summary>
+    public const string WasmSiteOrigin = "https://blazorwasm.local/";
+
+    /// <summary>
+    /// Default payload directory a staged Blazor WebAssembly site lives in (the pack target
+    /// <c>_OpenHarmonyStageWasmSite</c> stages <c>OpenHarmonyWasmSiteDir</c> there).
+    /// </summary>
+    public const string WasmSiteRoot = "wasmsite";
 
     /// <summary>How long an approval stays valid for its one matching reload.</summary>
     private static readonly TimeSpan s_navApprovalWindow = TimeSpan.FromSeconds(10);
@@ -923,6 +941,52 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         }
     }
 
+    /// <summary>
+    /// Registers a Blazor WebAssembly site root with the ArkTS shell (the "blazor" web command
+    /// with mode "wasm"): requests on <see cref="WasmSiteOrigin"/> are then served from
+    /// <c>&lt;AppDir&gt;/&lt;contentRoot&gt;</c> with the normal payload MIME types. The pack
+    /// target <c>_OpenHarmonyStageWasmSite</c> (property <c>OpenHarmonyWasmSiteDir</c>) stages a
+    /// published <c>wwwroot</c> into the payload's <see cref="WasmSiteRoot"/> directory, so an
+    /// app hosts a WASM site by registering that root once and pointing a WebView at
+    /// <see cref="WasmSiteOrigin"/>; the site's own bootstrap boots the runtime (no Blazor
+    /// Hybrid bootstrap is injected). A registration is not a load: the WebView's Source drives
+    /// the load, so the page is fetched exactly once.
+    /// </summary>
+    /// <param name="contentRoot">
+    /// Payload-relative site root (default <see cref="WasmSiteRoot"/>). Rooted paths, '\'
+    /// separators and "." / ".." segments are refused, exactly like the BlazorWebView
+    /// registration, so the shell can never be pointed outside the payload.
+    /// </param>
+    /// <returns>
+    /// True when the registration reached the shell bridge; false without an app directory
+    /// (off-device) or for an unsafe root, leaving no arming behind.
+    /// </returns>
+    public static bool RegisterWasmSite(string? contentRoot = null)
+    {
+        string root = string.IsNullOrWhiteSpace(contentRoot) ? WasmSiteRoot : contentRoot.Trim();
+        if (root.Length == 0 || root[0] is '/' or '\\')
+        {
+            // The shell's own layout guard refuses these too (isSafeLayoutPart); fail here so
+            // a rejected root never arms a half-registration.
+            OpenHarmonyBridge.WriteStatus("[maui] wasm site registration rejected: unsafe root");
+            return false;
+        }
+        OpenHarmonyAppContext? context = OpenHarmonyBridge.Context;
+        string appDir = context?.AppDir?.TrimEnd('/') ?? string.Empty;
+        if (appDir.Length == 0 || OpenHarmonyBlazorWebView.ResolveContentRoot(appDir, root) is null)
+        {
+            return false;
+        }
+        OpenHarmonyBridge.WebCommand("blazor", JsonSerializer.Serialize(new WasmSiteConfig
+        {
+            Origin = WasmSiteOrigin,
+            Base = appDir,
+            ContentRoot = root,
+            HostFile = OpenHarmonyBlazorWebView.DefaultHostFile,
+        }, OpenHarmonySliceJsonContext.Default.WasmSiteConfig));
+        return true;
+    }
+
     public static void MapSource(OpenHarmonyWebViewHandler handler, IWebView webView)
     {
         // A source load is a fresh navigation, not a history move.
@@ -1005,5 +1069,30 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Payload descriptor the shell consumes from the "blazor" web command for a Blazor
+    /// WebAssembly site (the same shape the BlazorWebView handler sends, plus the explicit
+    /// mode). The shell parses it with the same reader and only skips the Blazor Hybrid
+    /// bootstrap when <c>mode</c> is "wasm".
+    /// </summary>
+    internal sealed class WasmSiteConfig
+    {
+        [JsonPropertyName("origin")]
+        public string Origin { get; init; } = string.Empty;
+
+        [JsonPropertyName("base")]
+        public string Base { get; init; } = string.Empty;
+
+        [JsonPropertyName("root")]
+        public string ContentRoot { get; init; } = string.Empty;
+
+        [JsonPropertyName("defaultFile")]
+        public string HostFile { get; init; } = string.Empty;
+
+        /// <summary>Registration mode; "wasm" keeps the hybrid bootstrap out of the page.</summary>
+        [JsonPropertyName("mode")]
+        public string Mode { get; init; } = "wasm";
     }
 }

@@ -446,3 +446,43 @@ same instance DI resolves; `t18 map uri` pins the three URI shapes (plain, named
 placemark with a non-`None` navigation mode left in place); `t18 map degraded off-device` pins
 that both `OpenAsync` overloads complete and both `TryOpenAsync` overloads answer false without
 throwing when no host library/shell sink exists.
+
+## Uneven TableView rows (`OpenHarmonyItemListMaterializer`, `OpenHarmonyTableViewHandler`)
+
+`TableView.HasUnevenRows` used to be an honest degradation: the shared virtualized list pipeline
+modelled one slot height (`TableView.RowHeight`) for every row, the handler mapped the switch to
+a one-time status note, and `Cell.Height` was ignored. The materializer now has an opt-in
+variable-height mode the TableView handler drives:
+
+* **Contract.** `HasUnevenRows = true` measures every row: a positive `Cell.Height` is the row's
+  height (the `Cell.RenderHeight` precedence), otherwise the row keeps its measured content
+  height. `RowHeight` (when positive) only seeds the estimate for rows that have not been
+  measured yet - Android's adapter ignores `RowHeight` for uneven rows and iOS falls back to
+  `UITableView.AutomaticDimension` with a 44pt estimate, which is the default here. Turning the
+  switch off restores the one-`RowHeight` slot model; both mapper paths rewrite the materializer
+  metrics and reset the window.
+* **Slots.** The variable mode keeps the existing slot projection (collapse/expand, span-1 only)
+  and maintains a per-row measured-height dictionary plus lazily rebuilt visible-slot prefix
+  offsets; unmeasured rows are placed with the estimate, so the scroll extent and the row
+  positions converge as rows enter the window. The window is walked over the offsets (margin on
+  both ends) and then extended until a measured row covers the viewport bottom, so a
+  taller-than-estimated row cannot leave a blank tail. `ScrollTo`, the update anchors and the
+  last-visible-item walk use the same per-row heights. The mode is TableView-only: the
+  CollectionView grid and the other list controls keep the uniform slot maths.
+* **Limits (recorded).** A live `Cell.Height` change is applied on the next arrange/window
+  update; `Cell.ForceUpdateSize` is not wired (upstream gates it on `Parent as TableView`, which
+  is not a sectioned cell's parent in this MAUI version). The scroll extent of the not-yet-
+  measured tail is an estimate, like every virtualizing platform, and the estimate-based window
+  can keep rows that a later measurement moves out of view until the next update.
+
+Pinned by five interaction checks in `ohos-workload/test/maui-platform-verify` (513 -> 518,
+floor 493 -> 498): `tableview uneven heights` (a 120-high ViewCell row and a `Cell.Height = 90`
+row measure at those heights beside a shorter text row; the old pipeline clipped every row to
+one slot, so the check fails pre-change), `tableview uneven stack` (the rows stack on each
+other's measured height plus the row spacing and the content height ends at the last row's
+bottom), `tableview uneven scroll` (a 25-row table materializes a window, not all rows, and a
+jump to the content end reaches the last row whose measured bottom is the reported content
+height), `tableview uneven toggle` (HasUnevenRows off restores the 52+6 slot pitch and the
+`Cell.Height` row measures again when the switch returns), and `tableview uneven pins` (the
+handler/materializer contract; the old "not represented" note is gone). The pixel suite is
+unchanged and green.

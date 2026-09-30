@@ -24,6 +24,16 @@ public sealed class OpenHarmonyMauiAppHost
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
+        // NativeAOT launch ordering: the host dlopens the application library to probe its
+        // openharmony_app_main export *before* it publishes the launch context (setenv
+        // OHOS_HOST_APP_CONTEXT / the app handle), so the bridge's module initializer may have
+        // cached an empty context. Re-attach here, now that the app thread runs with the launch
+        // context published: Attach refreshes the snapshot and is idempotent (a no-op on the JIT
+        // route, whose context is already current). Without this, OpenHarmonyBridge.Context
+        // (AppDir/FilesDir) stays empty in AOT apps and every registration that validates
+        // against it (a BlazorWebView/HybridWebView content root, a WASM site, WriteStatus)
+        // degrades silently.
+        OpenHarmonyBridge.Attach();
         _context = new MauiContext(services);
         // Deep links: subscribe to the shell's activation transport (cold-start want and
         // onNewWant) before any window exists, so an activation that arrives early is queued

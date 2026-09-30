@@ -414,6 +414,55 @@ requires both walks to follow `CurrentItem`/`CurrentPage`. The pixel suite
 `shell current page draws under the shell` (red) and `shell item switch repaints the new page`
 (lime); the pre-fix slice fails the two shell checks against the canvas fill.
 
+## Media playback (`OpenHarmonyMediaPlayer`, T20)
+
+MAUI has no media-player abstraction; the MediaElement-shaped consumer is the CommunityToolkit.Maui
+control, so this is a platform extension like the Bluetooth GATT surface. It rides the established
+host/ArkTS request-response bridge and owns one process-wide AVPlayer in the shell sink:
+
+  managed call -> P/Invoke ohos_host_media_request(requestId, op, payload) -> the shell's
+    registerMediaSink handler lazily imports @kit.MediaKit and drives one AVPlayer ->
+    host.notifyMediaResult(requestId, code, payload) -> the awaiting Task; unsolicited player
+    events (stateChange/timeUpdate/durationUpdate/error) are pushed through a separate export
+    (ohos_host_media_register_event) so an older host library still serves the request half.
+
+Ops: 0 load (payload `kind\tlocation`; kind 0 url / 1 rawfile / 2 sandbox file path), 1 play,
+2 pause, 3 stop, 4 seek (milliseconds), 5 release (stop + release + close the descriptor),
+6 status (answers `state\tpositionMs\tdurationMs`). The load answer waits for the SDK's
+'prepared' transition; play/pause/stop/seek answer when the SDK call resolves. Event payloads are
+`state\t<name>[\t<reason>]`, `time\t<ms>`, `duration\t<ms>` and `error\t<code>\t<message>`;
+the state names are the AVPlayer states the SDK documents and map onto
+OpenHarmonyMediaPlaybackState. Result codes: 0 success, -1 unavailable (no host library, no sink,
+no Media Kit), -2 a transient kit failure; -1 flips IsSupported false and keeps it there.
+
+Source descriptors: an http/https/file URL goes to avPlayer.url; a rawfile name resolves through
+the ability context's resourceManager.getRawFd into avPlayer.fdSrc and is closed on release; a
+sandbox path is opened by the shell (fs.openSync READ_ONLY) and closed on release. A load replaces
+the previous source (release first). Requests are serialized through a promise chain, so one load
+cannot race another.
+
+Degradation: the Media Kit import is lazy and cached. A runtime that resolves @kit.MediaKit
+without the media namespace (or without createAVPlayer) is treated as unavailable and answers -1,
+not -2: the local OpenHarmony desktop image (7.0.0.111 system) declares
+SystemCapability.Multimedia.Media.Core yet resolves the kit without the player API, so on-device
+playback there is blocked at the platform layer while the sink itself stays healthy (the shell
+self-test still answers status op 6). On a runtime with the player API the same sink drives real
+playback; that path is verified off-device by the interaction suite and was exercised on device up
+to the kit boundary.
+
+Limits (recorded once): one player per process (a multi-player extension would add a player id to
+the payloads); volume/speed/loop have no mapping yet (the MediaElement handler can add ops);
+position ticks follow the SDK's timeUpdate cadence. The toolkit control itself is not part of this
+slice - a handler maps its IMediaElement surface onto this transport.
+
+Pinned by four interaction checks in ohos-workload/test/maui-platform-verify: the three-pack shell
+pins (sink registration, lazy import, AVPlayer calls, event records) plus the host exports/NAPI
+module-table/source contract, the off-device degradation of every call (Unavailable, invalid
+source/seek fail fast, IsSupported false), the native-shaped event parser (state/time/duration/
+error, malformed payloads ignored) and the op-6 status parser. On device the sink is exercised by
+the page's media self-test line (`media self-test media-kit=missing media-core-capability=true`)
+and, when the kit is present, by the app probe started from an `app://media/probe` activation.
+
 ## Map launching (`OpenHarmonyMapLauncher`, `IMap`)
 
 Essentials `Map` (`Microsoft.Maui.ApplicationModel.IMap`) was the last missing Essentials surface

@@ -341,12 +341,27 @@ text itself, so the scale is applied in managed code at the one boundary every t
   carry the same generation (or key on the scaled size), so a scale change can never serve
   metrics computed for the previous size.
 * **Limits (recorded).** The scale is a single process-wide value (the platform's own font size
-  setting is process-wide); the slice does not subscribe to the system configuration change
-  itself - the app host / shell half that reads `Configuration.fontSizeScale` and calls
-  `SetSystemFontScale` plus a re-arrange is still to be wired (the public setter is the seam).
-  Character spacing, paddings, row heights and other pixel geometry stay physical; only text
-  metrics scale. The diagnostics overlay (a debug tool that draws type names) keeps its fixed
-  18 px labels.
+  setting is process-wide). Character spacing, paddings, row heights and other pixel geometry stay
+  physical; only text metrics scale. The diagnostics overlay (a debug tool that draws type names)
+  keeps its fixed 18 px labels.
+* **Source wiring (T21 leftovers).** The ArkTS shell reads `Configuration.fontSizeScale` when the
+  ability is created and on every `onConfigurationUpdated`, and forwards it with
+  `host.notifyFontScale(scale)`; the native host normalizes invalid values to 1, remembers the last
+  value and replays it to a listener that registers later (`ohos_host_font_scale_set`).
+  `OpenHarmonySystemFontScale` registers that listener from a `[ModuleInitializer]` (guarded: no
+  host library is a no-op), publishes through the public setter and raises `Changed` only when the
+  effective value moved; the app host re-arranges at the last surface size and marks the surface
+  dirty, so the change re-measures every handler (through the generation-keyed caches) and repaints,
+  exactly like a platform configuration change.
+
+Pinned by three interaction checks in `ohos-workload/test/maui-platform-verify` (528 -> 531, floor
+508 -> 511): `t21 font scale shell pins` requires both abilities of the three preview packs to
+import `Configuration`, read `fontSizeScale` at create and in `onConfigurationUpdated` and forward
+it through `host.notifyFontScale` (byte-identical across the packs); `t21 font scale source
+contract` pins the managed listener entry point (`ohos_host_font_scale_set`), the NAPI notify with
+its late-listener replay in the host and the export list entry; `t21 font scale apply` drives the
+managed path off-device (a reported change publishes to the font manager and re-arranges exactly
+once, the same setting again is a no-op, and an invalid value resets to 1 and re-arranges).
 
 ## CarouselView group slides (`OpenHarmonyCarouselView`, `OpenHarmonyCarouselViewHandler`)
 

@@ -1615,3 +1615,85 @@ static readonly Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.Mapper -> Micr
 static readonly Microsoft.Maui.Platform.OpenHarmonyWindowHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IWindow!, Microsoft.Maui.Platform.OpenHarmonyWindowHandler!>!
 virtual Microsoft.Maui.Platform.OpenHarmonyView.Draw(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 virtual Microsoft.Maui.Platform.OpenHarmonyWindowOverlay.Draw(Microsoft.Maui.Graphics.ICanvas! canvas, Microsoft.Maui.Graphics.RectF dirtyRect) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaDurationChangedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaDurationChangedEventArgs.Duration.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs.Code.get -> int
+Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs.Message.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Completed = 6 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Error = 9 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Idle = 1 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Initialized = 2 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Paused = 5 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Playing = 4 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Prepared = 3 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Released = 8 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Stopped = 7 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Unknown = 0 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlayer
+Microsoft.Maui.Platform.OpenHarmonyMediaPositionChangedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaPositionChangedEventArgs.Position.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaResult
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Deconstruct(out Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, out string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Equals(Microsoft.Maui.Platform.OpenHarmonyMediaResult other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.IsSuccess.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Message.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Message.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.OpenHarmonyMediaResult() -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.OpenHarmonyMediaResult(Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Status.get -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Status.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaSource
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.Equals(Microsoft.Maui.Platform.OpenHarmonyMediaSource other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromFile(string! path) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromRawFile(string! name) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromUri(System.Uri! uri) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromUrl(string! url) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.Kind.get -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.Location.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.OpenHarmonyMediaSource() -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind.File = 2 -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind.RawFile = 1 -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind.Url = 0 -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs.Reason.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs.State.get -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus.Failed = -2 -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Deconstruct(out Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, out Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState State, out System.TimeSpan Position, out System.TimeSpan Duration, out string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Duration.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Duration.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Equals(Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.IsSuccess.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Message.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Message.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.OpenHarmonyMediaStatusResult() -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.OpenHarmonyMediaStatusResult(Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState State, System.TimeSpan Position, System.TimeSpan Duration, string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Position.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Position.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.State.get -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.State.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Status.get -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Status.init -> void
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.ApplyStatusPayload(string? payload) -> void
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.Duration.get -> System.TimeSpan
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.DurationChanged -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMediaDurationChangedEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.Failed -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.LoadAsync(Microsoft.Maui.Platform.OpenHarmonyMediaSource source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaResult>!
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.ParseState(string? state) -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.PauseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaResult>!
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.PlayAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaResult>!
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.Position.get -> System.TimeSpan
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.PositionChanged -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMediaPositionChangedEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.ReleaseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaResult>!
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.SeekAsync(System.TimeSpan position, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaResult>!
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.State.get -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.StateChanged -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.StatusAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult>!
+static Microsoft.Maui.Platform.OpenHarmonyMediaPlayer.StopAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMediaResult>!

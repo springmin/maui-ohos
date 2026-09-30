@@ -1,0 +1,3 @@
+<Window x:Class="MauiApp1.NewWindow1"
+             Title="NewWindow1">
+</Window>

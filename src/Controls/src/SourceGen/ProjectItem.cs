@@ -1,0 +1,139 @@
+using System;
+
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.Maui.Controls.Xaml;
+
+namespace Microsoft.Maui.Controls.SourceGen;
+
+record ProjectItem(AdditionalText AdditionalText, AnalyzerConfigOptions Options)
+{
+	public string Configuration
+		=> Options.GetValueOrDefault("build_property.Configuration", "Debug");
+
+	public bool EnableLineInfo
+	{
+		get
+		{
+			if (Options.IsEnabled("build_metadata.additionalfiles.LineInfo"))
+				return true;
+			if (Options.IsDisabled("build_metadata.additionalfiles.LineInfo"))
+				return false;
+			if (Options.IsEnabled("build_property.MauiXamlLineInfo"))
+				return true;
+			if (Options.IsDisabled("build_property.MauiXamlLineInfo"))
+				return false;
+			//return Configuration.Equals("Debug", StringComparison.OrdinalIgnoreCase);
+			return false; //default to False due to roslyn issues with large pdbs https://github.com/dotnet/roslyn/issues/80952
+		}
+	}
+
+	public bool EnableDiagnostics
+	{
+		get
+		{
+			if (Options.IsTrue("build_metadata.additionalfiles.EnableDiagnostics"))
+				return true;
+			if (Options.IsFalse("build_metadata.additionalfiles.EnableDiagnostics"))
+				return false;
+			if (Options.IsTrue("build_property.EnableMauiXamlDiagnostics"))
+				return true;
+			if (Options.IsFalse("build_property.EnableMauiXamlDiagnostics"))
+				return false;
+			return !Configuration.Equals("Release", StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
+	/// <summary>
+	/// Whether to emit <c>XamlComponentRegistry.Register()</c> calls and the
+	/// <c>XamlIncrementalHotReloadHandler.Track()</c> call into the generated
+	/// <c>InitializeComponent()</c> partial.  Required for incremental XAML Hot Reload.
+	/// Defaults to <see langword="false"/> until the feature is complete.
+	/// </summary>
+	public bool EnableIncrementalHotReload
+	{
+		get
+		{
+			if (Options.IsTrue("build_metadata.additionalfiles.EnableIncrementalHotReload"))
+				return true;
+			if (Options.IsFalse("build_metadata.additionalfiles.EnableIncrementalHotReload"))
+				return false;
+			if (Options.IsTrue("build_property.EnableMauiIncrementalHotReload"))
+				return true;
+			if (Options.IsFalse("build_property.EnableMauiIncrementalHotReload"))
+				return false;
+			return false; // safe default; the MAUI SDK targets always pass an explicit value (Debug=true, otherwise false)
+		}
+	}
+
+	public string Kind
+		=> Options.GetValueOrDefault("build_metadata.additionalfiles.GenKind", "None");
+
+	public XamlInflator Inflator
+	{
+		get
+		{
+			var xamlinflator = 0;
+			var parts = Options.GetValueOrDefault("build_metadata.additionalfiles.Inflator", "").Split(',');
+			for (int i = 0; i < parts.Length; i++)
+			{
+				var trimmed = parts[i].Trim();
+				if (Enum.TryParse<XamlInflator>(trimmed, true, out var xinfl))
+					xamlinflator |= (int)xinfl;
+			}
+			return (XamlInflator)xamlinflator;
+		}
+	}
+
+	public string? ManifestResourceName
+		=> Options.GetValueOrNull("build_metadata.additionalfiles.ManifestResourceName");
+
+	public string NoWarn
+		=> Options.GetValueOrNull("build_metadata.additionalfiles.NoWarn") ?? Options.GetValueOrNull("build_property.MauiXamlNoWarn") ?? "";
+
+	/// <summary>
+	/// When true, resources in ResourceDictionary are created lazily via factory functions.
+	/// This enables x:Shared support and faster inflation time.
+	/// </summary>
+	public bool LazyRD
+	{
+		get
+		{
+			// Per-file metadata takes precedence
+			if (Options.IsTrue("build_metadata.additionalfiles.LazyRD"))
+				return true;
+			if (Options.IsFalse("build_metadata.additionalfiles.LazyRD"))
+				return false;
+			// Global build property
+			if (Options.IsTrue("build_property.MauiXamlLazyRD"))
+				return true;
+			if (Options.IsFalse("build_property.MauiXamlLazyRD"))
+				return false;
+			// Default to true for lazy resources (perf improvement)
+			return true;
+		}
+	}
+
+	public string? RelativePath
+		=> Options.GetValueOrNull("build_metadata.additionalfiles.RelativePath");
+
+	/// <summary>
+	/// Stable, project-unique key for incremental hot reload state. Uses the XAML file's absolute
+	/// path (unique per project on disk, constant across incremental builds) so the process-global
+	/// <c>XamlHotReloadState</c> — hosted in a long-lived VBCSCompiler shared across many builds —
+	/// can never leak a patch chain between two projects that merely share an assembly name and a
+	/// file name (e.g. two apps both named "MauiApp.1" with a "MainPage.xaml"). Falls back to the
+	/// relative path when no absolute path is available (e.g. some unit-test harnesses).
+	/// </summary>
+	public string HotReloadStateKey
+		=> string.IsNullOrEmpty(AdditionalText.Path) ? (RelativePath ?? string.Empty) : AdditionalText.Path;
+
+	public string? TargetFramework
+		=> Options.GetValueOrNull("build_property.targetFramework");
+
+	public string? TargetPath
+		=> Options.GetValueOrDefault("build_metadata.additionalfiles.TargetPath", AdditionalText.Path);
+
+	public bool EnablePreviewFeatures
+		=> Options.IsTrue("build_property.EnablePreviewFeatures");
+}

@@ -1,0 +1,16 @@
+<Project>
+
+  <PropertyGroup>
+    <UsingMicrosoftMauiSdk>true</UsingMicrosoftMauiSdk>
+  </PropertyGroup>
+
+  <Import Project="Microsoft.Maui.Sdk.Before.targets" />
+
+  <Import Project="$(MicrosoftMauiSdkPlatformTargets)" Condition="'$(MicrosoftMauiSdkPlatformTargets)' != ''" />
+
+  <!-- Imported last -->
+  <PropertyGroup>
+    <AfterMicrosoftNETSdkTargets>$(AfterMicrosoftNETSdkTargets);$(MSBuildThisFileDirectory)Microsoft.Maui.Sdk.After.targets</AfterMicrosoftNETSdkTargets>
+  </PropertyGroup>
+
+</Project>

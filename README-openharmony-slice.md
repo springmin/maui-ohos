@@ -11,7 +11,7 @@ source drop `ohos-slice-1.0.1.tar.gz` on the `ohos-slice-1.0.1` release.
 | Branch | `feature/openharmony` (tip of the slice work) |
 | Directory | `src/Core/src/Platform/OpenHarmony/` — 107 `.cs` files + `README.md` + standalone `Microsoft.Maui.Platform.OpenHarmony.csproj` |
 | Tag / asset | `ohos-slice-1.0.1` → `ohos-slice-1.0.1.tar.gz` + `.sha256` |
-| Standalone project | plain `net11.0`; references `Microsoft.Maui.*` 11.0.0-rc.1.26451.6 and the workload bridge DLLs `Microsoft.OpenHarmony.Hosting` / `Microsoft.OpenHarmony.Maui.Graphics` |
+| Standalone project | plain `net11.0`; references `Microsoft.Maui.*` 11.0.0-rc.2.26478.12 and the workload bridge DLLs `Microsoft.OpenHarmony.Hosting` / `Microsoft.OpenHarmony.Maui.Graphics` |
 
 Clone the slice branch (the default branch will not have it):
 
@@ -55,8 +55,8 @@ Point the project at the slice directory and compile the files in:
   <DefineConstants>$(DefineConstants);OPENHARMONY_BLAZOR_WEBVIEW</DefineConstants>
 </PropertyGroup>
 <ItemGroup>
-  <PackageReference Include="Microsoft.Maui.Controls" Version="11.0.0-rc.1.26451.6" />
-  <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.1.26451.6" />
+  <PackageReference Include="Microsoft.Maui.Controls" Version="11.0.0-rc.2.26478.12" />
+  <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="11.0.0-rc.2.26478.12" />
   <Reference Include="Microsoft.OpenHarmony.Hosting">
     <HintPath>.../Microsoft.OpenHarmony.Hosting.dll</HintPath><Private>false</Private>
   </Reference>

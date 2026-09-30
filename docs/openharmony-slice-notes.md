@@ -21,7 +21,7 @@ it, wired without touching the host:
 
   * UseOpenHarmony registers OpenHarmonyMauiApplication plus an IMauiInitializeService shim.
     MauiAppBuilder.Build() runs every IMauiInitializeService (the documented contract, verified
-    against Microsoft.Maui.Core 11.0.0-rc.1.26451.6), so the singleton is created and
+    against Microsoft.Maui.Core 11.0.0-rc.2.26478.12), so the singleton is created and
     IPlatformApplication.Current is set before an app calls OpenHarmonyMauiAppHost.Run.
   * Services is the provider MauiAppBuilder.Build() handed the initializer. In rc.1 Build runs
     initializers inside a service scope (verified: ServiceProviderEngineScope), so this is that
@@ -144,7 +144,7 @@ Malformed event payloads are ignored; a value event whose base64 does not decode
 
 Keyboard accelerators for the OpenHarmony slice's hardware-key surface.
 
-MAUI rc.1 surface (verified against Microsoft.Maui.Controls 11.0.0-rc.1.26451.6):
+MAUI rc.1 surface (verified against Microsoft.Maui.Controls 11.0.0-rc.2.26478.12):
   * Microsoft.Maui.Controls.KeyboardAccelerator (BindableObject: Key string, Modifiers
     KeyboardAcceleratorModifiers; IKeyboardAccelerator) and the public flag enum
     Microsoft.Maui.KeyboardAcceleratorModifiers (None/Shift/Ctrl/Alt/Cmd/Windows);

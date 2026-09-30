@@ -1,0 +1,5 @@
+<Project>
+
+  <Import Project="$(MauiSrcDirectory)Maui.InTree.targets" />
+
+</Project>

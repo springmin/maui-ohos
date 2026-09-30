@@ -1,7 +1,7 @@
 # Microsoft.Maui.Platform.OpenHarmony (platform slice, start)
 
 Platform services for MAUI on OpenHarmony. The project builds standalone (`net11.0`) against
-`Microsoft.Maui.Core`/`Microsoft.Maui.Graphics` (11.0.0-rc.1.26451.6) and the platform bridge
+`Microsoft.Maui.Core`/`Microsoft.Maui.Graphics` (11.0.0-rc.2.26478.12) and the platform bridge
 that ships in the `microsoft.net.sdk.openharmony` workload
 (`Microsoft.OpenHarmony.Hosting`).
 

@@ -12,7 +12,7 @@
 // sink (unfocus) arrange between them.
 //
 // MAUI rc.1 has no key contract to surface: Microsoft.Maui and Microsoft.Maui.Controls
-// 11.0.0-rc.1.26451.6 expose no IKeyListener and no KeyDown/KeyUp members at all. The slice
+// 11.0.0-rc.2.26478.12 expose no IKeyListener and no KeyDown/KeyUp members at all. The slice
 // therefore keeps the surface internal - KeyEvent (raw), KeyDown/KeyUp (split), the
 // EventsReceived/LastKeyCode/LastEventType observables and Dispatch() as the testable entry
 // point, plus a one-time status line - and documents what a real public surface would need, in

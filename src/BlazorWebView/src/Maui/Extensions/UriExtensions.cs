@@ -1,0 +1,27 @@
+﻿using System;
+using System.IO;
+
+namespace Microsoft.AspNetCore.Components.WebView.Maui;
+
+internal static class UriExtensions
+{
+	internal static bool IsBaseOfPage(this Uri baseUri, string? uriString)
+	{
+		if (string.IsNullOrWhiteSpace(uriString))
+		{
+			return false;
+		}
+
+		if (!Uri.TryCreate(uriString, UriKind.Absolute, out var uri))
+		{
+			return false;
+		}
+
+		if (Path.HasExtension(uri.GetComponents(UriComponents.Path, UriFormat.Unescaped)))
+		{
+			return false;
+		}
+
+		return baseUri.IsBaseOf(uri);
+	}
+}

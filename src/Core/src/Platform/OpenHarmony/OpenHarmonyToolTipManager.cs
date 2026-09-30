@@ -1,6 +1,6 @@
 // Desktop-style tooltips for the OpenHarmony compositor.
 //
-// MAUI rc.1 surface (verified against Microsoft.Maui.Controls 11.0.0-rc.1.26451.6):
+// MAUI rc.1 surface (verified against Microsoft.Maui.Controls 11.0.0-rc.2.26478.12):
 //   * Microsoft.Maui.IToolTipElement.ToolTip (Microsoft.Maui.ToolTip, Content object) - Element
 //     implements it over the attached property below;
 //   * Microsoft.Maui.Controls.ToolTipProperties.TextProperty (object) + GetText/SetText;

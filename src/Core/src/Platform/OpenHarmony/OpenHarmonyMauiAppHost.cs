@@ -21,6 +21,8 @@ public sealed class OpenHarmonyMauiAppHost
     // The platform Create event can be delivered before Run creates the window; it is then
     // completed (Created, then Activated) when the window exists.
     private bool _createReceived;
+    // T21: font-scale reports that re-arranged the tree (the interaction-suite seam).
+    internal int SystemFontScaleRelayouts { get; private set; }
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
@@ -70,6 +72,11 @@ public sealed class OpenHarmonyMauiAppHost
         };
 
         OpenHarmonyBridge.RedrawRequested += () => _dirty = true;
+
+        // T21: the shell reports the system font scale (ArkTS Configuration.fontSizeScale ->
+        // host.notifyFontScale -> this listener). A changed value re-measures/re-arranges the
+        // whole tree and repaints; the scale alone cannot relayout.
+        OpenHarmonySystemFontScale.Changed += OnSystemFontScaleChanged;
 
         OpenHarmonyBridge.Frame += _ =>
         {
@@ -339,6 +346,22 @@ public sealed class OpenHarmonyMauiAppHost
             return false;
         }
         return _renderer.Render(content, _width, _height);
+    }
+
+    /// <summary>
+    /// Re-arranges and repaints after the system font scale changed (T21). The re-arrange walks
+    /// the tree again, so every handler re-measures through the generation-keyed text caches; the
+    /// frame loop paints the dirty surface (the surface may be gone between reports, in which
+    /// case only the dirty flag remains).
+    /// </summary>
+    private void OnSystemFontScaleChanged()
+    {
+        if (_width > 0 && _height > 0)
+        {
+            Arrange(_width, _height);
+            SystemFontScaleRelayouts++;
+        }
+        _dirty = true;
     }
 
     private bool _pinchWired;

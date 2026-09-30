@@ -15,9 +15,13 @@
 //     ArkTS section bridge (OpenHarmonyShellExtras). A rich View or a DataTemplate section is
 //     materialized as a real row of the panel (OpenHarmonyShellFlyout): Shell's own resolved
 //     FlyoutHeaderView/FlyoutFooterView is measured/arranged into the drawer and the renderer
-//     draws and hit-tests it. Shell.ItemTemplate rows are materialized the same way, bound to
-//     their ShellItem; a row's own content handles a touch first, the row -> item selection is
-//     the fallback.
+//     draws and hit-tests it. The item rows come from MAUI's canonical flyout model
+//     (IShellController.GenerateFlyoutGrouping): implicit items flatten, AsMultipleItems expands
+//     into one row per child, the current content's MenuItems append after it, and a row selects
+//     its own element when tapped. Shell.ItemTemplate materializes item rows, Shell.MenuItemTemplate
+//     menu rows, and FlyoutContent/FlyoutContentTemplate replaces the item rows with the resolved
+//     content view between the header and the footer; a row's own content handles a touch first,
+//     the row selection is the fallback.
 //   * SearchHandler: attach/detach, query, placeholder and visibility are tracked per current
 //     page (and per shell) in OpenHarmonyShellExtras and published through
 //     ohos_host_shell_search_set; the shell's notifyShellSearch edits return through the
@@ -49,6 +53,12 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             [nameof(Shell.FlyoutFooter)] = MapFlyoutSections,
             [nameof(Shell.FlyoutHeaderTemplate)] = MapFlyoutSections,
             [nameof(Shell.FlyoutFooterTemplate)] = MapFlyoutSections,
+            // T14 extras: a menu template, a FlyoutContent body and an ItemTemplate swap all
+            // re-materialize the drawer rows (as do the content/template pairs above).
+            [nameof(Shell.ItemTemplate)] = MapFlyoutSections,
+            [nameof(Shell.MenuItemTemplate)] = MapFlyoutSections,
+            [nameof(Shell.FlyoutContent)] = MapFlyoutSections,
+            [nameof(Shell.FlyoutContentTemplate)] = MapFlyoutSections,
             ["TabBarIsVisible"] = MapTabBar,
             ["SearchHandler"] = MapSearch,
         };
@@ -108,19 +118,76 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
     }
 
     /// <summary>
-    /// A tap on a compositor flyout row: header rows are not selectable, so the item index is
-    /// offset by the leading header row count and out-of-range rows just close the drawer.
+    /// A tap on a compositor flyout row. A rich row selects the element it materialized (a menu
+    /// row activates, a shell element switches the item/section/content chain); the flat text
+    /// layout keeps the index -> shell item mapping (header rows offset the index). Out-of-range
+    /// rows just close the drawer.
     /// </summary>
     private void SelectFlyoutRow(int row)
     {
         OpenHarmonyView view = PlatformView;
         view.FlyoutOpen = false;
-        int index = row - _flyoutLeadingRows;
-        if (VirtualView is { } shell && index >= 0 && index < shell.Items.Count)
+        OpenHarmonyFlyoutRow? rich = null;
+        if (view.FlyoutRows.Count > 0)
         {
-            shell.CurrentItem = shell.Items[index];
+            foreach (OpenHarmonyFlyoutRow candidate in view.FlyoutRows)
+            {
+                if (candidate.PanelIndex == row)
+                {
+                    rich = candidate;
+                    break;
+                }
+            }
+        }
+        if (rich?.Target is { } target)
+        {
+            SelectFlyoutElement(target);
+        }
+        else if (rich is null)
+        {
+            int index = row - _flyoutLeadingRows;
+            if (VirtualView is { } shell && index >= 0 && index < shell.Items.Count)
+            {
+                shell.CurrentItem = shell.Items[index];
+            }
         }
         OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
+    /// Selects a materialized flyout element: a menu item runs its own activation (Clicked/
+    /// Command, gated by IsEnabled), a ShellContent selects its section and item, a ShellSection
+    /// selects its item, a ShellItem selects itself. The ShellContent case is what makes an
+    /// AsMultipleItems row land exactly on the child the row stands for.
+    /// </summary>
+    private static void SelectFlyoutElement(object target)
+    {
+        switch (target)
+        {
+            case IMenuItemController menu:
+                menu.Activate();
+                break;
+            case ShellContent content:
+                if (content.Parent is ShellSection contentSection)
+                {
+                    contentSection.CurrentItem = content;
+                    SelectFlyoutElement(contentSection);
+                }
+                break;
+            case ShellSection section:
+                if (section.Parent is ShellItem owner)
+                {
+                    owner.CurrentItem = section;
+                    SelectFlyoutElement(owner);
+                }
+                break;
+            case ShellItem item:
+                if (item.Parent is Shell shell)
+                {
+                    shell.CurrentItem = item;
+                }
+                break;
+        }
     }
 
     protected override void ConnectHandler(OpenHarmonyView platformView)
@@ -203,6 +270,10 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             case nameof(Shell.FlyoutFooter):
             case nameof(Shell.FlyoutHeaderTemplate):
             case nameof(Shell.FlyoutFooterTemplate):
+            case nameof(Shell.ItemTemplate):
+            case nameof(Shell.MenuItemTemplate):
+            case nameof(Shell.FlyoutContent):
+            case nameof(Shell.FlyoutContentTemplate):
             case "TabBarIsVisible":
             case "SearchHandler":
             case "TitleView":

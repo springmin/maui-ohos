@@ -53,6 +53,12 @@ internal sealed class OpenHarmonyItemListMaterializer
     private double _headerHeight;
     private double _footerHeight;
     private double _emptyHeight;
+    // Variable heights (TableView.HasUnevenRows): the measured height of each data row and the
+    // prefix offsets of the visible slots. The offsets are rebuilt lazily whenever a measurement
+    // or the slot projection changed; unmeasured rows keep using EstimatedItemHeight.
+    private readonly Dictionary<int, double> _rowHeights = new();
+    private double[] _rowY = Array.Empty<double>();
+    private bool _rowYDirty = true;
 
     /// <summary>Group header factory, supplied by the list handlers.</summary>
     public Func<object?, string>? headerTextFactory;
@@ -148,6 +154,26 @@ internal sealed class OpenHarmonyItemListMaterializer
     /// </summary>
     public bool DisablePooling { get; set; }
 
+    /// <summary>
+    /// Opt-in per-row heights (TableView.HasUnevenRows): every row is arranged at its own
+    /// measured height (or its preferred height, see <see cref="preferredItemHeight"/>) instead
+    /// of one slot height for all rows. A row that has not been measured yet is placed with
+    /// <see cref="EstimatedItemHeight"/>, so the scroll content height converges as rows enter
+    /// the window. Only the span-1 lists use it; the CollectionView grid and the uniform list
+    /// controls keep the fixed/measured-first-row slot model.
+    /// </summary>
+    public bool VariableItemHeights { get; set; }
+
+    /// <summary>
+    /// Preferred height of an item (0 = none). The TableView handler reads Cell.Height: a
+    /// positive cell height wins over the measured content, the same precedence Cell.RenderHeight
+    /// reports to the platform renderers.
+    /// </summary>
+    public Func<object?, double>? preferredItemHeight;
+
+    /// <summary>Height assumed for a row that has not been measured yet (variable heights only).</summary>
+    public double EstimatedItemHeight { get; set; } = 44;
+
     /// <summary>Columns per row (CollectionView GridItemsLayout span).</summary>
     public int Span
     {
@@ -186,7 +212,21 @@ internal sealed class OpenHarmonyItemListMaterializer
     }
 
     /// <summary>Scrolled content height: header + visible item slots + footer.</summary>
-    public double TotalHeight => _headerHeight + GridRowCount * SlotHeight + _footerHeight;
+    public double TotalHeight
+    {
+        get
+        {
+            if (VariableItemHeights && Span <= 1)
+            {
+                lock (_gate)
+                {
+                    EnsureRowYLocked();
+                    return _headerHeight + (_slotRows.Count > 0 ? _rowY[_slotRows.Count] : 0) + _footerHeight;
+                }
+            }
+            return _headerHeight + GridRowCount * SlotHeight + _footerHeight;
+        }
+    }
 
     /// <summary>True when the source has no rows (EmptyView territory).</summary>
     public bool IsEmpty => _data.Count == 0;
@@ -274,6 +314,7 @@ internal sealed class OpenHarmonyItemListMaterializer
             _footerRows.Clear();
             _groups.Clear();
             _rowGroup = Array.Empty<int>();
+            _rowHeights.Clear();
             if (source is not null)
             {
                 BuildRows(source, grouped);
@@ -397,8 +438,17 @@ internal sealed class OpenHarmonyItemListMaterializer
 
     public double GetItemY(int index)
     {
-        int slot = index >= 0 && index < _rowSlot.Length ? _rowSlot[index] : index;
-        return _headerHeight + (Span <= 1 ? slot : slot / Span) * SlotHeight;
+        if (VariableItemHeights && Span <= 1)
+        {
+            lock (_gate)
+            {
+                EnsureRowYLocked();
+                int slot = index >= 0 && index < _rowSlot.Length ? _rowSlot[index] : index;
+                return _headerHeight + (slot >= 0 && slot < _slotRows.Count ? _rowY[slot] : 0);
+            }
+        }
+        int flatSlot = index >= 0 && index < _rowSlot.Length ? _rowSlot[index] : index;
+        return _headerHeight + (Span <= 1 ? flatSlot : flatSlot / Span) * SlotHeight;
     }
 
     public double GetItemX(int index, double width)
@@ -423,6 +473,8 @@ internal sealed class OpenHarmonyItemListMaterializer
         {
             _pool.Clear();
             _materialized.Clear();
+            _rowHeights.Clear();
+            _rowYDirty = true;
             ResetWindowLocked();
         }
         Update(force: true);
@@ -454,15 +506,48 @@ internal sealed class OpenHarmonyItemListMaterializer
         int gridRows = GridRowCount;
         if (frame.Height > 0 && frame.Width > 0 && gridRows > 0)
         {
-            double contentTop = _headerHeight;
-            int firstGridRow = Math.Max(0, (int)Math.Floor((offset - WindowMargin - contentTop) / SlotHeight));
-            int lastGridRow = Math.Min(gridRows - 1, (int)Math.Ceiling((offset + frame.Height + WindowMargin - contentTop) / SlotHeight));
-            if (firstGridRow <= lastGridRow)
+            if (VariableItemHeights && Span <= 1)
             {
-                int firstSlot = Math.Min(slotCount - 1, firstGridRow * Span);
-                int lastSlot = Math.Min(slotCount - 1, (lastGridRow + 1) * Span - 1);
-                first = _slotRows[firstSlot];
-                last = _slotRows[lastSlot];
+                // Variable heights: the window is walked over the per-row offsets (measured rows
+                // use their real height, unmeasured ones the estimate). The margin on both ends
+                // absorbs the estimate error until the rows are measured.
+                lock (_gate)
+                {
+                    EnsureRowYLocked();
+                    int slots = _slotRows.Count;
+                    if (slots > 0)
+                    {
+                        double topLimit = offset - WindowMargin - _headerHeight;
+                        int firstSlot = 0;
+                        while (firstSlot < slots &&
+                               _rowY[firstSlot] + RowHeightFor(_slotRows[firstSlot]) + Spacing <= topLimit)
+                        {
+                            firstSlot++;
+                        }
+                        firstSlot = Math.Min(firstSlot, slots - 1);
+                        double bottomLimit = offset + frame.Height + WindowMargin - _headerHeight;
+                        int lastSlot = firstSlot;
+                        while (lastSlot + 1 < slots && _rowY[lastSlot + 1] < bottomLimit)
+                        {
+                            lastSlot++;
+                        }
+                        first = _slotRows[firstSlot];
+                        last = _slotRows[lastSlot];
+                    }
+                }
+            }
+            else
+            {
+                double contentTop = _headerHeight;
+                int firstGridRow = Math.Max(0, (int)Math.Floor((offset - WindowMargin - contentTop) / SlotHeight));
+                int lastGridRow = Math.Min(gridRows - 1, (int)Math.Ceiling((offset + frame.Height + WindowMargin - contentTop) / SlotHeight));
+                if (firstGridRow <= lastGridRow)
+                {
+                    int firstSlot = Math.Min(slotCount - 1, firstGridRow * Span);
+                    int lastSlot = Math.Min(slotCount - 1, (lastGridRow + 1) * Span - 1);
+                    first = _slotRows[firstSlot];
+                    last = _slotRows[lastSlot];
+                }
             }
         }
         if (!force && first == _windowFirst && last == _windowLast)
@@ -496,6 +581,35 @@ internal sealed class OpenHarmonyItemListMaterializer
                 if (IsRowVisible(index) && !_materialized.ContainsKey(index))
                 {
                     _materialized[index] = Materialize(index);
+                }
+            }
+            if (VariableItemHeights && Span <= 1 && last >= 0)
+            {
+                // The window above was computed from estimates; walk forward until a measured row
+                // covers the viewport bottom (no margin - only rows that can actually be seen
+                // matter), so a taller-than-estimated row cannot leave a blank tail.
+                double viewportBottom = offset + frame.Height;
+                int guard = _data.Count + 1;
+                while (guard-- > 0)
+                {
+                    int next = NextVisibleRow(last);
+                    if (next < 0)
+                    {
+                        break;
+                    }
+                    if (GetItemY(last) + RowHeightFor(last) >= viewportBottom)
+                    {
+                        break;
+                    }
+                    last = next;
+                    if (!_materialized.ContainsKey(last))
+                    {
+                        _materialized[last] = Materialize(last);
+                    }
+                }
+                if (last > _windowLast)
+                {
+                    _windowLast = last;
                 }
             }
             if (_slotsDirty)
@@ -578,7 +692,7 @@ internal sealed class OpenHarmonyItemListMaterializer
         // The item's visual extent (the slot adds the row spacing, which should stay out of the
         // alignment maths: End means the item's bottom sits on the viewport bottom). A row that
         // is already materialized reports its measured height (group headers differ from items).
-        double extent = Math.Max(1, ItemHeight);
+        double extent = Math.Max(1, VariableItemHeights ? RowHeightFor(row) : ItemHeight);
         View? materialized;
         lock (_gate)
         {
@@ -790,6 +904,7 @@ internal sealed class OpenHarmonyItemListMaterializer
             }
         }
         _rowSlot[count] = slot;
+        _rowYDirty = true;
     }
 
     private bool IsRowVisibleCore(int row)
@@ -800,6 +915,57 @@ internal sealed class OpenHarmonyItemListMaterializer
         }
         int group = row < _rowGroup.Length ? _rowGroup[row] : -1;
         return group < 0 || !IsGroupCollapsed(_groups[group].Group);
+    }
+
+    /// <summary>
+    /// Height of a data row under the variable-height contract: its measured height, or the
+    /// estimate while the row has not been measured yet.
+    /// </summary>
+    private double RowHeightFor(int row)
+    {
+        if (!VariableItemHeights)
+        {
+            return ItemHeight;
+        }
+        lock (_gate)
+        {
+            return _rowHeights.TryGetValue(row, out double measured) ? measured : Math.Max(1, EstimatedItemHeight);
+        }
+    }
+
+    /// <summary>Rebuilds the visible-slot prefix offsets when a measurement or projection changed.</summary>
+    private void EnsureRowYLocked()
+    {
+        int slots = _slotRows.Count;
+        if (!_rowYDirty && _rowY.Length >= slots + 1)
+        {
+            return;
+        }
+        if (_rowY.Length < slots + 1)
+        {
+            _rowY = new double[slots + 1];
+        }
+        double y = 0;
+        for (int slot = 0; slot < slots; slot++)
+        {
+            _rowY[slot] = y;
+            y += RowHeightFor(_slotRows[slot]) + Spacing;
+        }
+        _rowY[slots] = y;
+        _rowYDirty = false;
+    }
+
+    /// <summary>Next visible row after the given one, -1 when the row is the last one.</summary>
+    private int NextVisibleRow(int row)
+    {
+        for (int i = row + 1; i < _data.Count; i++)
+        {
+            if (IsRowVisible(i))
+            {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /// <summary>Expands the group owning the row when it is collapsed (ScrollTo target).</summary>
@@ -818,7 +984,7 @@ internal sealed class OpenHarmonyItemListMaterializer
         double top = _platformView.ScrollOffsetY;
         for (int row = 0; row < _data.Count; row++)
         {
-            if (IsDataRow(row) && IsRowVisible(row) && GetItemY(row) + ItemHeight > top + 0.5)
+            if (IsDataRow(row) && IsRowVisible(row) && GetItemY(row) + RowHeightFor(row) > top + 0.5)
             {
                 return row;
             }
@@ -859,7 +1025,7 @@ internal sealed class OpenHarmonyItemListMaterializer
             ExpandRow(row);
         }
         RectF frame = _platformView.Frame;
-        double extent = Math.Max(1, ItemHeight);
+        double extent = Math.Max(1, VariableItemHeights ? RowHeightFor(row) : ItemHeight);
         double target = mode == ItemsUpdatingScrollMode.KeepLastItemInView
             ? GetItemY(row) + extent - frame.Height
             : GetItemY(row) - anchorOffset;
@@ -982,6 +1148,24 @@ internal sealed class OpenHarmonyItemListMaterializer
         double itemWidth = GetItemWidth(width);
         view.Measure(itemWidth, double.PositiveInfinity);
         Size size = view.DesiredSize;
+        if (VariableItemHeights && Span <= 1)
+        {
+            // Per-row heights (TableView.HasUnevenRows): the preferred height (Cell.Height) wins
+            // over the measured content, and the row keeps its own height instead of the shared
+            // slot height. A changed measurement invalidates the offsets and re-arranges the
+            // materialized rows (the update loop owns that pass).
+            double preferred = preferredItemHeight?.Invoke(_data[index]) ?? 0;
+            double height = preferred > 0 ? preferred : Math.Max(size.Height, 1);
+            if (!_rowHeights.TryGetValue(index, out double previous) || Math.Abs(previous - height) > 0.01)
+            {
+                _rowHeights[index] = height;
+                _rowYDirty = true;
+                _slotsDirty = true;
+            }
+            view.Arrange(new Rect(frame.X + GetItemX(index, width), frame.Y + GetItemY(index),
+                itemWidth, height));
+            return;
+        }
         if (FixedItemHeight > 0)
         {
             // Fixed rows: the first row seeds the slot height regardless of its kind (a section
@@ -992,9 +1176,9 @@ internal sealed class OpenHarmonyItemListMaterializer
         {
             ItemHeight = size.Height;
         }
-        double height = FixedItemHeight > 0 ? ItemHeight : Math.Max(size.Height, ItemHeight);
+        double rowHeight = FixedItemHeight > 0 ? ItemHeight : Math.Max(size.Height, ItemHeight);
         view.Arrange(new Rect(frame.X + GetItemX(index, width), frame.Y + GetItemY(index),
-            itemWidth, height));
+            itemWidth, rowHeight));
     }
 
     /// <summary>Wires the row's tap: item selection, group-header toggle or nothing.</summary>

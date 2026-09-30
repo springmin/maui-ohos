@@ -39,6 +39,9 @@ public sealed class OpenHarmonyTableViewHandler : OpenHarmonyViewHandler<TableVi
             // row for a different cell would show the previous cell's text.
             BindRowContext = false,
             DisablePooling = true,
+            // HasUnevenRows: a positive Cell.Height wins over the measured content, the Cell
+            // RenderHeight precedence the platform renderers use.
+            preferredItemHeight = PreferredRowHeight,
         };
         return view;
     }
@@ -80,9 +83,9 @@ public sealed class OpenHarmonyTableViewHandler : OpenHarmonyViewHandler<TableVi
         {
             return;
         }
-        // RowHeight is the only height contract the uniform shared pipeline can model (see
-        // MapHasUnevenRows for the unequal-rows degradation note).
-        materializer.FixedItemHeight = table.RowHeight > -1 ? table.RowHeight : 0;
+        // The height contract: HasUnevenRows measures each row (Cell.Height wins when positive),
+        // otherwise RowHeight is the single slot height as before.
+        ApplyRowMetrics(materializer, table);
         materializer.SetItems(_rows);
         materializer.Update(force: true);
         PlatformView.ScrollContentWidth = (float)frame.Width;
@@ -175,22 +178,41 @@ public sealed class OpenHarmonyTableViewHandler : OpenHarmonyViewHandler<TableVi
     {
         if (handler._materializer is { } materializer)
         {
-            materializer.FixedItemHeight = tableView.RowHeight > -1 ? tableView.RowHeight : 0;
-            // FixedItemHeight only affects rows materialized after it is set; re-materializing
-            // the window is what applies a RowHeight change to the rows already on screen.
+            ApplyRowMetrics(materializer, tableView);
+            // The height contract only affects rows materialized after it is set; re-materializing
+            // the window is what applies a change to the rows already on screen.
             materializer.Reset();
         }
     }
 
-    /// <summary>One-time honest note for the per-row heights the uniform pipeline cannot model.</summary>
+    /// <summary>
+    /// TableView.HasUnevenRows switches the shared list pipeline to per-row measured heights:
+    /// RowHeight (when positive) becomes the estimate for rows that have not been measured yet,
+    /// and a positive Cell.Height wins over the measured content (the Cell.RenderHeight
+    /// precedence). Turning it back off restores the one-RowHeight slot model.
+    /// </summary>
     public static void MapHasUnevenRows(OpenHarmonyTableViewHandler handler, TableView tableView)
     {
-        if (tableView.HasUnevenRows)
+        if (handler._materializer is { } materializer)
         {
-            OpenHarmonyStatus.Once("table.unevenrows",
-                "TableView.HasUnevenRows is not represented: the shared list pipeline uses one row height (TableView.RowHeight), so Cell.Height is not applied");
+            ApplyRowMetrics(materializer, tableView);
+            // The rows already on screen keep their old frames until the window is rebuilt:
+            // Reset drops and re-materializes them under the new height contract.
+            materializer.Reset();
         }
     }
+
+    /// <summary>Writes the TableView height contract onto the shared materializer.</summary>
+    private static void ApplyRowMetrics(OpenHarmonyItemListMaterializer materializer, TableView table)
+    {
+        materializer.VariableItemHeights = table.HasUnevenRows;
+        materializer.EstimatedItemHeight = table.RowHeight > 0 ? table.RowHeight : 44;
+        materializer.FixedItemHeight = table.RowHeight > -1 ? table.RowHeight : 0;
+    }
+
+    /// <summary>Cell.Height when it is positive (0 = measure the row's content).</summary>
+    private static double PreferredRowHeight(object? item)
+        => item is Cell cell && cell.Height > 0 ? cell.Height : 0;
 
     /// <summary>Flat row projection: a section whose title/header should draw a header row.</summary>
     private sealed record TableSectionHeader(Cell? Cell, string Title, Color? TextColor);

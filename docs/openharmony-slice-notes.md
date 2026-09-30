@@ -486,3 +486,40 @@ height), `tableview uneven toggle` (HasUnevenRows off restores the 52+6 slot pit
 `Cell.Height` row measures again when the switch returns), and `tableview uneven pins` (the
 handler/materializer contract; the old "not represented" note is gone). The pixel suite is
 unchanged and green.
+## Rich shell flyout rows (`OpenHarmonyShellFlyout`)
+
+The drawer's item rows are MAUI's canonical flyout model (T14 leftovers): while the panel is open,
+`IShellController.GenerateFlyoutGrouping()` supplies the rows instead of a walk over `shell.Items`,
+so the compositor shows what every platform renderer shows:
+
+* **Canonical rows.** Implicit `ShellItem`/`ShellSection` wrappers flatten to the `ShellContent`
+  they stand for; an element hidden with `FlyoutItemIsVisible=false` disappears; an item or section
+  with `FlyoutDisplayOptions.AsMultipleItems` expands into one row per visible child; a plain
+  `TabBar` is excluded from the flyout (the grouping drops it, like the platform renderers); and
+  the current `ShellContent`'s visible `MenuItems` append right after its row. Every row carries the
+  element it stands for (`OpenHarmonyFlyoutRow.Target`): a tap on an `AsMultipleItems` row selects
+  the child section/content chain, and a menu row runs `IMenuItemController.Activate()`
+  (Clicked/Command, gated by `IsEnabled`).
+* **Templates.** An item row resolves `Shell.ItemTemplate` (the element's own attached value first,
+  then the shell's), a menu row resolves `Shell.MenuItemTemplate` in MAUI's order (the item's
+  parent, then the item, then the shell), and the content is bound to the element. Without an
+  explicit template the row keeps the element's text: this compositor cannot host MAUI's default
+  flyout cell (a `Cell`), so the text row is the default-cell equivalent.
+* **FlyoutContent.** `Shell.FlyoutContent`/`FlyoutContentTemplate` resolves through
+  `IShellController.FlyoutContent`; the resolved view replaces the item rows and fills the panel
+  between the header and footer rows (`OpenHarmonyFlyoutRow.IsBody`), and its own content receives
+  touches first, exactly like an item row. A template content binds against the Shell.
+* **Connected section subtrees.** The resolved header/footer/content views are Shell-owned, so the
+  materializer connects their subtree (idempotent) before measuring - the section's inner content
+  then has a platform view to measure, draw and hit-test like a template row.
+* **Limits (recorded).** Row icons are not drawn (the flat rows never drew them either); a
+  `DataTemplate` that materializes a `Cell` falls back to the text row; the panel still opens
+  without page animation, and `FlyoutHeaderBehavior` (scroll/collapse) stays unmapped.
+
+Pinned by ten interaction checks in `ohos-workload/test/maui-platform-verify` (513 -> 523, floor
+493 -> 503): the T14 block now pins the canonical row targets and bindings (an implicit item binds
+to its `ShellContent`), `t14 menu item template/text fallback/activation` pin `Shell.MenuItemTemplate`
+rows (template binding, the text row without a template, `IMenuItemController.Activate`),
+`t14 as-multiple-items rows/select` pin the `AsMultipleItems` expansion and its child selection, and
+`t14 flyout content rows/layout/button tap/template` pin `Shell.FlyoutContent` replacing the rows,
+filling the panel and owning its touches, with its template resolving against the Shell.

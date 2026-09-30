@@ -831,10 +831,11 @@ public class OpenHarmonyView
     internal const float FlyoutRowGap = 8f;
 
     /// <summary>
-    /// Materialized rich rows of the drawer (T14: a View/DataTemplate FlyoutHeader/Footer and
-    /// Shell.ItemTemplate item rows). Empty for a text-only panel, which then keeps the flat
-    /// FlyoutItems geometry below; with rows, the row frames drive drawing and hit-testing so
-    /// header sections can be real views and item rows can be full templates.
+    /// Materialized rich rows of the drawer (T14: rich FlyoutHeader/Footer sections, the canonical
+    /// flyout rows - Shell.ItemTemplate item rows, Shell.MenuItemTemplate menu rows and
+    /// AsMultipleItems children - and a FlyoutContent body). Empty for a text-only panel, which
+    /// then keeps the flat FlyoutItems geometry below; with rows, the row frames drive drawing
+    /// and hit-testing so header sections can be real views and item rows can be full templates.
     /// </summary>
     internal List<OpenHarmonyFlyoutRow> FlyoutRows { get; } = new();
 

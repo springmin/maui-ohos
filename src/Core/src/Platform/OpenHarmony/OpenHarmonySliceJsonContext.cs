@@ -8,6 +8,7 @@
 //   * OpenHarmonyHybridWebViewHandler: HybridAssetsConfig, DotNetInvokeResult, string[] (the
 //     JS -> .NET invocation parameters), string (page id / task id / method name),
 //   * OpenHarmonyBlazorWebViewHandler: BlazorAssetsConfig, string (document id / message),
+//   * OpenHarmonyWebViewHandler: WasmSiteConfig (the Blazor WebAssembly site registration),
 //   * OpenHarmonyGeocoding: string (the address inside the GeoCodeRequest JSON).
 //
 // The nested types had to become internal (they were private) so the context can reference
@@ -18,6 +19,7 @@ namespace Microsoft.Maui.Platform;
 
 [JsonSerializable(typeof(OpenHarmonyHybridWebViewHandler.HybridAssetsConfig))]
 [JsonSerializable(typeof(OpenHarmonyHybridWebViewHandler.DotNetInvokeResult))]
+[JsonSerializable(typeof(OpenHarmonyWebViewHandler.WasmSiteConfig))]
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(string))]
 #if OPENHARMONY_BLAZOR_WEBVIEW

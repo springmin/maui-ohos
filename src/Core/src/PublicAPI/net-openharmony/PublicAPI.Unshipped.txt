@@ -1125,6 +1125,8 @@ const Microsoft.Maui.Platform.OpenHarmonyBlazorWebView.AppOrigin = "https://0.0.
 const Microsoft.Maui.Platform.OpenHarmonyBlazorWebView.ContentRoot = "wwwroot" -> string!
 const Microsoft.Maui.Platform.OpenHarmonyBlazorWebView.DefaultHostFile = "index.html" -> string!
 const Microsoft.Maui.Platform.OpenHarmonyBlazorWebView.FrameworkDirectory = "_framework" -> string!
+const Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.WasmSiteOrigin = "https://blazorwasm.local/" -> string!
+const Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.WasmSiteRoot = "wasmsite" -> string!
 const Microsoft.Maui.Platform.OpenHarmonyView.CalendarHeaderHeight = 52 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.CalendarRowHeight = 46 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.CalendarWeeks = 6 -> int
@@ -1540,6 +1542,7 @@ static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.JsMessage -> System.Act
 static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.MapCookies(Microsoft.Maui.Platform.OpenHarmonyWebViewHandler! handler, Microsoft.Maui.IWebView! webView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.MapSource(Microsoft.Maui.Platform.OpenHarmonyWebViewHandler! handler, Microsoft.Maui.IWebView! webView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.OnPageEvent(string! state, string! url) -> void
+static Microsoft.Maui.Platform.OpenHarmonyWebViewHandler.RegisterWasmSite(string? contentRoot = null) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyWindowHandler.MapContent(Microsoft.Maui.Platform.OpenHarmonyWindowHandler! handler, Microsoft.Maui.IWindow! window) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWindowHandler.MapHeight(Microsoft.Maui.Platform.OpenHarmonyWindowHandler! handler, Microsoft.Maui.IWindow! window) -> void
 static Microsoft.Maui.Platform.OpenHarmonyWindowHandler.MapTitle(Microsoft.Maui.Platform.OpenHarmonyWindowHandler! handler, Microsoft.Maui.IWindow! window) -> void

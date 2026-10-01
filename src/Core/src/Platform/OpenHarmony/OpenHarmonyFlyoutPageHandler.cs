@@ -78,6 +78,15 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
     private void OnIsPresentedChanged(object? sender, EventArgs args)
     {
         MapIsPresented(this, VirtualView!);
+        // FIX-WVP: the single ArkWeb overlay renders above the managed surface, so the drawer
+        // the compositor draws would be covered by a visible web page. Suspend the overlay while
+        // the drawer is open (the shell then ignores frame/load re-shows) and resume its previous
+        // visibility when it closes, so a drawer on a page without a web control cannot make a
+        // stale overlay reappear.
+        if (VirtualView is { IsPresented: false })
+        {
+            OpenHarmonyBridge.WebCommand("resume");
+        }
         ArrangeContent();
         OpenHarmonyBridge.RequestRedraw();
     }
@@ -120,7 +129,17 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
     }
 
     public static void MapIsPresented(OpenHarmonyFlyoutPageHandler handler, FlyoutPage flyoutPage)
-        => handler.PlatformView.FlyoutPresented = flyoutPage.IsPresented;
+    {
+        handler.PlatformView.FlyoutPresented = flyoutPage.IsPresented;
+        if (flyoutPage.IsPresented)
+        {
+            // FIX-WVP: the ArkWeb overlay sits above the managed surface; suspend it while the
+            // compositor-drawn drawer is open (also covers a drawer that starts presented). The
+            // flyout handler's own arrange cycle re-emits the detail's web frame, which the
+            // shell ignores while suspended.
+            OpenHarmonyBridge.WebCommand("suspend");
+        }
+    }
 
     public static void MapContent(OpenHarmonyFlyoutPageHandler handler, FlyoutPage flyoutPage)
     {

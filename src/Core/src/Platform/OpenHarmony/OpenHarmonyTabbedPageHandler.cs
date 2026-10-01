@@ -43,6 +43,10 @@ public sealed class OpenHarmonyTabbedPageHandler : OpenHarmonyViewHandler<Micros
 
     private void OnCurrentPageChanged(object? sender, EventArgs args)
     {
+        // FIX-WVP: the single ArkWeb overlay (declared above the managed surface) would keep
+        // covering the new tab. Suspend it; the new page's web control, if any, re-shows through
+        // its next arrange/load/frame command, and switching back re-arranges the old page.
+        OpenHarmonyBridge.WebCommand("hide");
         MapPages(this, VirtualView!);
         ArrangeContent();
         OpenHarmonyBridge.RequestRedraw();

@@ -154,8 +154,36 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     {
         base.PlatformArrange(frame);
         // The ArkWeb component is a shell overlay shared by the web handlers: place it on this
-        // control's frame (the command also shows it).
-        OpenHarmonyWebViewHandler.SendPlatformFrame(frame);
+        // control's frame (the command also shows it). While a connected HybridWebView has
+        // registered with the shell, the shell's single-overlay arbitration keeps the hybrid
+        // page loaded (FIX-WVP), so sending this control's frame would move that page onto the
+        // BlazorWebView's box and blank the hybrid area (observed on the device; FIX-BACKSIZE).
+        // The desired size above stays real, so the layout still arranges this control; only
+        // the overlay frame is withheld. An app without a registered hybrid still places the
+        // overlay on this control - the path the suite pins.
+        if (!OpenHarmonyHybridWebViewHandler.HasRegisteredOverlay)
+        {
+            OpenHarmonyWebViewHandler.SendPlatformFrame(frame);
+        }
+    }
+
+    // ViewHandlerOfT.Standard (the partial the OpenHarmony slice compiles) answers Size.Zero, so
+    // a BlazorWebView reported 0x0 and its parent arranged a zero-height frame: PlatformArrange
+    // then sent a degenerate "frame" and the shell ignored it (FIX-WVP guard), leaving the single
+    // ArkWeb overlay at its previous visibility - hidden after a tab switch or a drawer - so the
+    // control never re-showed itself. Mirror the WebView/HybridWebView handlers (width =
+    // constraint, height capped at 400) and honour an explicit HeightRequest, the value the demo
+    // apps set; B2/FIX-BACKSIZE.
+    public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
+    {
+        var element = VirtualView as Microsoft.Maui.Controls.VisualElement;
+        double width = double.IsFinite(widthConstraint)
+            ? widthConstraint
+            : (element is not null && element.WidthRequest > 0 ? element.WidthRequest : 0);
+        double height = element?.HeightRequest > 0
+            ? element.HeightRequest
+            : (double.IsFinite(heightConstraint) ? Math.Min(400, heightConstraint) : 400);
+        return new Size(width, height);
     }
 
     /// <summary>

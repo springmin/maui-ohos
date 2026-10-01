@@ -200,6 +200,8 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
             shell.Navigated += OnShellNavigated;
             _lastStackDepth = CurrentStackDepth(shell);
         }
+        // FIX-BACKSIZE: the system Back press closes an open shell drawer (see OnBackPressed).
+        OpenHarmonyBridge.BackPressed += OnBackPressed;
         MapShell(this, VirtualView!);
         if (VirtualView is { } connectedShell)
         {
@@ -209,6 +211,7 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
+        OpenHarmonyBridge.BackPressed -= OnBackPressed;
         if (VirtualView is { } shell)
         {
             shell.PropertyChanged -= OnShellPropertyChanged;
@@ -219,6 +222,24 @@ public sealed class OpenHarmonyShellHandler : OpenHarmonyViewHandler<Shell>
         _chrome?.Detach();
         _flyout?.Detach();
         base.DisconnectHandler(platformView);
+    }
+
+    /// <summary>
+    /// System Back (hosting bridge event): closes an open shell drawer and writes the managed
+    /// <see cref="Shell.FlyoutIsPresented"/> back (the compositor's FlyoutOpen is platform state
+    /// and both move together), consuming the press. A Locked drawer is re-pinned by every chrome
+    /// refresh, so it is left to the system default; a closed drawer reports false.
+    /// </summary>
+    private bool OnBackPressed()
+    {
+        if (VirtualView is { } shell && PlatformView.FlyoutOpen && shell.FlyoutBehavior != FlyoutBehavior.Locked)
+        {
+            PlatformView.FlyoutOpen = false;
+            shell.FlyoutIsPresented = false;
+            OpenHarmonyBridge.RequestRedraw();
+            return true;
+        }
+        return false;
     }
 
     /// <summary>

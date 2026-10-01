@@ -60,6 +60,12 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
                 flyoutPage.FlyoutLayoutBehavior = FlyoutLayoutBehavior.Popover;
             }
             flyoutPage.IsPresentedChanged += OnIsPresentedChanged;
+            // FIX-BACKSIZE: the shell forwards the system Back press through the hosting bridge
+            // (onBackPress -> host.backPressed -> OpenHarmonyBridge.BackPressed). Close the
+            // presented drawer by writing the managed property back (the same path the scrim
+            // dismiss uses) and answer true so the press is consumed; with the drawer closed the
+            // default false lets the system background the app.
+            OpenHarmonyBridge.BackPressed += OnBackPressed;
             OpenHarmonyHandlerConnector.ConnectTree(flyoutPage.Flyout);
             OpenHarmonyHandlerConnector.ConnectTree(flyoutPage.Detail);
         }
@@ -71,8 +77,24 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
         if (VirtualView is { } flyoutPage)
         {
             flyoutPage.IsPresentedChanged -= OnIsPresentedChanged;
+            OpenHarmonyBridge.BackPressed -= OnBackPressed;
         }
         base.DisconnectHandler(platformView);
+    }
+
+    /// <summary>
+    /// System Back (hosting bridge event): a presented drawer is closed through the managed
+    /// property so the platform view and the overlay suspension follow, and the press reports
+    /// true (consumed). A closed drawer reports false and the system keeps its default.
+    /// </summary>
+    private bool OnBackPressed()
+    {
+        if (VirtualView is { IsPresented: true } flyoutPage)
+        {
+            flyoutPage.IsPresented = false;
+            return true;
+        }
+        return false;
     }
 
     private void OnIsPresentedChanged(object? sender, EventArgs args)

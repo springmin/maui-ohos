@@ -122,6 +122,11 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     // removed as soon as its assets land, so each pending root registers exactly once.
     private static readonly HashSet<OpenHarmonyHybridWebViewHandler> s_pendingRegistration = new();
     private static bool s_registrationHooksAttached;
+    // FIX-BACKSIZE: connected handlers whose assets actually reached the shell. The shell's
+    // single ArkWeb overlay is arbitrated on registration (a hybrid registration keeps it,
+    // FIX-WVP), so while this is non-zero other web handlers must not send overlay frames.
+    private static int s_registeredOverlayOwners;
+    private bool _registeredOverlay;
     private string? _registeredAssets;
     // B2/B3 identity of this handler's page: generated once per handler, handed to the shell
     // with the asset registration (HybridAssetsConfig.id), stamped into the served documents as
@@ -139,6 +144,24 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             lock (s_handlers)
             {
                 return s_pendingRegistration.Contains(this);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True while a connected HybridWebView has registered its assets with the shell: the
+    /// shell's single ArkWeb overlay then serves the hybrid origin (FIX-WVP registration
+    /// arbitration), so another web handler's overlay frame would move the hybrid page onto
+    /// its own box (observed on the device once the BlazorWebView got a real desired size,
+    /// FIX-BACKSIZE).
+    /// </summary>
+    internal static bool HasRegisteredOverlay
+    {
+        get
+        {
+            lock (s_handlers)
+            {
+                return s_registeredOverlayOwners > 0;
             }
         }
     }
@@ -214,6 +237,12 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         {
             s_handlers.Remove(this);
             s_pendingRegistration.Remove(this);
+            if (_registeredOverlay)
+            {
+                // The hybrid registration no longer backs the shell overlay (FIX-BACKSIZE).
+                _registeredOverlay = false;
+                s_registeredOverlayOwners--;
+            }
         }
         if (ReferenceEquals(s_activeInvokeHandler, this))
         {
@@ -285,6 +314,13 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             register = key != _registeredAssets;
             _registeredAssets = key;
             s_pendingRegistration.Remove(this);
+            if (!_registeredOverlay)
+            {
+                // First successful registration for this handler: the shell's single overlay now
+                // serves the hybrid origin until this handler disconnects (FIX-BACKSIZE).
+                _registeredOverlay = true;
+                s_registeredOverlayOwners++;
+            }
         }
         if (!register)
         {

@@ -1,5 +1,7 @@
 // FlyoutPage handler for OpenHarmony: the detail fills the window, the flyout slides in as a
-// left panel with a scrim; the renderer draws/nit-tests the panel and the hamburger.
+// left panel over a scrim - the slice's only presentation, so a default layout behavior is
+// stated as FlyoutLayoutBehavior.Popover (see ConnectHandler); the renderer draws/hit-tests the
+// panel and the hamburger.
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
@@ -44,6 +46,19 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
         base.ConnectHandler(platformView);
         if (VirtualView is { } flyoutPage)
         {
+            // The compositor draws the flyout as a sliding overlay (there is no docked/split
+            // layout). MAUI resolves the default layout behavior against the idiom and the
+            // display orientation, and on a tablet-sized landscape surface that means split
+            // mode: IsPresented is pinned true (UpdateFlyoutLayoutBehavior force-presents it)
+            // and a dismiss write-back throws "Can't change IsPresented when setting Default"
+            // - the device drawer opened but its outside tap could never close it (the touch
+            // callback reports the throw and the panel stays). State the presentation this
+            // slice actually renders so MAUI's model agrees with the compositor; an explicit
+            // app value (Split/Popover/...) is left alone.
+            if (flyoutPage.FlyoutLayoutBehavior == FlyoutLayoutBehavior.Default)
+            {
+                flyoutPage.FlyoutLayoutBehavior = FlyoutLayoutBehavior.Popover;
+            }
             flyoutPage.IsPresentedChanged += OnIsPresentedChanged;
             OpenHarmonyHandlerConnector.ConnectTree(flyoutPage.Flyout);
             OpenHarmonyHandlerConnector.ConnectTree(flyoutPage.Detail);

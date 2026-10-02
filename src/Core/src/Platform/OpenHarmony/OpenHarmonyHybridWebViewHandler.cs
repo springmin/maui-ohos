@@ -100,6 +100,16 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     private static readonly ConcurrentDictionary<string, PendingInvoke> s_invokeRequests = new();
 
     /// <summary>
+    /// Overlay slot this handler claimed while connected (MULTI-OVL): the hybrid frame, eval
+    /// and registration all carry it, so the shell serves this handler's page on its own
+    /// ArkWeb overlay instead of arbitrating a single one (FIX-WVP). -1 beyond the shell cap.
+    /// </summary>
+    private int _overlaySlot = -1;
+
+    /// <summary>The claimed overlay slot (MULTI-OVL); -1 beyond the cap.</summary>
+    internal int OverlaySlot => _overlaySlot;
+
+    /// <summary>
     /// One in-flight window.HybridWebView.__InvokeJavaScript call. The completion is only
     /// accepted from the handler that started it and with the document id the shell stamped for
     /// that handler's page, so a harvested task id cannot be completed by another page (B2).
@@ -219,6 +229,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
+        _overlaySlot = OpenHarmonyOverlays.Acquire();
         lock (s_handlers)
         {
             s_handlers.Add(this);
@@ -248,6 +259,8 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         {
             s_activeInvokeHandler = null;
         }
+        OpenHarmonyOverlays.Release(_overlaySlot);
+        _overlaySlot = -1;
         base.DisconnectHandler(platformView);
     }
 
@@ -257,8 +270,9 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        // The ArkWeb component is a shell overlay: place it on the control's frame.
-        OpenHarmonyWebViewHandler.SendPlatformFrame(frame);
+        // The ArkWeb component is a shell overlay: place it on the control's frame (tagged with
+        // this handler's slot, MULTI-OVL).
+        OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
         // First render: if ConnectHandler ran before the app context was published, this is
         // the point where the shell (and the extracted payload) is definitely available.
         if (IsHybridAssetsRegistrationPending)
@@ -335,6 +349,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             Root = root,
             DefaultFile = defaultFile,
             Id = _pageId,
+            Slot = _overlaySlot,
         }, OpenHarmonySliceJsonContext.Default.HybridAssetsConfig));
         HybridAssetsRegistered?.Invoke(payloadDir, root, defaultFile);
     }
@@ -638,6 +653,10 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         /// <summary>Per-registration document id (B2/B3), echoed in the shell message envelope.</summary>
         [JsonPropertyName("id")]
         public string Id { get; init; } = string.Empty;
+
+        /// <summary>Overlay slot this registration owns (MULTI-OVL); the shell loads the page there.</summary>
+        [JsonPropertyName("slot")]
+        public int Slot { get; init; } = -1;
     }
 
     // Controls.HybridWebView raises these commands through IElementHandler.Invoke/InvokeAsync;
@@ -648,7 +667,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         switch (command)
         {
             case nameof(IHybridWebView.EvaluateJavaScriptAsync) when args is EvaluateJavaScriptAsyncRequest request:
-                _ = CompleteEvaluateAsync(request);
+                _ = CompleteEvaluateAsync(request, _overlaySlot);
                 return;
             case nameof(IHybridWebView.SendRawMessage) when args is HybridWebViewRawMessage message:
                 if (message.Message is { } rawMessage)
@@ -667,7 +686,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
 
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
     public Task<string?> EvaluateJavaScriptAsync(string script)
-        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script);
+        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, _overlaySlot);
 
     /// <summary>
     /// Delivers a raw message to the hybrid page. The stock HybridWebView JavaScript receives
@@ -700,7 +719,8 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             "{window.external.receiveMessage(m);}" +
             "else{window.dispatchEvent(new CustomEvent('HybridWebViewMessageReceived',{detail:{message:m}}));}" +
             "return 'ok';})(" +
-            JsonSerializer.Serialize(_pageId, OpenHarmonySliceJsonContext.Default.String) + "," + json + ")").ConfigureAwait(false);
+            JsonSerializer.Serialize(_pageId, OpenHarmonySliceJsonContext.Default.String) + "," + json + ")",
+            _overlaySlot).ConfigureAwait(false);
         if (result is not null && result.Trim().Trim('"') == "skip")
         {
             OpenHarmonyBridge.WriteStatus(
@@ -858,9 +878,9 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             $"[maui] hybrid page payload rejected: {payload.Length} characters exceed the {MaxPagePayloadLength} character cap");
     }
 
-    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request)
+    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request, int slot)
     {
-        string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(request.Script).ConfigureAwait(false);
+        string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(request.Script, slot).ConfigureAwait(false);
         // An empty string stands in for "the platform had no result" (HybridWebView returns null
         // for null, "null" and "undefined" results alike).
         request.TrySetResult(result ?? string.Empty);
@@ -897,7 +917,8 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         s_invokeRequests[taskId] = new PendingInvoke(source, this);
         _ = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
             $"window.HybridWebView.__InvokeJavaScript({JsonSerializer.Serialize(taskId, OpenHarmonySliceJsonContext.Default.String)}, " +
-            $"{JsonSerializer.Serialize(request.MethodName, OpenHarmonySliceJsonContext.Default.String)}, [{argList}])").ConfigureAwait(false);
+            $"{JsonSerializer.Serialize(request.MethodName, OpenHarmonySliceJsonContext.Default.String)}, [{argList}])",
+            _overlaySlot).ConfigureAwait(false);
         if (!OpenHarmonyWebViewHandler.IsJavaScriptBridgeAvailable)
         {
             // No host library: the page never received the kickoff, so do not wait for a reply.

@@ -68,6 +68,18 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     private static readonly List<OpenHarmonyWebViewHandler> s_handlers = new();
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<string?>> s_evalRequests = new();
+
+    /// <summary>
+    /// Overlay slot this handler claimed while connected (MULTI-OVL). The shell declares two
+    /// ArkWeb overlays; the slot tags every per-overlay command (frame/load/show/history/eval)
+    /// and routes the shell's page events back to this handler. -1 when the shell cap is
+    /// reached: the control then keeps the legacy untagged protocol (slot 0), so a third
+    /// simultaneous web control must not corrupt another control's overlay.
+    /// </summary>
+    private int _overlaySlot = -1;
+
+    /// <summary>The claimed overlay slot (MULTI-OVL); -1 beyond the cap.</summary>
+    internal int OverlaySlot => _overlaySlot;
     private static readonly object s_navSync = new();
     private static readonly Dictionary<string, long> s_approvedNavigations = new();
     private static unsafe IntPtr s_evalResultCallback = (IntPtr)(delegate* unmanaged[Cdecl]<int, IntPtr, int, void>)&OnEvalResultNative;
@@ -115,6 +127,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
+        _overlaySlot = OpenHarmonyOverlays.Acquire();
         lock (s_handlers)
         {
             s_handlers.Add(this);
@@ -129,6 +142,8 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             s_handlers.Remove(this);
         }
+        OpenHarmonyOverlays.Release(_overlaySlot);
+        _overlaySlot = -1;
         base.DisconnectHandler(platformView);
     }
 
@@ -140,18 +155,19 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         base.PlatformArrange(frame);
         // The native Web component is a shell overlay: place it on the control's frame (the
         // command also shows it). The values are MAUI DIP, which the shell applies as ArkUI vp.
-        SendPlatformFrame(frame);
+        SendPlatformFrame(frame, _overlaySlot);
     }
 
     /// <summary>
     /// Sends the shell overlay frame to the ArkWeb component ("frame", arg "x\ny\nw\nh" in
     /// MAUI DIP applied as ArkUI vp); a zero width/height keeps that dimension full-window.
-    /// Shared by the WebView, HybridWebView and BlazorWebView handlers, which all render into
-    /// the same shell overlay.
+    /// Shared by the WebView, HybridWebView and BlazorWebView handlers, which each own an
+    /// overlay slot (MULTI-OVL): the slot is tagged onto the argument, and a legacy untagged
+    /// frame lands on the first overlay.
     /// </summary>
-    internal static void SendPlatformFrame(Rect frame)
-        => OpenHarmonyBridge.WebCommand("frame", FormattableString.Invariant(
-            $"{frame.X:0.###}\n{frame.Y:0.###}\n{frame.Width:0.###}\n{frame.Height:0.###}"));
+    internal static void SendPlatformFrame(Rect frame, int slot)
+        => OpenHarmonyBridge.WebCommand("frame", OpenHarmonyOverlays.Tag(slot, FormattableString.Invariant(
+            $"{frame.X:0.###}\n{frame.Y:0.###}\n{frame.Width:0.###}\n{frame.Height:0.###}")));
 
     // MAUI raises the JavaScript commands through IElementHandler.Invoke (Controls.WebView
     // wraps the script in try{JSON.stringify(eval(...))}catch(e){'null'} before calling us).
@@ -160,20 +176,20 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         switch (command)
         {
             case nameof(IWebView.EvaluateJavaScriptAsync) when args is EvaluateJavaScriptAsyncRequest request:
-                _ = CompleteEvaluateAsync(request);
+                _ = CompleteEvaluateAsync(request, _overlaySlot);
                 return;
             case nameof(IWebView.Eval) when args is string script:
                 // Fire-and-forget evaluation (IWebView.Eval has no result).
-                _ = EvaluateJavaScriptAsyncCore(script);
+                _ = EvaluateJavaScriptAsyncCore(script, _overlaySlot);
                 return;
             case nameof(IWebView.GoBack):
-                SendHistoryCommand("back", WebNavigationEvent.Back);
+                SendHistoryCommand("back", WebNavigationEvent.Back, _overlaySlot);
                 return;
             case nameof(IWebView.GoForward):
-                SendHistoryCommand("forward", WebNavigationEvent.Forward);
+                SendHistoryCommand("forward", WebNavigationEvent.Forward, _overlaySlot);
                 return;
             case nameof(IWebView.Reload):
-                SendHistoryCommand("refresh", WebNavigationEvent.Refresh);
+                SendHistoryCommand("refresh", WebNavigationEvent.Refresh, _overlaySlot);
                 return;
             default:
                 base.Invoke(command, args);
@@ -186,26 +202,37 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// WebNavigationEvent for the next page event. The shell reports the resulting history
     /// availability afterwards, so the command itself needs no reply.
     /// </summary>
-    private static void SendHistoryCommand(string op, WebNavigationEvent navigationEvent)
+    private static void SendHistoryCommand(string op, WebNavigationEvent navigationEvent, int slot)
     {
         s_pendingNavigation = navigationEvent;
-        OpenHarmonyBridge.WebCommand(op);
+        OpenHarmonyBridge.WebCommand(op, OpenHarmonyOverlays.Tag(slot));
     }
 
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
-    public Task<string?> EvaluateJavaScriptAsync(string script) => EvaluateJavaScriptAsyncCore(script);
+    public Task<string?> EvaluateJavaScriptAsync(string script) => EvaluateJavaScriptAsyncCore(script, _overlaySlot);
 
     /// <summary>
     /// Sends the script to the ArkTS shell (registerWebEvalSink) and awaits the runJavaScript
     /// result by request id. A missing host library or sink answers null instead of throwing.
+    /// The global form (no slot) targets the first overlay: cookie reads and diagnostics only
+    /// need some live page, and the cookie store is shared by every overlay.
     /// </summary>
-    internal static async Task<string?> EvaluateJavaScriptAsyncCore(string script)
+    internal static Task<string?> EvaluateJavaScriptAsyncCore(string script)
+        => EvaluateJavaScriptAsyncCore(script, 0);
+
+    /// <summary>
+    /// Slot-tagged form (MULTI-OVL): the shell runs the script on the WebviewController of the
+    /// matching overlay ("s&lt;slot&gt;\n&lt;script&gt;"), so a Blazor IPC eval lands in the
+    /// BlazorWebView's document and never in the HybridWebView's.
+    /// </summary>
+    internal static async Task<string?> EvaluateJavaScriptAsyncCore(string script, int slot)
     {
         if (string.IsNullOrEmpty(script))
         {
             return null;
         }
-        return await SendHostRequestAsync(requestId => WebEvalNative(script, requestId) == 0).ConfigureAwait(false);
+        string tagged = OpenHarmonyOverlays.TagScript(slot, script);
+        return await SendHostRequestAsync(requestId => WebEvalNative(tagged, requestId) == 0).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -261,9 +288,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         return await source.Task.ConfigureAwait(false);
     }
 
-    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request)
+    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request, int slot = 0)
     {
-        string? result = await EvaluateJavaScriptAsyncCore(request.Script).ConfigureAwait(false);
+        string? result = await EvaluateJavaScriptAsyncCore(request.Script, slot).ConfigureAwait(false);
         // An empty string stands in for "the platform had no result"; Controls.WebView maps
         // "null" to null and trims the quotes JSON.stringify adds on non-Android platforms.
         request.TrySetResult(result ?? string.Empty);
@@ -515,21 +542,21 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     /// <summary>
     /// The shell cancelled a main-frame load it did not originate and asks for a decision (B6).
-    /// Parses "__OHNAV|&lt;url&gt;|&lt;id&gt;", raises Navigating on the connected WebViews and,
-    /// when none cancelled, approves exactly that URL back to the shell ("nav" command). The
+    /// Parses "__OHNAV|&lt;url&gt;|&lt;id&gt;" or the slot-tagged MULTI-OVL form
+    /// "__OHNAV|s&lt;slot&gt;|&lt;url&gt;|&lt;id&gt;", raises Navigating on the WebViews that
+    /// own the slot and, when none cancelled, approves exactly that URL back to the shell
+    /// ("nav" command carrying the same slot, so the shell reloads the right overlay). The
     /// shell reloads only the URL it cancelled for the id it issued, so a forged approval is
     /// inert.
     /// </summary>
     internal static void HandleNavigationRequest(string payload)
     {
-        int separator = payload.LastIndexOf('|', StringComparison.Ordinal);
-        if (separator <= NavRequestPrefix.Length)
+        if (!OpenHarmonyOverlays.TryParseNavigationRequest(payload, out int slot, out string url, out string requestId))
         {
+            OpenHarmonyBridge.WriteStatus("[maui] web navigation rejected: malformed request");
             return;
         }
-        string url = payload.Substring(NavRequestPrefix.Length, separator - NavRequestPrefix.Length);
-        string requestId = payload.Substring(separator + 1);
-        if (requestId.Length == 0 || requestId.Length > 128 || url.Length == 0 || url.Length > MaxNavUrlLength)
+        if (requestId.Length > 128 || url.Length == 0 || url.Length > MaxNavUrlLength)
         {
             OpenHarmonyBridge.WriteStatus("[maui] web navigation rejected: malformed request");
             return;
@@ -547,14 +574,14 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             OpenHarmonyBridge.WriteStatus("[maui] web navigation rejected: not an http(s) navigation");
             return;
         }
-        if (!RaiseNavigating(url))
+        if (!RaiseNavigating(url, WebNavigationEvent.NewPage, slot))
         {
             // The app cancelled: leave the load blocked (no approval is sent).
             return;
         }
         ApproveNavigation(url);
         NavigationApprovalSent?.Invoke(requestId, url);
-        OpenHarmonyBridge.WebCommand("nav", requestId + "\n" + url);
+        OpenHarmonyBridge.WebCommand("nav", OpenHarmonyOverlays.Tag(slot, requestId + "\n" + url));
     }
 
     /// <summary>
@@ -717,16 +744,24 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// Cancel (IWebView.Navigating returns the cancel flag).
     /// </summary>
     private static bool RaiseNavigating(string url)
-        => RaiseNavigating(url, WebNavigationEvent.NewPage);
+        => RaiseNavigating(url, WebNavigationEvent.NewPage, -1);
 
-    /// <summary>Raises Navigating with the load's event kind (Back/Forward/Refresh for history loads).</summary>
-    private static bool RaiseNavigating(string url, WebNavigationEvent navigationEvent)
+    /// <summary>
+    /// Raises Navigating with the load's event kind (Back/Forward/Refresh for history loads) on
+    /// the views that own <paramref name="slot"/> (MULTI-OVL). A negative slot stays a fan-out
+    /// to every connected view, the legacy single-overlay behavior.
+    /// </summary>
+    private static bool RaiseNavigating(string url, WebNavigationEvent navigationEvent, int slot = -1)
     {
         bool allowed = true;
         lock (s_handlers)
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
+                if (slot >= 0 && handler._overlaySlot != slot)
+                {
+                    continue;
+                }
                 if (handler.VirtualView is { } webView && webView.Navigating(navigationEvent, url))
                 {
                     allowed = false;
@@ -739,9 +774,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// <summary>
     /// Mirrors a completed/failed shell load into IWebView.Navigated with the event kind the
     /// load was started with (Back/Forward/Refresh for history loads, NewPage otherwise) and
-    /// consumes the pending kind.
+    /// consumes the pending kind. Slot-tagged events only reach the views that own the slot.
     /// </summary>
-    private static void RaiseNavigated(string url, WebNavigationResult result)
+    private static void RaiseNavigated(string url, WebNavigationResult result, int slot = -1)
     {
         WebNavigationEvent navigationEvent = s_pendingNavigation;
         s_pendingNavigation = WebNavigationEvent.NewPage;
@@ -749,6 +784,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
+                if (slot >= 0 && handler._overlaySlot != slot)
+                {
+                    continue;
+                }
                 handler.VirtualView?.Navigated(navigationEvent, url, result);
             }
         }
@@ -756,9 +795,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     /// <summary>
     /// Applies the shell's history state ("history|&lt;back&gt;|&lt;forward&gt;", 1/0 flags) to
-    /// every connected WebView's IWebView.CanGoBack/CanGoForward.
+    /// every connected WebView's IWebView.CanGoBack/CanGoForward; a slot-tagged state only
+    /// reaches the views that own the slot (MULTI-OVL).
     /// </summary>
-    private static void ApplyHistoryState(string state)
+    private static void ApplyHistoryState(string state, int slot = -1)
     {
         string[] parts = state.Split('|');
         if (parts.Length != 3 || !TryParseFlag(parts[1], out bool canGoBack) || !TryParseFlag(parts[2], out bool canGoForward))
@@ -770,6 +810,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
+                if (slot >= 0 && handler._overlaySlot != slot)
+                {
+                    continue;
+                }
                 if (handler.VirtualView is { } webView)
                 {
                     webView.CanGoBack = canGoBack;
@@ -991,6 +1035,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     {
         // A source load is a fresh navigation, not a history move.
         s_pendingNavigation = WebNavigationEvent.NewPage;
+        int slot = handler._overlaySlot;
         switch (webView.Source)
         {
             case UrlWebViewSource url when !string.IsNullOrEmpty(url.Url):
@@ -1002,13 +1047,13 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                         $"[maui] web load rejected: {SanitizeUrlForLog(url.Url)}");
                     return;
                 }
-                OpenHarmonyBridge.WebCommand("load", url.Url);
+                OpenHarmonyBridge.WebCommand("load", OpenHarmonyOverlays.Tag(slot, url.Url));
                 break;
             case HtmlWebViewSource html:
-                OpenHarmonyBridge.WebCommand("data", html.Html);
+                OpenHarmonyBridge.WebCommand("data", OpenHarmonyOverlays.Tag(slot, html.Html));
                 break;
             default:
-                OpenHarmonyBridge.WebCommand("show");
+                OpenHarmonyBridge.WebCommand("show", OpenHarmonyOverlays.Tag(slot));
                 break;
         }
     }
@@ -1016,7 +1061,16 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// <summary>Mirrors a shell page event into the MAUI WebView events.</summary>
     public static void OnPageEvent(string state, string url)
     {
-        if (state == "started")
+        // MULTI-OVL: the shell prefixes each per-overlay event with its slot ("s0|finished").
+        // An untagged state (a shell that predates the second overlay) stays a fan-out.
+        int slot = -1;
+        string effectiveState = state;
+        if (OpenHarmonyOverlays.TryParseEventState(state, out int eventSlot, out string rest))
+        {
+            slot = eventSlot;
+            effectiveState = rest;
+        }
+        if (effectiveState == "started")
         {
             // A load the shell already asked about (B6) raised Navigating before it started;
             // do not raise it a second time. App-origin loads never take that path. The event
@@ -1025,27 +1079,27 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             {
                 return;
             }
-            RaiseNavigating(url, s_pendingNavigation);
+            RaiseNavigating(url, s_pendingNavigation, slot);
             return;
         }
-        if (state.StartsWith(HistoryStatePrefix, StringComparison.Ordinal))
+        if (effectiveState.StartsWith(HistoryStatePrefix, StringComparison.Ordinal))
         {
             // ArkWeb history availability after a page end/back/forward/refresh; mirrors into
             // IWebView.CanGoBack/CanGoForward and consumes the pending history kind.
-            ApplyHistoryState(state);
+            ApplyHistoryState(effectiveState, slot);
             return;
         }
-        if (state == "error")
+        if (effectiveState == "error")
         {
             // A failed main-frame load: clear the overlay (the managed surface shows through)
             // and report the failure through IWebView.Navigated. The shell reports this outside
             // the page's control, so a script cannot turn a failure into a success.
             OpenHarmonyBridge.WebCommand("hide");
-            RaiseNavigated(url, WebNavigationResult.Failure);
+            RaiseNavigated(url, WebNavigationResult.Failure, slot);
         }
-        else if (state == "finished")
+        else if (effectiveState == "finished")
         {
-            RaiseNavigated(url, WebNavigationResult.Success);
+            RaiseNavigated(url, WebNavigationResult.Success, slot);
             // The page is done: mirror the ArkWeb cookie store back into IWebView.Cookies
             // (best-effort; the container stays authoritative for what the app set).
             ScheduleCookieRead(url);
@@ -1065,7 +1119,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             {
                 if (handler.VirtualView is not null)
                 {
-                    OpenHarmonyBridge.WriteStatus($"[maui] web {state}: {loggedUrl}");
+                    OpenHarmonyBridge.WriteStatus($"[maui] web {effectiveState}: {loggedUrl}");
                 }
             }
         }

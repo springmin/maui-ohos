@@ -83,6 +83,17 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     public const string AppOrigin = OpenHarmonyBlazorWebView.AppOrigin;
 
     private OpenHarmonyWebViewManager? _webViewManager;
+
+    /// <summary>
+    /// Overlay slot this handler claimed while connected (MULTI-OVL): the Blazor frame, eval and
+    /// registration carry it, so the Blazor page renders on its own ArkWeb overlay even while a
+    /// HybridWebView owns another (the FIX-WVP/FIX-BACKSIZE single-overlay withholding is gone).
+    /// -1 beyond the shell cap.
+    /// </summary>
+    private int _overlaySlot = -1;
+
+    /// <summary>The claimed overlay slot (MULTI-OVL); -1 beyond the cap.</summary>
+    internal int OverlaySlot => _overlaySlot;
     private RootComponentsCollection? _rootComponents;
     private string? _registeredAssets;
     // B1/B3 identity of this handler's page: generated once per handler, sent to the shell with
@@ -144,6 +155,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
+        _overlaySlot = OpenHarmonyOverlays.Acquire();
         // Inbound half of the shared JS channel: the shell's dotnetHost proxy raises JsMessage
         // from arbitrary threads; binding the sink is idempotent (same call the WebView and
         // HybridWebView handlers make).
@@ -177,24 +189,20 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         {
             _ = DisposeWebViewManagerAsync(manager);
         }
+        OpenHarmonyOverlays.Release(_overlaySlot);
+        _overlaySlot = -1;
         base.DisconnectHandler(platformView);
     }
 
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        // The ArkWeb component is a shell overlay shared by the web handlers: place it on this
-        // control's frame (the command also shows it). While a connected HybridWebView has
-        // registered with the shell, the shell's single-overlay arbitration keeps the hybrid
-        // page loaded (FIX-WVP), so sending this control's frame would move that page onto the
-        // BlazorWebView's box and blank the hybrid area (observed on the device; FIX-BACKSIZE).
-        // The desired size above stays real, so the layout still arranges this control; only
-        // the overlay frame is withheld. An app without a registered hybrid still places the
-        // overlay on this control - the path the suite pins.
-        if (!OpenHarmonyHybridWebViewHandler.HasRegisteredOverlay)
-        {
-            OpenHarmonyWebViewHandler.SendPlatformFrame(frame);
-        }
+        // The ArkWeb component is a shell overlay: place it on this control's frame, tagged
+        // with this handler's own slot (MULTI-OVL). The previous single-overlay arbitration is
+        // gone: a registered HybridWebView no longer keeps the BlazorWebView's overlay, because
+        // the shell now serves each registered landing on its own slot (the frame used to move
+        // the hybrid page onto the BlazorWebView's box and blank the hybrid area, FIX-BACKSIZE).
+        OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
     }
 
     // ViewHandlerOfT.Standard (the partial the OpenHarmony slice compiles) answers Size.Zero, so
@@ -266,7 +274,8 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             webView.JSComponents,
             hostPageRelativePath,
             shellStartedHostPageLoad: _shellStartedHostPageLoad,
-            pageDocumentId: _pageId);
+            pageDocumentId: _pageId,
+            overlaySlot: _overlaySlot);
         _startDiag = $"manager created host={hostPageRelativePath} shellStarted={_shellStartedHostPageLoad} " +
             $"id={_pageId[..8]}";
         OpenHarmonyBridge.WriteStatus($"[maui] blazor {_startDiag}");
@@ -359,6 +368,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             ContentRoot = contentRootDir,
             HostFile = Path.GetFileName(hostPage),
             Id = _pageId,
+            Slot = _overlaySlot,
         }, OpenHarmonySliceJsonContext.Default.BlazorAssetsConfig));
         // The shell command arms origin interception and loads the host page (origin root), so
         // the manager created after this registration must not send the same load again.
@@ -391,7 +401,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
 
     /// <summary>Evaluates a script on the shell's ArkWeb page (the existing web eval channel).</summary>
     public Task<string?> EvaluateJavaScriptAsync(string script)
-        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script);
+        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, _overlaySlot);
 
     /// <summary>
     /// Inbound JS -> .NET: the payload must carry the shell's document-origin envelope, report
@@ -548,6 +558,10 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         /// <summary>Per-registration document id (B1/B3), echoed in the shell message envelope.</summary>
         [JsonPropertyName("id")]
         public string Id { get; init; } = string.Empty;
+
+        /// <summary>Overlay slot this registration owns (MULTI-OVL); the shell loads the page there.</summary>
+        [JsonPropertyName("slot")]
+        public int Slot { get; init; } = -1;
     }
 }
 
@@ -602,6 +616,10 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
     // document that still carries it (window.__ohBlazorId, B3).
     private readonly string _pageDocumentId;
 
+    // MULTI-OVL: the handler's overlay slot; navigation loads and evals carry it, so this
+    // manager's IPC never lands in another web control's ArkWeb overlay.
+    private readonly int _overlaySlot;
+
     public OpenHarmonyWebViewManager(
         OpenHarmonyBlazorWebViewHandler handler,
         IServiceProvider provider,
@@ -610,12 +628,14 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         JSComponentConfigurationStore jsComponents,
         string hostPageRelativePath,
         bool shellStartedHostPageLoad,
-        string pageDocumentId)
+        string pageDocumentId,
+        int overlaySlot)
         : base(provider, dispatcher, new Uri(OpenHarmonyBlazorWebViewHandler.AppOrigin), fileProvider, jsComponents, hostPageRelativePath)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _shellStartedHostPageLoad = shellStartedHostPageLoad;
         _pageDocumentId = pageDocumentId;
+        _overlaySlot = overlaySlot;
     }
 
     /// <summary>
@@ -636,7 +656,7 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             return;
         }
         OpenHarmonyBridge.WriteStatus($"[maui] blazor navigate: {absoluteUri}");
-        OpenHarmonyBridge.WebCommand(ShellLoadCommand, absoluteUri.ToString());
+        OpenHarmonyBridge.WebCommand(ShellLoadCommand, OpenHarmonyOverlays.Tag(_overlaySlot, absoluteUri.ToString()));
     }
 
     /// <summary>
@@ -674,7 +694,8 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             "else if(window.external&&typeof window.external.receiveMessage==='function')" +
             "{window.external.receiveMessage(m);}" +
             "return 'ok';})(" +
-            JsonSerializer.Serialize(_pageDocumentId, OpenHarmonySliceJsonContext.Default.String) + "," + JsonSerializer.Serialize(message, OpenHarmonySliceJsonContext.Default.String) + ")").ConfigureAwait(false);
+            JsonSerializer.Serialize(_pageDocumentId, OpenHarmonySliceJsonContext.Default.String) + "," + JsonSerializer.Serialize(message, OpenHarmonySliceJsonContext.Default.String) + ")",
+            _overlaySlot).ConfigureAwait(false);
         OpenHarmonyBridge.WriteStatus(
             $"[maui] blazor eval out ({message.Substring(0, Math.Min(120, message.Length))}) -> {result ?? "<null>"}");
         OpenHarmonyBlazorWebViewHandler.Diag($"eval out head={message.Substring(0, Math.Min(400, message.Length))} result={result ?? "<null>"}");

@@ -55,7 +55,7 @@ using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHybridWebView>
+public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHybridWebView>, IOpenHarmonyOverlaySlotOwner
 {
     /// <summary>Message prefix the stock HybridWebView JavaScript uses for raw messages.</summary>
     internal const string RawMessagePrefix = "__RawMessage|";
@@ -102,11 +102,20 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     /// <summary>
     /// Overlay slot this handler claimed while connected (MULTI-OVL): the hybrid frame, eval
     /// and registration all carry it, so the shell serves this handler's page on its own
-    /// ArkWeb overlay instead of arbitrating a single one (FIX-WVP). -1 beyond the shell cap.
+    /// ArkWeb overlay instead of arbitrating a single one (FIX-WVP). MULTI-OVERLAY-FULL: the
+    /// claim is owner-aware and LRU, so a third web control preempts the least-recently-used
+    /// idle slot and a preempted hybrid replays its registration (load/attach) on restore.
+    /// -1 while suspended between a preemption and the restore.
     /// </summary>
     private int _overlaySlot = -1;
 
-    /// <summary>The claimed overlay slot (MULTI-OVL); -1 beyond the cap.</summary>
+    /// <summary>True while this handler lost its slot to an LRU preemption (registration replay).</summary>
+    private bool _overlayPreempted;
+
+    /// <summary>True after a frame/load was sent for the current claim (the victim heuristic).</summary>
+    private bool _overlayEngaged;
+
+    /// <summary>The claimed overlay slot (MULTI-OVL); -1 while suspended or beyond the cap.</summary>
     internal int OverlaySlot => _overlaySlot;
 
     /// <summary>
@@ -229,7 +238,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        _overlaySlot = OpenHarmonyOverlays.Acquire();
+        _overlaySlot = OpenHarmonyOverlays.Acquire(this);
         lock (s_handlers)
         {
             s_handlers.Add(this);
@@ -259,10 +268,73 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         {
             s_activeInvokeHandler = null;
         }
-        OpenHarmonyOverlays.Release(_overlaySlot);
+        OpenHarmonyOverlays.Release(_overlaySlot, this);
         _overlaySlot = -1;
+        _overlayEngaged = false;
         base.DisconnectHandler(platformView);
     }
+
+    /// <summary>
+    /// MULTI-OVERLAY-FULL restore hook: claims a slot when this handler has none (a preemption
+    /// left it suspended) and reports whether the claim is a restore that has to replay its
+    /// registration. A live claim is only touched (LRU bookkeeping). Never throws.
+    /// </summary>
+    private bool EnsureOverlaySlot()
+    {
+        if (_overlaySlot >= 0)
+        {
+            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            return false;
+        }
+        int slot = OpenHarmonyOverlays.Acquire(this);
+        if (slot < 0)
+        {
+            return false;
+        }
+        _overlaySlot = slot;
+        if (_overlayPreempted)
+        {
+            _overlayPreempted = false;
+            OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay restored: slot {slot}");
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Replays this hybrid's registration on the slot it just re-acquired: the shell serves the
+    /// layout for the new slot and loads the hybrid origin, so the page (and its document id
+    /// stamp) comes back after a preemption.
+    /// </summary>
+    private void ReplayOverlay()
+    {
+        if (_overlaySlot < 0)
+        {
+            return;
+        }
+        OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay replay: slot {_overlaySlot}");
+        lock (s_handlers)
+        {
+            _registeredAssets = null;
+        }
+        RegisterHybridAssets();
+    }
+
+    /// <summary>LRU preemption (MULTI-OVERLAY-FULL): drop the claim, stay suspended until reused.</summary>
+    void IOpenHarmonyOverlaySlotOwner.OnOverlaySlotPreempted(int slot)
+    {
+        if (_overlaySlot != slot)
+        {
+            return;
+        }
+        _overlaySlot = -1;
+        _overlayPreempted = true;
+        _overlayEngaged = false;
+        OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay preempted: slot {slot}");
+    }
+
+    /// <summary>True while this hybrid's overlay is showing (the pool preempts idle owners first).</summary>
+    bool IOpenHarmonyOverlaySlotOwner.IsOverlaySlotEngaged => _overlaySlot >= 0 && _overlayEngaged;
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
         => new(Math.Min(widthConstraint, widthConstraint), Math.Min(400, heightConstraint));
@@ -271,8 +343,19 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     {
         base.PlatformArrange(frame);
         // The ArkWeb component is a shell overlay: place it on the control's frame (tagged with
-        // this handler's slot, MULTI-OVL).
-        OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
+        // this handler's slot, MULTI-OVL). MULTI-OVERLAY-FULL: a handler suspended by an LRU
+        // preemption must NOT restore from an arrange (a layout pass runs for every control, so
+        // restoring here would let two suspended hybrids preempt each other forever); an
+        // explicit use (registration/eval/raw message) or a first-time claim does it.
+        if (!_overlayPreempted)
+        {
+            EnsureOverlaySlot();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+            OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
+        }
         // First render: if ConnectHandler ran before the app context was published, this is
         // the point where the shell (and the extracted payload) is definitely available.
         if (IsHybridAssetsRegistrationPending)
@@ -291,6 +374,9 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
 
     private void RegisterHybridAssets()
     {
+        // MULTI-OVERLAY-FULL: a suspended handler claims (or re-claims) a slot here; the
+        // registration below is the load/attach replay, so no extra replay pass is needed.
+        EnsureOverlaySlot();
         OpenHarmonyAppContext? context = OpenHarmonyBridge.Context;
         if (context is null || string.IsNullOrEmpty(context.AppDir))
         {
@@ -319,7 +405,10 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             defaultFile = "index.html";
         }
         string payloadDir = context.AppDir.TrimEnd('/');
-        string key = payloadDir + "|" + root + "|" + defaultFile;
+        // MULTI-OVERLAY-FULL: the slot is part of the registration key, so a restore that lands
+        // on a different slot (or the same slot after another owner took it) re-issues the shell
+        // command and reloads the hybrid page there.
+        string key = payloadDir + "|" + root + "|" + defaultFile + "|s" + _overlaySlot;
         bool register;
         lock (s_handlers)
         {
@@ -339,9 +428,10 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         if (!register)
         {
             // ConnectHandler and the HybridRoot/DefaultFile mapper both land here; only
-            // re-issue the shell command when the payload layout actually changed.
+            // re-issue the shell command when the payload layout or the slot changed.
             return;
         }
+        _overlayEngaged = true;
         EnsureHybridWebViewScript(payloadDir);
         OpenHarmonyBridge.WebCommand("hybrid", JsonSerializer.Serialize(new HybridAssetsConfig
         {
@@ -507,7 +597,10 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
 
     /// <summary>
     /// Managed half of host.notifyHybridInvoke: services one JS invocation and completes it.
-    /// Exposed for tests; the native callback feeds the same path.
+    /// Exposed for tests; the native callback feeds the same path. MULTI-OVERLAY-FULL: the
+    /// request id carries the overlay slot (<see cref="OpenHarmonyOverlays.TryDecodeInvokeRequestId"/>),
+    /// so the invocation runs on the HybridWebView that owns that slot; an untagged legacy id
+    /// falls back to the last registered hybrid.
     /// </summary>
     internal static Task OnHybridInvokeAsync(int requestId, string methodName, string argsJson)
         => CompleteHybridInvokeAsync(requestId, methodName, argsJson);
@@ -526,7 +619,22 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         string payload;
         try
         {
-            OpenHarmonyHybridWebViewHandler? handler = s_activeInvokeHandler;
+            OpenHarmonyHybridWebViewHandler? handler;
+            if (OpenHarmonyOverlays.TryDecodeInvokeRequestId(requestId, out int invokeSlot, out _))
+            {
+                handler = HandlerForSlot(invokeSlot);
+                OpenHarmonyBridge.WriteStatus($"[maui] hybrid invoke (slot {invokeSlot}): {methodName}");
+                if (handler is null)
+                {
+                    SendInvokeResult(requestId, ErrorPayload(new InvalidOperationException(
+                        $"no HybridWebView owns overlay slot {invokeSlot}")));
+                    return;
+                }
+            }
+            else
+            {
+                handler = s_activeInvokeHandler;
+            }
             payload = handler is null
                 ? ErrorPayload(new InvalidOperationException("no HybridWebView page is registered with the shell"))
                 : await handler.InvokeDotNetAsync(methodName, argsJson).ConfigureAwait(false);
@@ -536,6 +644,22 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             payload = ErrorPayload(ex);
         }
         SendInvokeResult(requestId, payload);
+    }
+
+    /// <summary>The connected handler that owns <paramref name="slot"/> (or null).</summary>
+    private static OpenHarmonyHybridWebViewHandler? HandlerForSlot(int slot)
+    {
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers)
+            {
+                if (handler._overlaySlot == slot)
+                {
+                    return handler;
+                }
+            }
+        }
+        return null;
     }
 
     /// <summary>
@@ -667,7 +791,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         switch (command)
         {
             case nameof(IHybridWebView.EvaluateJavaScriptAsync) when args is EvaluateJavaScriptAsyncRequest request:
-                _ = CompleteEvaluateAsync(request, _overlaySlot);
+                _ = CompleteEvaluateAsync(request, UseOverlaySlot());
                 return;
             case nameof(IHybridWebView.SendRawMessage) when args is HybridWebViewRawMessage message:
                 if (message.Message is { } rawMessage)
@@ -684,9 +808,26 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         }
     }
 
+    /// <summary>
+    /// MULTI-OVERLAY-FULL use gate: ensures a live claim before a per-overlay command and
+    /// replays the registration (load/attach) when the claim is a restore; answers the claim.
+    /// </summary>
+    private int UseOverlaySlot()
+    {
+        if (EnsureOverlaySlot())
+        {
+            ReplayOverlay();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+        }
+        return _overlaySlot;
+    }
+
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
     public Task<string?> EvaluateJavaScriptAsync(string script)
-        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, _overlaySlot);
+        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, UseOverlaySlot());
 
     /// <summary>
     /// Delivers a raw message to the hybrid page. The stock HybridWebView JavaScript receives
@@ -720,7 +861,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             "else{window.dispatchEvent(new CustomEvent('HybridWebViewMessageReceived',{detail:{message:m}}));}" +
             "return 'ok';})(" +
             JsonSerializer.Serialize(_pageId, OpenHarmonySliceJsonContext.Default.String) + "," + json + ")",
-            _overlaySlot).ConfigureAwait(false);
+            UseOverlaySlot()).ConfigureAwait(false);
         if (result is not null && result.Trim().Trim('"') == "skip")
         {
             OpenHarmonyBridge.WriteStatus(
@@ -918,7 +1059,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         _ = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
             $"window.HybridWebView.__InvokeJavaScript({JsonSerializer.Serialize(taskId, OpenHarmonySliceJsonContext.Default.String)}, " +
             $"{JsonSerializer.Serialize(request.MethodName, OpenHarmonySliceJsonContext.Default.String)}, [{argList}])",
-            _overlaySlot).ConfigureAwait(false);
+            UseOverlaySlot()).ConfigureAwait(false);
         if (!OpenHarmonyWebViewHandler.IsJavaScriptBridgeAvailable)
         {
             // No host library: the page never received the kickoff, so do not wait for a reply.

@@ -15,7 +15,7 @@ using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>
+public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<IWebView>, IOpenHarmonyOverlaySlotOwner
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -70,15 +70,22 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<string?>> s_evalRequests = new();
 
     /// <summary>
-    /// Overlay slot this handler claimed while connected (MULTI-OVL). The shell declares two
-    /// ArkWeb overlays; the slot tags every per-overlay command (frame/load/show/history/eval)
-    /// and routes the shell's page events back to this handler. -1 when the shell cap is
-    /// reached: the control then keeps the legacy untagged protocol (slot 0), so a third
-    /// simultaneous web control must not corrupt another control's overlay.
+    /// Overlay slot this handler claimed while connected (MULTI-OVL); the slot tags every
+    /// per-overlay command (frame/load/show/history/eval) and routes the shell's page events
+    /// back to this handler. MULTI-OVERLAY-FULL makes the claim owner-aware and LRU: a third
+    /// concurrent web control preempts the least-recently-used idle slot instead of falling back
+    /// to the legacy protocol, and a preempted handler is restored (with a load replay) the next
+    /// time it is used. -1 while suspended between a preemption and the restore.
     /// </summary>
     private int _overlaySlot = -1;
 
-    /// <summary>The claimed overlay slot (MULTI-OVL); -1 beyond the cap.</summary>
+    /// <summary>True while this handler lost its slot to an LRU preemption (replay on restore).</summary>
+    private bool _overlayPreempted;
+
+    /// <summary>True after a frame/load was sent for the current claim (the victim heuristic).</summary>
+    private bool _overlayEngaged;
+
+    /// <summary>The claimed overlay slot (MULTI-OVL); -1 while suspended or beyond the cap.</summary>
     internal int OverlaySlot => _overlaySlot;
     private static readonly object s_navSync = new();
     private static readonly Dictionary<string, long> s_approvedNavigations = new();
@@ -127,7 +134,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        _overlaySlot = OpenHarmonyOverlays.Acquire();
+        _overlaySlot = OpenHarmonyOverlays.Acquire(this);
         lock (s_handlers)
         {
             s_handlers.Add(this);
@@ -142,10 +149,68 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             s_handlers.Remove(this);
         }
-        OpenHarmonyOverlays.Release(_overlaySlot);
+        OpenHarmonyOverlays.Release(_overlaySlot, this);
         _overlaySlot = -1;
+        _overlayEngaged = false;
         base.DisconnectHandler(platformView);
     }
+
+    /// <summary>
+    /// MULTI-OVERLAY-FULL restore hook: claims a slot when this handler has none (a preemption
+    /// left it suspended) and reports whether the claim is a restore that has to replay the
+    /// load. A live claim is only touched (LRU bookkeeping). Never throws.
+    /// </summary>
+    private bool EnsureOverlaySlot()
+    {
+        if (_overlaySlot >= 0)
+        {
+            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            return false;
+        }
+        int slot = OpenHarmonyOverlays.Acquire(this);
+        if (slot < 0)
+        {
+            return false;
+        }
+        _overlaySlot = slot;
+        if (_overlayPreempted)
+        {
+            _overlayPreempted = false;
+            OpenHarmonyBridge.WriteStatus($"[maui] web overlay restored: slot {slot}");
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Replays this control's page on the slot it just re-acquired: the Source load (url/html)
+    /// or the show, exactly what MapSource sends on a fresh connect.
+    /// </summary>
+    private void ReplayOverlay()
+    {
+        if (VirtualView is null || _overlaySlot < 0)
+        {
+            return;
+        }
+        OpenHarmonyBridge.WriteStatus($"[maui] web overlay replay: slot {_overlaySlot}");
+        MapSource(this, VirtualView);
+    }
+
+    /// <summary>LRU preemption (MULTI-OVERLAY-FULL): drop the claim, stay suspended until reused.</summary>
+    void IOpenHarmonyOverlaySlotOwner.OnOverlaySlotPreempted(int slot)
+    {
+        if (_overlaySlot != slot)
+        {
+            return;
+        }
+        _overlaySlot = -1;
+        _overlayPreempted = true;
+        _overlayEngaged = false;
+        OpenHarmonyBridge.WriteStatus($"[maui] web overlay preempted: slot {slot}");
+    }
+
+    /// <summary>True while this control's overlay is showing (the pool preempts idle owners first).</summary>
+    bool IOpenHarmonyOverlaySlotOwner.IsOverlaySlotEngaged => _overlaySlot >= 0 && _overlayEngaged;
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
         => new(Math.Min(widthConstraint, widthConstraint), Math.Min(400, heightConstraint));
@@ -155,7 +220,19 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         base.PlatformArrange(frame);
         // The native Web component is a shell overlay: place it on the control's frame (the
         // command also shows it). The values are MAUI DIP, which the shell applies as ArkUI vp.
-        SendPlatformFrame(frame, _overlaySlot);
+        // A handler suspended by an LRU preemption must NOT restore from an arrange (a layout
+        // pass runs for every control, so restoring here would let two suspended handlers
+        // preempt each other forever); its next explicit use - source/load, eval, history or a
+        // new arrange after it re-acquired - drives the restore and its load replay.
+        if (!_overlayPreempted)
+        {
+            EnsureOverlaySlot();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+            SendPlatformFrame(frame, _overlaySlot);
+        }
     }
 
     /// <summary>
@@ -176,25 +253,42 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         switch (command)
         {
             case nameof(IWebView.EvaluateJavaScriptAsync) when args is EvaluateJavaScriptAsyncRequest request:
-                _ = CompleteEvaluateAsync(request, _overlaySlot);
+                _ = CompleteEvaluateAsync(request, UseOverlaySlot());
                 return;
             case nameof(IWebView.Eval) when args is string script:
                 // Fire-and-forget evaluation (IWebView.Eval has no result).
-                _ = EvaluateJavaScriptAsyncCore(script, _overlaySlot);
+                _ = EvaluateJavaScriptAsyncCore(script, UseOverlaySlot());
                 return;
             case nameof(IWebView.GoBack):
-                SendHistoryCommand("back", WebNavigationEvent.Back, _overlaySlot);
+                SendHistoryCommand("back", WebNavigationEvent.Back, UseOverlaySlot());
                 return;
             case nameof(IWebView.GoForward):
-                SendHistoryCommand("forward", WebNavigationEvent.Forward, _overlaySlot);
+                SendHistoryCommand("forward", WebNavigationEvent.Forward, UseOverlaySlot());
                 return;
             case nameof(IWebView.Reload):
-                SendHistoryCommand("refresh", WebNavigationEvent.Refresh, _overlaySlot);
+                SendHistoryCommand("refresh", WebNavigationEvent.Refresh, UseOverlaySlot());
                 return;
             default:
                 base.Invoke(command, args);
                 return;
         }
+    }
+
+    /// <summary>
+    /// MULTI-OVERLAY-FULL use gate: ensures a live claim before a per-overlay command and replays
+    /// the page when the claim is a restore; answers the claim to tag the command with.
+    /// </summary>
+    private int UseOverlaySlot()
+    {
+        if (EnsureOverlaySlot())
+        {
+            ReplayOverlay();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+        }
+        return _overlaySlot;
     }
 
     /// <summary>
@@ -209,7 +303,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     }
 
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
-    public Task<string?> EvaluateJavaScriptAsync(string script) => EvaluateJavaScriptAsyncCore(script, _overlaySlot);
+    public Task<string?> EvaluateJavaScriptAsync(string script) => EvaluateJavaScriptAsyncCore(script, UseOverlaySlot());
 
     /// <summary>
     /// Sends the script to the ArkTS shell (registerWebEvalSink) and awaits the runJavaScript
@@ -1035,7 +1129,13 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     {
         // A source load is a fresh navigation, not a history move.
         s_pendingNavigation = WebNavigationEvent.NewPage;
-        int slot = handler._overlaySlot;
+        // MULTI-OVERLAY-FULL: claiming here is enough; the source load itself is the replay a
+        // restored handler needs (PlatformArrange's ReplayOverlay funnels through this mapper).
+        int slot = handler.EnsureOverlaySlot() ? handler._overlaySlot : handler.UseOverlaySlot();
+        if (handler._overlaySlot >= 0)
+        {
+            handler._overlayEngaged = true;
+        }
         switch (webView.Source)
         {
             case UrlWebViewSource url when !string.IsNullOrEmpty(url.Url):
@@ -1070,6 +1170,26 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             slot = eventSlot;
             effectiveState = rest;
         }
+        if (effectiveState == "activate")
+        {
+            // MULTI-OVERLAY-FULL: the shell forwards a user touch on an overlay as
+            // "s<slot>|activate" so the LRU pool refreshes the slot's owner (the shell cannot
+            // touch the pool itself). Only the handler that owns the slot is refreshed.
+            if (slot >= 0)
+            {
+                lock (s_handlers)
+                {
+                    foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
+                    {
+                        if (handler._overlaySlot == slot && OpenHarmonyOverlays.Touch(slot, handler))
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            return;
+        }
         if (effectiveState == "started")
         {
             // A load the shell already asked about (B6) raised Navigating before it started;
@@ -1091,10 +1211,12 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         }
         if (effectiveState == "error")
         {
-            // A failed main-frame load: clear the overlay (the managed surface shows through)
-            // and report the failure through IWebView.Navigated. The shell reports this outside
-            // the page's control, so a script cannot turn a failure into a success.
-            OpenHarmonyBridge.WebCommand("hide");
+            // A failed main-frame load: clear only that overlay (the managed surface shows
+            // through) and report the failure through IWebView.Navigated. The shell reports
+            // this outside the page's control, so a script cannot turn a failure into a
+            // success. MULTI-OVERLAY-FULL: the slot-tagged hide clears this overlay only;
+            // an untagged command (legacy shell) keeps the global hide.
+            OpenHarmonyBridge.WebCommand("hide", OpenHarmonyOverlays.Tag(slot));
             RaiseNavigated(url, WebNavigationResult.Failure, slot);
         }
         else if (effectiveState == "finished")

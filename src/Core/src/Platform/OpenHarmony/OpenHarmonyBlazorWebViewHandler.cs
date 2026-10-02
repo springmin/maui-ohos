@@ -77,7 +77,7 @@ namespace Microsoft.Maui.Platform;
 /// <c>MauiOpenHarmonyExtensions.SliceHandlers</c> (the <c>IBlazorWebView</c> entry), so an app
 /// that only calls <c>AddMauiBlazorWebView()</c> still gets this handler on this platform.
 /// </remarks>
-public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBlazorWebView>, IBlazorWebViewHandler
+public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBlazorWebView>, IBlazorWebViewHandler, IOpenHarmonyOverlaySlotOwner
 {
     /// <summary>Origin Blazor app content is loaded from (<c>BlazorWebViewHandler.AppOrigin</c>).</summary>
     public const string AppOrigin = OpenHarmonyBlazorWebView.AppOrigin;
@@ -88,11 +88,19 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     /// Overlay slot this handler claimed while connected (MULTI-OVL): the Blazor frame, eval and
     /// registration carry it, so the Blazor page renders on its own ArkWeb overlay even while a
     /// HybridWebView owns another (the FIX-WVP/FIX-BACKSIZE single-overlay withholding is gone).
-    /// -1 beyond the shell cap.
+    /// MULTI-OVERLAY-FULL: the claim is owner-aware and LRU, so a third web control preempts the
+    /// least-recently-used idle slot and a preempted Blazor handler replays its registration
+    /// (load/attach) on restore. -1 while suspended between a preemption and the restore.
     /// </summary>
     private int _overlaySlot = -1;
 
-    /// <summary>The claimed overlay slot (MULTI-OVL); -1 beyond the cap.</summary>
+    /// <summary>True while this handler lost its slot to an LRU preemption (registration replay).</summary>
+    private bool _overlayPreempted;
+
+    /// <summary>True after a frame/load was sent for the current claim (the victim heuristic).</summary>
+    private bool _overlayEngaged;
+
+    /// <summary>The claimed overlay slot (MULTI-OVL); -1 while suspended or beyond the cap.</summary>
     internal int OverlaySlot => _overlaySlot;
     private RootComponentsCollection? _rootComponents;
     private string? _registeredAssets;
@@ -155,7 +163,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        _overlaySlot = OpenHarmonyOverlays.Acquire();
+        _overlaySlot = OpenHarmonyOverlays.Acquire(this);
         // Inbound half of the shared JS channel: the shell's dotnetHost proxy raises JsMessage
         // from arbitrary threads; binding the sink is idempotent (same call the WebView and
         // HybridWebView handlers make).
@@ -189,10 +197,87 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         {
             _ = DisposeWebViewManagerAsync(manager);
         }
-        OpenHarmonyOverlays.Release(_overlaySlot);
+        OpenHarmonyOverlays.Release(_overlaySlot, this);
         _overlaySlot = -1;
+        _overlayEngaged = false;
         base.DisconnectHandler(platformView);
     }
+
+    /// <summary>
+    /// MULTI-OVERLAY-FULL restore hook: claims a slot when this handler has none (a preemption
+    /// left it suspended) and reports whether the claim is a restore that has to replay its
+    /// registration. A live claim is only touched (LRU bookkeeping). Never throws.
+    /// </summary>
+    private bool EnsureOverlaySlot()
+    {
+        if (_overlaySlot >= 0)
+        {
+            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            return false;
+        }
+        int slot = OpenHarmonyOverlays.Acquire(this);
+        if (slot < 0)
+        {
+            return false;
+        }
+        _overlaySlot = slot;
+        if (_overlayPreempted)
+        {
+            _overlayPreempted = false;
+            OpenHarmonyBridge.WriteStatus($"[maui] blazor overlay restored: slot {slot}");
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Replays this handler's registration on the slot it just re-acquired: the shell serves the
+    /// Blazor origin for the new slot and loads the host page, so the page reboots the Blazor
+    /// bootstrap and re-attaches the root components.
+    /// </summary>
+    private void ReplayOverlay()
+    {
+        if (_overlaySlot < 0)
+        {
+            return;
+        }
+        OpenHarmonyBridge.WriteStatus($"[maui] blazor overlay replay: slot {_overlaySlot}");
+        _registeredAssets = null;
+        RegisterBlazorAssets();
+    }
+
+    /// <summary>
+    /// MULTI-OVERLAY-FULL use gate for the manager's IPC: claim/touch and replay a suspended
+    /// handler; answers the current (possibly new) slot, -1 while none is claimed.
+    /// </summary>
+    internal int EnsureOverlaySlotForUse()
+    {
+        if (EnsureOverlaySlot())
+        {
+            ReplayOverlay();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+        }
+        return _overlaySlot;
+    }
+
+    /// <summary>LRU preemption (MULTI-OVERLAY-FULL): drop the claim, stay suspended until reused.</summary>
+    void IOpenHarmonyOverlaySlotOwner.OnOverlaySlotPreempted(int slot)
+    {
+        if (_overlaySlot != slot)
+        {
+            return;
+        }
+        _overlaySlot = -1;
+        _overlayPreempted = true;
+        _overlayEngaged = false;
+        OpenHarmonyBridge.WriteStatus($"[maui] blazor overlay preempted: slot {slot}");
+    }
+
+    /// <summary>True while this handler's overlay is showing (the pool preempts idle owners first).</summary>
+    bool IOpenHarmonyOverlaySlotOwner.IsOverlaySlotEngaged => _overlaySlot >= 0 && _overlayEngaged;
 
     public override void PlatformArrange(Rect frame)
     {
@@ -202,7 +287,18 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         // gone: a registered HybridWebView no longer keeps the BlazorWebView's overlay, because
         // the shell now serves each registered landing on its own slot (the frame used to move
         // the hybrid page onto the BlazorWebView's box and blank the hybrid area, FIX-BACKSIZE).
-        OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
+        // MULTI-OVERLAY-FULL: a preempted handler does not restore from an arrange (layout runs
+        // for every control; restoring here would livelock the pool); an explicit manager use
+        // (navigation/send) restores it.
+        if (!_overlayPreempted)
+        {
+            EnsureOverlaySlot();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+            OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
+        }
     }
 
     // ViewHandlerOfT.Standard (the partial the OpenHarmony slice compiles) answers Size.Zero, so
@@ -274,8 +370,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             webView.JSComponents,
             hostPageRelativePath,
             shellStartedHostPageLoad: _shellStartedHostPageLoad,
-            pageDocumentId: _pageId,
-            overlaySlot: _overlaySlot);
+            pageDocumentId: _pageId);
         _startDiag = $"manager created host={hostPageRelativePath} shellStarted={_shellStartedHostPageLoad} " +
             $"id={_pageId[..8]}";
         OpenHarmonyBridge.WriteStatus($"[maui] blazor {_startDiag}");
@@ -340,6 +435,9 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     /// </summary>
     public void RegisterBlazorAssets()
     {
+        // MULTI-OVERLAY-FULL: a suspended handler claims (or re-claims) a slot here; the
+        // registration below is the load/attach replay, so no extra replay pass is needed.
+        EnsureOverlaySlot();
         OpenHarmonyAppContext? context = OpenHarmonyBridge.Context;
         if (context is null || string.IsNullOrEmpty(context.AppDir))
         {
@@ -354,13 +452,15 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
             return;
         }
         // ConnectHandler and the HostPage mapper both land here; only re-issue the shell command
-        // when the payload layout actually changed (the command also loads the origin).
-        string key = context.AppDir.TrimEnd('/') + "|" + contentRootDir + "|" + Path.GetFileName(hostPage);
+        // when the payload layout or the overlay slot actually changed (the command also loads
+        // the origin; MULTI-OVERLAY-FULL adds the slot so a restore re-registers on its slot).
+        string key = context.AppDir.TrimEnd('/') + "|" + contentRootDir + "|" + Path.GetFileName(hostPage) + "|s" + _overlaySlot;
         if (key == _registeredAssets)
         {
             return;
         }
         _registeredAssets = key;
+        _overlayEngaged = true;
         OpenHarmonyBridge.WebCommand("blazor", JsonSerializer.Serialize(new BlazorAssetsConfig
         {
             Origin = AppOrigin,
@@ -401,7 +501,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
 
     /// <summary>Evaluates a script on the shell's ArkWeb page (the existing web eval channel).</summary>
     public Task<string?> EvaluateJavaScriptAsync(string script)
-        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, _overlaySlot);
+        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, EnsureOverlaySlotForUse());
 
     /// <summary>
     /// Inbound JS -> .NET: the payload must carry the shell's document-origin envelope, report
@@ -616,9 +716,10 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
     // document that still carries it (window.__ohBlazorId, B3).
     private readonly string _pageDocumentId;
 
-    // MULTI-OVL: the handler's overlay slot; navigation loads and evals carry it, so this
-    // manager's IPC never lands in another web control's ArkWeb overlay.
-    private readonly int _overlaySlot;
+    // MULTI-OVERLAY-FULL: the handler this manager serves; navigation loads and evals ask it
+    // for the current overlay slot (a handler suspended by an LRU preemption re-acquires and
+    // replays here), so this manager's IPC never lands in another web control's ArkWeb overlay.
+    private readonly OpenHarmonyBlazorWebViewHandler _handler;
 
     public OpenHarmonyWebViewManager(
         OpenHarmonyBlazorWebViewHandler handler,
@@ -628,14 +729,13 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         JSComponentConfigurationStore jsComponents,
         string hostPageRelativePath,
         bool shellStartedHostPageLoad,
-        string pageDocumentId,
-        int overlaySlot)
+        string pageDocumentId)
         : base(provider, dispatcher, new Uri(OpenHarmonyBlazorWebViewHandler.AppOrigin), fileProvider, jsComponents, hostPageRelativePath)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _shellStartedHostPageLoad = shellStartedHostPageLoad;
         _pageDocumentId = pageDocumentId;
-        _overlaySlot = overlaySlot;
+        _handler = handler;
     }
 
     /// <summary>
@@ -655,8 +755,11 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             OpenHarmonyBridge.WriteStatus($"[maui] blazor navigate skipped (shell started): {absoluteUri}");
             return;
         }
+        // MULTI-OVERLAY-FULL: a navigation is an activation; a suspended handler restores here
+        // (its registration reload already started) and the current slot tags the load.
+        int slot = _handler.EnsureOverlaySlotForUse();
         OpenHarmonyBridge.WriteStatus($"[maui] blazor navigate: {absoluteUri}");
-        OpenHarmonyBridge.WebCommand(ShellLoadCommand, OpenHarmonyOverlays.Tag(_overlaySlot, absoluteUri.ToString()));
+        OpenHarmonyBridge.WebCommand(ShellLoadCommand, OpenHarmonyOverlays.Tag(slot, absoluteUri.ToString()));
     }
 
     /// <summary>
@@ -686,6 +789,14 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
 
     private async Task SendMessageCoreAsync(string message)
     {
+        // MULTI-OVERLAY-FULL: a message to a suspended handler restores it (registration replay)
+        // and the eval lands on the current slot; it never falls back to another overlay.
+        int slot = _handler.EnsureOverlaySlotForUse();
+        if (slot < 0)
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] blazor message skipped: no overlay slot is claimed");
+            return;
+        }
         string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
             "(function(id,m){" +
             "if(window.__ohBlazorId!==id){return 'skip';}" +
@@ -695,7 +806,7 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             "{window.external.receiveMessage(m);}" +
             "return 'ok';})(" +
             JsonSerializer.Serialize(_pageDocumentId, OpenHarmonySliceJsonContext.Default.String) + "," + JsonSerializer.Serialize(message, OpenHarmonySliceJsonContext.Default.String) + ")",
-            _overlaySlot).ConfigureAwait(false);
+            slot).ConfigureAwait(false);
         OpenHarmonyBridge.WriteStatus(
             $"[maui] blazor eval out ({message.Substring(0, Math.Min(120, message.Length))}) -> {result ?? "<null>"}");
         OpenHarmonyBlazorWebViewHandler.Diag($"eval out head={message.Substring(0, Math.Min(400, message.Length))} result={result ?? "<null>"}");

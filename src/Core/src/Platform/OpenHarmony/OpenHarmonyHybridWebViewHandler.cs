@@ -528,9 +528,16 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     /// <summary>
     /// Copies the framework bootstrap script (embedded in the Microsoft.Maui assembly) next to
     /// the extracted payload, where the shell serves it from as _framework/hybridwebview.js.
+    /// In the payload-in-libs launch modes (JIT DEVCOMPAT and NativeAOT) the payload root is the
+    /// read-only bundle libs directory and the pack already staged the script there
+    /// (OpenHarmony.Hap.targets _OpenHarmonyStageHybridWebViewScript, SAMPLE-FIX); File.Create
+    /// then fails while the file the shell serves is already in place, so that case is not an
+    /// extraction failure. Writable payloads (the dotnet.zip extraction tree) keep the previous
+    /// overwrite semantics, so a refreshed app always serves the script of its own package.
     /// </summary>
     private static void EnsureHybridWebViewScript(string payloadDir)
     {
+        string destination = Path.Combine(payloadDir, "_framework", "hybridwebview.js");
         try
         {
             using Stream? script = typeof(Microsoft.Maui.Handlers.HybridWebViewHandler).Assembly
@@ -539,13 +546,18 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             {
                 return;
             }
-            string destination = Path.Combine(payloadDir, "_framework", "hybridwebview.js");
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             using FileStream file = File.Create(destination);
             script.CopyTo(file);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
+            if (File.Exists(destination))
+            {
+                // Pack-staged copy in a read-only payload root: nothing to extract, and the
+                // version matches the Microsoft.Maui assembly the app was built against.
+                return;
+            }
             OpenHarmonyBridge.WriteStatus($"[maui] hybrid bootstrap script extraction failed: {ex.Message}");
         }
     }

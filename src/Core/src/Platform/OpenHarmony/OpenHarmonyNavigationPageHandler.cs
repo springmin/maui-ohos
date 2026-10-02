@@ -152,6 +152,8 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
                 }
             }
             _toolbarPage = current;
+            // A page swap closes a dropdown the previous page had open.
+            PlatformView.ToolbarOverflowOpen = false;
             if (current is not null)
             {
                 if (current.ToolbarItems is System.Collections.Specialized.INotifyCollectionChanged collection)
@@ -164,14 +166,13 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
                 }
             }
         }
-        PlatformView.ToolbarItems.Clear();
         if (current is not null)
         {
-            foreach (ToolbarItem item in current.ToolbarItems)
-            {
-                ToolbarItem captured = item;
-                PlatformView.ToolbarItems.Add((captured.Text ?? string.Empty, () => ActivateToolbarItem(captured)));
-            }
+            OpenHarmonyToolbarMirror.Fill(PlatformView.ToolbarItems, current.ToolbarItems);
+        }
+        else
+        {
+            PlatformView.ToolbarItems.Clear();
         }
     }
 
@@ -195,22 +196,6 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
         // Text/enabled changes are mirrored by rebuilding the platform item list.
         UpdateToolbar();
         OpenHarmonyBridge.RequestRedraw();
-    }
-
-    private static void ActivateToolbarItem(ToolbarItem item)
-    {
-        if (!item.IsEnabled)
-        {
-            return;
-        }
-        if (item is IMenuItemController controller)
-        {
-            controller.Activate();
-        }
-        else
-        {
-            item.Command?.Execute(item.CommandParameter);
-        }
     }
 
     private void OnBackTapped()

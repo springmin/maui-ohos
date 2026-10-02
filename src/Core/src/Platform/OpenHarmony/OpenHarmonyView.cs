@@ -6,6 +6,39 @@ using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
 
 namespace Microsoft.Maui.Platform;
 
+/// <summary>
+/// One row of the compositor's navigation/shell toolbar. The platform mirror builds these from
+/// the current page's <c>ToolbarItem</c> collection (text and/or icon, order, enabled state,
+/// activation) and <see cref="OpenHarmonyView"/> draws and hit-tests them: primary items dock in
+/// the bar, secondary items live in the overflow dropdown behind the "more" affordance.
+/// </summary>
+public sealed class OpenHarmonyToolbarItem
+{
+    /// <summary>Item label (empty for an icon-only item, which still keeps its bar slot).</summary>
+    public string Text { get; init; } = string.Empty;
+
+    /// <summary>Decoded icon bytes (file source); null for text/glyph-only items.</summary>
+    public byte[]? IconBytes { get; init; }
+
+    /// <summary>Glyph text of a FontImageSource icon; null for text/bytes-only items.</summary>
+    public string? Glyph { get; init; }
+
+    /// <summary>Glyph size in surface pixels (already density-scaled); 0 means the bar default.</summary>
+    public float GlyphFontSize { get; init; }
+
+    /// <summary>Glyph colour (a FontImageSource's own colour).</summary>
+    public Color GlyphColor { get; init; } = Colors.White;
+
+    /// <summary>False mirrors an item whose IsEnabled is false: drawn dimmed, taps ignored.</summary>
+    public bool IsEnabled { get; init; } = true;
+
+    /// <summary>True for ToolbarItemOrder.Secondary: the row lives in the overflow dropdown.</summary>
+    public bool IsSecondary { get; init; }
+
+    /// <summary>The activation contract (MenuItem.Clicked/Command); never null.</summary>
+    public Action Activate { get; init; } = static () => { };
+}
+
 public class OpenHarmonyView
 {
     public IView? VirtualView { get; set; }
@@ -88,6 +121,7 @@ public class OpenHarmonyView
     public Action? Tap { get; set; }
 
     private bool _pressed;
+    private bool _toolbarPressed;
 
     /// <summary>
     /// Touch-down state. The setter drives the press-progress transition (see
@@ -1252,31 +1286,187 @@ public class OpenHarmonyView
         SetSwipeOpen(true);
     }
 
-    /// <summary>Toolbar items of the current page: label plus activation, drawn right-aligned.</summary>
-    public List<(string Text, Action Activate)> ToolbarItems { get; } = new();
+    /// <summary>
+    /// Toolbar rows of the current page: primary rows first, then the secondary rows behind the
+    /// overflow affordance (OpenHarmonyToolbarMirror fills the list). Drawing, hit-testing and
+    /// activation all read this list.
+    /// </summary>
+    public List<OpenHarmonyToolbarItem> ToolbarItems { get; } = new();
     public float ToolbarItemWidth { get; set; } = 140f;
 
-    /// <summary>Rectangle of a toolbar item (drawing and hit testing share it).</summary>
+    /// <summary>Width of the overflow ("more") affordance at the bar's trailing edge.</summary>
+    public const float ToolbarMoreWidth = 56f;
+
+    /// <summary>Height of one overflow dropdown row.</summary>
+    public const float ToolbarOverflowRowHeight = 46f;
+
+    /// <summary>Height of the bar owning the toolbar (nav bar or shell title bar).</summary>
+    public float ToolbarBarHeight => IsNavigationPage ? NavBarHeight : TitleBarHeight;
+
+    /// <summary>True when this platform view owns a toolbar (nav page bar or shell title bar).</summary>
+    public bool ShowsToolbar => IsNavigationPage || ShowsTitleBar;
+
+    /// <summary>True while the overflow dropdown is open.</summary>
+    public bool ToolbarOverflowOpen { get; set; }
+
+    /// <summary>True when the page has secondary items (the overflow affordance is drawn).</summary>
+    public bool HasToolbarOverflow
+    {
+        get
+        {
+            foreach (OpenHarmonyToolbarItem item in ToolbarItems)
+            {
+                if (item.IsSecondary)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /// <summary>Rectangle of a primary toolbar item (drawing and hit testing share it).</summary>
     public RectF ToolbarItemRect(int index)
     {
         RectF frame = CanvasFrame;
-        // Toolbar items are trailing actions: docked to the physical right in LTR, left in RTL.
-        float x = FlowRightToLeft
-            ? frame.X + index * ToolbarItemWidth
-            : frame.Right - (index + 1) * ToolbarItemWidth;
-        return new RectF(x, frame.Y, ToolbarItemWidth, NavBarHeight);
+        // Primary items are trailing actions: docked to the physical right in LTR, left in RTL,
+        // inside the more affordance when one exists.
+        float inset = FlowRightToLeft ? frame.X : frame.Right;
+        if (HasToolbarOverflow)
+        {
+            inset += FlowRightToLeft ? ToolbarMoreWidth : -ToolbarMoreWidth;
+        }
+        float x = FlowRightToLeft ? inset + index * ToolbarItemWidth : inset - (index + 1) * ToolbarItemWidth;
+        return new RectF(x, frame.Y, ToolbarItemWidth, ToolbarBarHeight);
     }
 
+    /// <summary>Rectangle of the overflow affordance (empty when no secondary item exists).</summary>
+    public RectF ToolbarMoreRect()
+    {
+        RectF frame = CanvasFrame;
+        float x = FlowRightToLeft ? frame.X : frame.Right - ToolbarMoreWidth;
+        return new RectF(x, frame.Y, ToolbarMoreWidth, ToolbarBarHeight);
+    }
+
+    /// <summary>Rectangle of an overflow row (below the bar, trailing-aligned).</summary>
+    public RectF ToolbarOverflowRect(int row)
+    {
+        RectF frame = CanvasFrame;
+        float width = Math.Min(220f, frame.Width);
+        float x = FlowRightToLeft ? frame.X : frame.Right - width;
+        return new RectF(x, frame.Y + ToolbarBarHeight + row * ToolbarOverflowRowHeight, width, ToolbarOverflowRowHeight);
+    }
+
+    /// <summary>Ordinal of the primary toolbar item at the point (-1 when outside every item).</summary>
     public int ToolbarItemAt(float x, float y)
     {
-        for (int i = 0; i < ToolbarItems.Count; i++)
+        int index = 0;
+        foreach (OpenHarmonyToolbarItem item in ToolbarItems)
         {
-            if (ToolbarItemRect(i).Contains(x, y))
+            if (item.IsSecondary)
             {
-                return i;
+                continue;
             }
+            if (ToolbarItemRect(index).Contains(x, y))
+            {
+                return index;
+            }
+            index++;
         }
         return -1;
+    }
+
+    /// <summary>True when the point is inside the overflow affordance.</summary>
+    public bool InToolbarMore(float x, float y)
+        => HasToolbarOverflow && ToolbarMoreRect().Contains(x, y);
+
+    /// <summary>Row index of the open overflow dropdown (-1 when closed or outside it).</summary>
+    public int ToolbarOverflowIndexAt(float x, float y)
+    {
+        if (!ToolbarOverflowOpen)
+        {
+            return -1;
+        }
+        int row = 0;
+        foreach (OpenHarmonyToolbarItem item in ToolbarItems)
+        {
+            if (!item.IsSecondary)
+            {
+                continue;
+            }
+            if (ToolbarOverflowRect(row).Contains(x, y))
+            {
+                return row;
+            }
+            row++;
+        }
+        return -1;
+    }
+
+    /// <summary>Activates a primary item by ordinal (false for a disabled or missing item).</summary>
+    public bool ActivateToolbarItem(int index)
+    {
+        OpenHarmonyToolbarItem? item = ToolbarItemAtOrdinal(index, secondary: false);
+        if (item is null || !item.IsEnabled)
+        {
+            return false;
+        }
+        item.Activate();
+        return true;
+    }
+
+    /// <summary>Opens/closes the overflow dropdown and requests a frame.</summary>
+    public void SetToolbarOverflow(bool open)
+    {
+        if (ToolbarOverflowOpen == open)
+        {
+            return;
+        }
+        ToolbarOverflowOpen = open && HasToolbarOverflow;
+        RequestToolbarRedraw();
+    }
+
+    /// <summary>Activates the secondary item behind an overflow row (and closes the dropdown).</summary>
+    public bool ActivateToolbarOverflow(int row)
+    {
+        OpenHarmonyToolbarItem? item = ToolbarItemAtOrdinal(row, secondary: true);
+        if (item is null || !item.IsEnabled)
+        {
+            return false;
+        }
+        SetToolbarOverflow(false);
+        item.Activate();
+        return true;
+    }
+
+    /// <summary>The ordinal-th item of the primary or secondary partition.</summary>
+    private OpenHarmonyToolbarItem? ToolbarItemAtOrdinal(int ordinal, bool secondary)
+    {
+        int index = 0;
+        foreach (OpenHarmonyToolbarItem item in ToolbarItems)
+        {
+            if (item.IsSecondary != secondary)
+            {
+                continue;
+            }
+            if (index++ == ordinal)
+            {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private static void RequestToolbarRedraw()
+    {
+        try
+        {
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.RequestRedraw();
+        }
+        catch (Exception)
+        {
+            // No host: the next input/frame event repaints anyway.
+        }
     }
 
     public bool InBackRegion(float x, float y)
@@ -2264,6 +2454,9 @@ public class OpenHarmonyView
         canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(28);
         canvas.DrawString(TitleText ?? string.Empty, frame.X + 56, frame.Y, frame.Width - 112, TitleBarHeight,
             HorizontalAlignment.Center, VerticalAlignment.Center);
+        // The current page's toolbar rows (ShellChrome mirror): the same primary/secondary
+        // surface the navigation bar draws.
+        DrawToolbarItems(canvas, frame, Colors.White);
     }
 
     private void DrawTabBar(MauiCanvas canvas, RectF frame)
@@ -2451,14 +2644,123 @@ public class OpenHarmonyView
         canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(30);
         canvas.DrawString(NavTitle ?? string.Empty, frame.X + NavBackWidth, frame.Y,
             frame.Width - NavBackWidth * 2, NavBarHeight, HorizontalAlignment.Center, VerticalAlignment.Center);
-        canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
-        for (int i = 0; i < ToolbarItems.Count; i++)
+        DrawToolbarItems(canvas, frame, NavBarTextColor);
+        // The current page is drawn by the renderer, translated below the bar.
+    }
+
+    /// <summary>
+    /// Draws the primary toolbar rows (icon and/or label, dimmed when disabled) and the overflow
+    /// affordance when the page has secondary items. Shared by the navigation bar and the shell
+    /// title bar so both bars express the same ToolbarItem contract.
+    /// </summary>
+    private void DrawToolbarItems(MauiCanvas canvas, RectF frame, Color textColor)
+    {
+        int index = 0;
+        foreach (OpenHarmonyToolbarItem item in ToolbarItems)
         {
-            RectF item = ToolbarItemRect(i);
-            canvas.DrawString(ToolbarItems[i].Text, item.X, item.Y, item.Width, item.Height,
+            if (item.IsSecondary)
+            {
+                continue;
+            }
+            DrawToolbarItem(canvas, item, ToolbarItemRect(index), textColor);
+            index++;
+        }
+        if (!HasToolbarOverflow)
+        {
+            return;
+        }
+        // "More": three stacked dots, drawn vectorially so no glyph/font is required.
+        RectF more = ToolbarMoreRect();
+        canvas.FillColor = textColor;
+        float cx = more.Center.X;
+        float cy = more.Center.Y;
+        for (int i = -1; i <= 1; i++)
+        {
+            canvas.FillCircle(cx, cy + i * 9f, 3f);
+        }
+    }
+
+    /// <summary>Draws one primary item: icon and/or label, dimmed when disabled.</summary>
+    private void DrawToolbarItem(MauiCanvas canvas, OpenHarmonyToolbarItem item, RectF rect, Color textColor)
+    {
+        bool hasText = !string.IsNullOrEmpty(item.Text);
+        bool hasGlyph = !string.IsNullOrEmpty(item.Glyph);
+        bool hasImage = item.IconBytes is { Length: > 0 };
+        if (!hasText && !hasGlyph && !hasImage)
+        {
+            return;
+        }
+        float savedAlpha = canvas.Alpha;
+        if (!item.IsEnabled)
+        {
+            canvas.Alpha = savedAlpha * 0.5f;
+        }
+        bool iconThenText = hasText && (hasGlyph || hasImage);
+        float iconWidth = iconThenText ? Math.Min(32f, rect.Width) : 0f;
+        if (hasImage)
+        {
+            float side = Math.Min(28f, Math.Max(8f, rect.Height - 16f));
+            float iconX = iconThenText
+                ? (FlowRightToLeft ? rect.Right - iconWidth : rect.X) + (iconWidth - side) / 2f
+                : rect.X + (rect.Width - side) / 2f;
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas.DrawImageBytes(
+                item.IconBytes!, (int)iconX, (int)(rect.Y + (rect.Height - side) / 2f), (int)side, (int)side);
+        }
+        else if (hasGlyph)
+        {
+            canvas.FontColor = item.GlyphColor;
+            canvas.FontSize = item.GlyphFontSize > 0 ? item.GlyphFontSize : OpenHarmonyFontManager.ScaleFontSize(26);
+            float glyphX = iconThenText
+                ? (FlowRightToLeft ? rect.Right - iconWidth : rect.X)
+                : rect.X;
+            canvas.DrawString(item.Glyph!, glyphX, rect.Y, iconThenText ? iconWidth : rect.Width, rect.Height,
                 HorizontalAlignment.Center, VerticalAlignment.Center);
         }
-        // The current page is drawn by the renderer, translated below the bar.
+        if (hasText)
+        {
+            float textX = iconThenText && !FlowRightToLeft ? rect.X + iconWidth : rect.X;
+            float textWidth = iconThenText ? rect.Width - iconWidth : rect.Width;
+            canvas.FontColor = textColor;
+            canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
+            canvas.DrawString(item.Text, textX, rect.Y, Math.Max(8f, textWidth), rect.Height,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+        canvas.Alpha = savedAlpha;
+    }
+
+    /// <summary>
+    /// Draws the open overflow dropdown (the secondary rows). The renderer calls this after the
+    /// tree walk so the rows float above the page content.
+    /// </summary>
+    public void DrawToolbarOverflow(MauiCanvas canvas)
+    {
+        if (!ToolbarOverflowOpen)
+        {
+            return;
+        }
+        int rows = 0;
+        foreach (OpenHarmonyToolbarItem item in ToolbarItems)
+        {
+            if (!item.IsSecondary)
+            {
+                continue;
+            }
+            RectF row = ToolbarOverflowRect(rows++);
+            canvas.FillColor = Colors.Black;
+            canvas.FillRectangle(row.X, row.Y, row.Width, row.Height);
+            canvas.StrokeColor = Colors.Gray;
+            canvas.StrokeSize = 1;
+            canvas.DrawRectangle(row.X, row.Y, row.Width, row.Height);
+            canvas.FontColor = item.IsEnabled ? Colors.White : Colors.Gray;
+            canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
+            canvas.DrawString(item.Text ?? string.Empty, row.X + 16, row.Y, row.Width - 32, row.Height,
+                FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+        if (rows == 0)
+        {
+            // The items went away while the dropdown was open.
+            ToolbarOverflowOpen = false;
+        }
     }
 
     private void DrawCheckBox(MauiCanvas canvas, RectF frame)
@@ -2607,7 +2909,8 @@ public class OpenHarmonyView
                 Pressed = true;
                 return true;
             }
-            if (up && Pressed)
+            // A shell's title-bar press shares Pressed but belongs to the toolbar block below.
+            if (up && Pressed && !_toolbarPressed)
             {
                 Pressed = false;
                 if (tab >= 0)
@@ -2672,22 +2975,37 @@ public class OpenHarmonyView
                 return true;
             }
         }
-        if (IsNavigationPage)
+        if (ShowsToolbar)
         {
-            if (down && (InBackRegion(x, y) || ToolbarItemAt(x, y) >= 0))
+            // The bar's own affordances (back, primary items, the overflow button) win over the
+            // page content, like a native toolbar. The shell bar shares the item handling; its
+            // back/hamburger slots are the renderer's chrome block.
+            bool inBar = y >= CanvasFrame.Y && y <= CanvasFrame.Y + ToolbarBarHeight;
+            int toolbarIndex = inBar ? ToolbarItemAt(x, y) : -1;
+            bool inMore = inBar && InToolbarMore(x, y);
+            bool inBack = IsNavigationPage && CanGoBack && InBackRegion(x, y);
+            if (down && (inBack || toolbarIndex >= 0 || inMore))
             {
+                if (inMore)
+                {
+                    // The affordance toggles the dropdown (the renderer consumes an open
+                    // dropdown's taps, so closing here also works when no frame has run yet).
+                    SetToolbarOverflow(!ToolbarOverflowOpen);
+                    return true;
+                }
+                _toolbarPressed = true;
                 Pressed = true;
                 return true;
             }
-            if (up && Pressed)
+            if (up && _toolbarPressed)
             {
+                _toolbarPressed = false;
                 Pressed = false;
-                int toolbarIndex = ToolbarItemAt(x, y);
                 if (toolbarIndex >= 0)
                 {
-                    ToolbarItems[toolbarIndex].Activate();
+                    ActivateToolbarItem(toolbarIndex);
                 }
-                else if (InBackRegion(x, y))
+                else if (inBack)
                 {
                     BackTapped?.Invoke();
                 }

@@ -121,6 +121,7 @@ public sealed class OpenHarmonyWindowRenderer
         _canvas.FillRectangle(0, 0, width, height);
         _popupView = null;
         _flyoutPanelView = null;
+        _toolbarOverflowView = null;
         _carouselViews.Clear();
         DrawView(content, OpenHarmonyFlowMap.Identity, contentRightToLeft);
         if (showsTitleBar)
@@ -152,6 +153,12 @@ public sealed class OpenHarmonyWindowRenderer
         {
             // Dropdowns float above the rest of the tree.
             popup.DrawPopup(_canvas);
+        }
+        if (_toolbarOverflowView is { ToolbarOverflowOpen: true } toolbarOverflow)
+        {
+            // The toolbar's overflow dropdown floats above the content too (the bar itself is
+            // drawn with its own view, before the children it would otherwise sit under).
+            toolbarOverflow.DrawToolbarOverflow(_canvas);
         }
         OpenHarmonyAlertHost.SetSurface(width, height);
         OpenHarmonyView.SetSurfaceViewport(width, height);
@@ -643,6 +650,11 @@ public sealed class OpenHarmonyWindowRenderer
                 // Drawn last so the dropdown floats above the rest of the tree.
                 _popupView = platform;
             }
+            if (platform.ToolbarOverflowOpen)
+            {
+                // Same deferral for the toolbar overflow dropdown.
+                _toolbarOverflowView = platform;
+            }
             if (platform.FlyoutOpen)
             {
                 _flyoutPanelView = platform;
@@ -767,6 +779,7 @@ public sealed class OpenHarmonyWindowRenderer
     private float _downY;
     private bool _moved;
     private OpenHarmonyView? _popupView;
+    private OpenHarmonyView? _toolbarOverflowView;
     private OpenHarmonyView? _flyoutPanelView;
     private readonly List<OpenHarmonyView> _carouselViews = new();
     private OpenHarmonyView? _textDragTarget;
@@ -1289,6 +1302,10 @@ public sealed class OpenHarmonyWindowRenderer
         {
             wanted |= TouchTargets.Popup;
         }
+        if (_toolbarOverflowView is not { ToolbarOverflowOpen: true })
+        {
+            wanted |= TouchTargets.ToolbarOverflow;
+        }
         if (_flyoutPanelView is not { FlyoutOpen: true })
         {
             wanted |= TouchTargets.Flyout;
@@ -1306,6 +1323,10 @@ public sealed class OpenHarmonyWindowRenderer
             if ((wanted & TouchTargets.Popup) != 0)
             {
                 _popupView = walk.Popup;
+            }
+            if ((wanted & TouchTargets.ToolbarOverflow) != 0)
+            {
+                _toolbarOverflowView = walk.ToolbarOverflow;
             }
             if ((wanted & TouchTargets.Flyout) != 0)
             {
@@ -1399,6 +1420,36 @@ public sealed class OpenHarmonyWindowRenderer
                         popup.PopupClosed?.Invoke();
                         OpenHarmonyBridge.RequestRedraw();
                     }
+                }
+            }
+            return true;
+        }
+        if (_toolbarOverflowView is { ToolbarOverflowOpen: true } toolbarOverflow)
+        {
+            // The open toolbar dropdown owns the touch: a row activates its secondary item, a
+            // tap outside (or on the affordance, which toggles it closed) dismisses. The bar
+            // itself is below the dropdown, so this runs before the content routing.
+            if (down)
+            {
+                _downX = x;
+                _downY = y;
+                _moved = false;
+                if (toolbarOverflow.InToolbarMore(x, y))
+                {
+                    toolbarOverflow.SetToolbarOverflow(false);
+                }
+                return true;
+            }
+            if (up && !_moved)
+            {
+                int row = toolbarOverflow.ToolbarOverflowIndexAt(x, y);
+                if (row >= 0)
+                {
+                    toolbarOverflow.ActivateToolbarOverflow(row);
+                }
+                else if (!toolbarOverflow.InToolbarMore(x, y))
+                {
+                    toolbarOverflow.SetToolbarOverflow(false);
                 }
             }
             return true;
@@ -1779,6 +1830,7 @@ public sealed class OpenHarmonyWindowRenderer
         Flyout = 1 << 6,
         Drop = 1 << 7,
         Graphics = 1 << 8,
+        ToolbarOverflow = 1 << 9,
     }
 
     /// <summary>Results of one touch walk; null means "nothing of that kind under the point".</summary>
@@ -1790,6 +1842,7 @@ public sealed class OpenHarmonyWindowRenderer
         public IView? Drag;
         public IView? Gesture;
         public OpenHarmonyView? Popup;
+        public OpenHarmonyView? ToolbarOverflow;
         public OpenHarmonyView? Flyout;
         public OpenHarmonyView? Graphics;
 
@@ -1822,6 +1875,10 @@ public sealed class OpenHarmonyWindowRenderer
             if ((wanted & TouchTargets.Popup) != 0 && walk.Popup is null && platform.PopupVisible)
             {
                 walk.Popup = platform;
+            }
+            if ((wanted & TouchTargets.ToolbarOverflow) != 0 && walk.ToolbarOverflow is null && platform.ToolbarOverflowOpen)
+            {
+                walk.ToolbarOverflow = platform;
             }
             if ((wanted & TouchTargets.Flyout) != 0 && walk.Flyout is null && platform.FlyoutOpen)
             {

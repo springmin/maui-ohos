@@ -13,10 +13,11 @@
 // ChromeRefresh, so a change is picked up on the next frame.
 //
 // ToolbarItems: the current page's collection is mirrored into OpenHarmonyView.ToolbarItems the
-// same way OpenHarmonyNavigationPageHandler mirrors it for NavigationPage: the bar draws one
-// text item per ToolbarItem and a tap activates it (IMenuItemController.Activate, else the
-// item's Command with its CommandParameter). The mirror compares the page, the item count and
-// the item texts before rebuilding, because the shell chrome sync runs on every draw.
+// same way OpenHarmonyNavigationPageHandler mirrors it for NavigationPage - text, icon
+// (file bytes or FontImageSource glyph), Order/Priority and IsEnabled (OpenHarmonyToolbarMirror),
+// with a tap activating the item (IMenuItemController.Activate, else the item's Command with its
+// CommandParameter). The rebuild is event-driven (page swap, collection/item changes), so the
+// per-draw chrome sync only compares the page reference.
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
@@ -66,8 +67,10 @@ internal sealed class OpenHarmonyShellChrome
     /// <summary>Clears the mirrored toolbar and releases the title view row.</summary>
     public void Detach()
     {
+        UnsubscribeToolbar(_toolbarPage);
         _toolbarPage = null;
         _view.ToolbarItems.Clear();
+        _view.ToolbarOverflowOpen = false;
         _titleViewRow = null;
         _view.ShellTitleViewRow = null;
     }
@@ -138,66 +141,71 @@ internal sealed class OpenHarmonyShellChrome
         => shell.CurrentPage?.Title ?? shell.CurrentItem?.Title ?? string.Empty;
 
     /// <summary>
-    /// Mirrors <paramref name="page"/>'s ToolbarItems into the platform bar. Rebuilds only when
-    /// the page, the item count or an item text changed; the tap delegate re-checks IsEnabled.
+    /// Mirrors <paramref name="page"/>'s ToolbarItems into the platform bar (text, icon, order,
+    /// enabled state and activation). The rebuild is event-driven - a page swap or a collection/
+    /// item change - so the per-draw Apply only compares the page reference, like MAUI's own
+    /// platform toolbars.
     /// </summary>
     private void UpdateToolbar(Page? page)
     {
-        bool pageChanged = !ReferenceEquals(_toolbarPage, page);
+        if (ReferenceEquals(_toolbarPage, page))
+        {
+            return;
+        }
+        UnsubscribeToolbar(_toolbarPage);
         _toolbarPage = page;
-        if (!pageChanged && !ToolbarDiffers(page))
+        if (page is not null)
         {
-            return;
+            if (page.ToolbarItems is System.Collections.Specialized.INotifyCollectionChanged collection)
+            {
+                collection.CollectionChanged += OnToolbarCollectionChanged;
+            }
+            foreach (ToolbarItem item in page.ToolbarItems)
+            {
+                item.PropertyChanged += OnToolbarItemChanged;
+            }
         }
-        _view.ToolbarItems.Clear();
-        if (page is null)
-        {
-            _refresh();
-            return;
-        }
-        foreach (ToolbarItem item in page.ToolbarItems)
-        {
-            ToolbarItem captured = item;
-            _view.ToolbarItems.Add((captured.Text ?? string.Empty, () => ActivateToolbarItem(captured)));
-        }
+        // A page swap closes a dropdown the previous page had open.
+        _view.ToolbarOverflowOpen = false;
+        RebuildToolbar();
+    }
+
+    private void RebuildToolbar()
+    {
+        OpenHarmonyToolbarMirror.Fill(_view.ToolbarItems, _toolbarPage?.ToolbarItems);
         _refresh();
     }
 
-    /// <summary>True when the mirrored item texts no longer match the page's collection.</summary>
-    private bool ToolbarDiffers(Page? page)
+    private void UnsubscribeToolbar(Page? page)
     {
         if (page is null)
         {
-            return _view.ToolbarItems.Count > 0;
-        }
-        if (_view.ToolbarItems.Count != page.ToolbarItems.Count)
-        {
-            return true;
-        }
-        for (int i = 0; i < page.ToolbarItems.Count; i++)
-        {
-            if (!string.Equals(_view.ToolbarItems[i].Text, page.ToolbarItems[i].Text ?? string.Empty, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>Same activation contract as OpenHarmonyNavigationPageHandler.ActivateToolbarItem.</summary>
-    private static void ActivateToolbarItem(ToolbarItem item)
-    {
-        if (!item.IsEnabled)
-        {
             return;
         }
-        if (item is IMenuItemController controller)
+        if (page.ToolbarItems is System.Collections.Specialized.INotifyCollectionChanged collection)
         {
-            controller.Activate();
+            collection.CollectionChanged -= OnToolbarCollectionChanged;
         }
-        else
+        foreach (ToolbarItem item in page.ToolbarItems)
         {
-            item.Command?.Execute(item.CommandParameter);
+            item.PropertyChanged -= OnToolbarItemChanged;
         }
     }
+
+    private void OnToolbarCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
+    {
+        // Re-read the page so the per-item subscriptions follow the collection.
+        if (_toolbarPage is { } page)
+        {
+            foreach (ToolbarItem item in page.ToolbarItems)
+            {
+                item.PropertyChanged -= OnToolbarItemChanged;
+                item.PropertyChanged += OnToolbarItemChanged;
+            }
+        }
+        RebuildToolbar();
+    }
+
+    private void OnToolbarItemChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+        => RebuildToolbar();
 }

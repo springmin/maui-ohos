@@ -728,6 +728,23 @@ Microsoft.Maui.Platform.OpenHarmonyTicker.SystemEnabled.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyTicker.SystemEnabled.set -> void
 Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler
 Microsoft.Maui.Platform.OpenHarmonyTimePickerHandler.OpenHarmonyTimePickerHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.Activate.get -> System.Action!
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.Activate.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.Glyph.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.Glyph.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.GlyphColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.GlyphColor.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.GlyphFontSize.get -> float
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.GlyphFontSize.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.IconBytes.get -> byte[]?
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.IconBytes.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.IsEnabled.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.IsEnabled.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.IsSecondary.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.IsSecondary.init -> void
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.Text.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyToolbarItem.Text.init -> void
 Microsoft.Maui.Platform.OpenHarmonyVersionTracking
 Microsoft.Maui.Platform.OpenHarmonyVersionTracking.BuildHistory.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Microsoft.Maui.Platform.OpenHarmonyVersionTracking.CurrentBuild.get -> string!
@@ -751,6 +768,8 @@ Microsoft.Maui.Platform.OpenHarmonyVibration.OpenHarmonyVibration() -> void
 Microsoft.Maui.Platform.OpenHarmonyVibration.Vibrate() -> void
 Microsoft.Maui.Platform.OpenHarmonyVibration.Vibrate(System.TimeSpan duration) -> void
 Microsoft.Maui.Platform.OpenHarmonyView
+Microsoft.Maui.Platform.OpenHarmonyView.ActivateToolbarItem(int index) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ActivateToolbarOverflow(int row) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.BackTapped.get -> System.Action?
 Microsoft.Maui.Platform.OpenHarmonyView.BackTapped.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.Background.get -> Microsoft.Maui.Graphics.Color?
@@ -803,6 +822,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.DrawCalendar(Microsoft.OpenHarmony.Maui.
 Microsoft.Maui.Platform.OpenHarmonyView.DrawFlyoutPanel(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawPopup(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.DrawShadow(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawToolbarOverflow(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.FlyoutDismiss.get -> System.Action?
 Microsoft.Maui.Platform.OpenHarmonyView.FlyoutDismiss.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.FlyoutItemAt(float x, float y) -> int
@@ -835,6 +855,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverStart.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.GraphicsStartInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[]>?
 Microsoft.Maui.Platform.OpenHarmonyView.GraphicsStartInteraction.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.HitTest(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.HasToolbarOverflow.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.get -> Microsoft.Maui.TextAlignment
 Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ImageAspect.get -> Microsoft.Maui.Aspect
@@ -846,6 +867,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.InBackRegion(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.InClearButton(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.InFlyoutPanel(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.InHamburger(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InToolbarMore(float x, float y) -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.IndicatorColor.get -> Microsoft.Maui.Graphics.Color!
 Microsoft.Maui.Platform.OpenHarmonyView.IndicatorColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.IndicatorCount.get -> int
@@ -976,6 +998,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.SelectedTab.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.SelectionLength.get -> int
 Microsoft.Maui.Platform.OpenHarmonyView.SelectionLength.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.SetSwipeOpen(bool open, bool notify = true) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SetToolbarOverflow(bool open) -> void
 Microsoft.Maui.Platform.OpenHarmonyView.Shape.get -> Microsoft.Maui.Graphics.IShape?
 Microsoft.Maui.Platform.OpenHarmonyView.Shape.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ShapeFill.get -> Microsoft.Maui.Graphics.Paint?
@@ -990,6 +1013,7 @@ Microsoft.Maui.Platform.OpenHarmonyView.ShowsHamburger.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.ShowsHamburger.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.ShowsTitleBar.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.ShowsTitleBar.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsToolbar.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyView.SliderDrag.get -> System.Action<float, bool>?
 Microsoft.Maui.Platform.OpenHarmonyView.SliderDrag.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.SliderFraction.get -> float
@@ -1053,11 +1077,17 @@ Microsoft.Maui.Platform.OpenHarmonyView.TextColor.get -> Microsoft.Maui.Graphics
 Microsoft.Maui.Platform.OpenHarmonyView.TextColor.set -> void
 Microsoft.Maui.Platform.OpenHarmonyView.TitleText.get -> string?
 Microsoft.Maui.Platform.OpenHarmonyView.TitleText.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarBarHeight.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemAt(float x, float y) -> int
 Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemRect(int index) -> Microsoft.Maui.Graphics.RectF
 Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemWidth.get -> float
 Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemWidth.set -> void
-Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItems.get -> System.Collections.Generic.List<(string! Text, System.Action! Activate)>!
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItems.get -> System.Collections.Generic.List<Microsoft.Maui.Platform.OpenHarmonyToolbarItem!>!
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarMoreRect() -> Microsoft.Maui.Graphics.RectF
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowIndexAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowOpen.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowOpen.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowRect(int row) -> Microsoft.Maui.Graphics.RectF
 Microsoft.Maui.Platform.OpenHarmonyView.ViewChildren.get -> System.Collections.Generic.List<Microsoft.Maui.IView!>!
 Microsoft.Maui.Platform.OpenHarmonyView.VirtualView.get -> Microsoft.Maui.IView?
 Microsoft.Maui.Platform.OpenHarmonyView.VirtualView.set -> void
@@ -1136,6 +1166,8 @@ const Microsoft.Maui.Platform.OpenHarmonyView.NavBackWidth = 88 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.PopupRowHeight = 46 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.TabBarHeight = 56 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.TitleBarHeight = 56 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.ToolbarMoreWidth = 56 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowRowHeight = 46 -> float
 override Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.Equals(object? obj) -> bool
 override Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.GetHashCode() -> int
 override Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.ToString() -> string!

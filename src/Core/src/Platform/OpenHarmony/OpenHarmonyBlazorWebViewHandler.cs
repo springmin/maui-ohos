@@ -46,6 +46,7 @@
 // to gate milestone 2 there too, add the package reference and the constant to that vehicle.
 #if OPENHARMONY_BLAZOR_WEBVIEW
 using System.Collections.Specialized;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Components.Web;
@@ -91,12 +92,25 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     // does not send a second, equivalent load.
     private bool _shellStartedHostPageLoad;
 
+    // Last startup outcome, surfaced through the message-time BLZ_DIAG console probe.
+    private string _startDiag = "not attempted";
+    private bool _clickProbeDone;
+
     public static readonly IPropertyMapper<IBlazorWebView, OpenHarmonyBlazorWebViewHandler> Mapper =
         new PropertyMapper<IBlazorWebView, OpenHarmonyBlazorWebViewHandler>(ViewMapper)
         {
             [nameof(IBlazorWebView.HostPage)] = MapHostPage,
             [nameof(IBlazorWebView.RootComponents)] = MapRootComponents,
         };
+
+    // AOT root for the WebView package's IPC (FIX-BWVMount). Every "__bwv:" payload is parsed
+    // into JsonElement[] inside the package, whose static JsonSerializerOptions has a
+    // reflection-only resolver: NativeAOT then finds no native code for the reflection-built
+    // ArrayConverter<JsonElement[], JsonElement> and the attach message throws before the page
+    // can attach. Touching the source-generated type info here keeps the array converter (and
+    // its metadata) in the AOT image; the package's own options are untouched.
+    static OpenHarmonyBlazorWebViewHandler()
+        => _ = OpenHarmonySliceJsonContext.Default.GetTypeInfo(typeof(JsonElement[]));
 
     public OpenHarmonyBlazorWebViewHandler() : base(Mapper) { }
 
@@ -121,6 +135,8 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         // HybridWebView handlers make).
         OpenHarmonyWebViewHandler.JsMessage += OnJsMessage;
         OpenHarmonyWebViewHandler.EnsureMessageRegistered();
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] blazor connect: hostPage={VirtualView?.HostPage ?? "<null>"} services={(Services is null ? "null" : "set")}");
         RegisterBlazorAssets();
         // The property mapper runs right after ConnectHandler and sets HostPage/RootComponents;
         // this call covers the case where the control was already fully configured.
@@ -206,12 +222,16 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     {
         if (!RequiredStartupPropertiesSet || _webViewManager is not null)
         {
+            _startDiag = $"skip required={RequiredStartupPropertiesSet} manager={_webViewManager is not null} " +
+                $"hostPage={HostPage ?? "<null>"} services={Services is not null}";
+            OpenHarmonyBridge.WriteStatus($"[maui] blazor start: {_startDiag}");
             return;
         }
         if (PlatformView is null)
         {
             throw new InvalidOperationException($"Can't start {nameof(IBlazorWebView)} without a platform web view instance.");
         }
+        Diag($"start hostPage={HostPage}");
 
         // We assume the host page is always in the root of the content directory, because it's
         // unclear there's any other use case; this matches the package handlers.
@@ -227,12 +247,15 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         _webViewManager = new OpenHarmonyWebViewManager(
             this,
             Services!,
-            new MauiDispatcher(Services!.GetRequiredService<IDispatcher>()),
+            new MauiDispatcher(new DiagDispatcher(Services!.GetRequiredService<IDispatcher>())),
             fileProvider,
             webView.JSComponents,
             hostPageRelativePath,
             shellStartedHostPageLoad: _shellStartedHostPageLoad,
             pageDocumentId: _pageId);
+        _startDiag = $"manager created host={hostPageRelativePath} shellStarted={_shellStartedHostPageLoad} " +
+            $"id={_pageId[..8]}";
+        OpenHarmonyBridge.WriteStatus($"[maui] blazor {_startDiag}");
         // The "blazor" command's own load is consumed by this manager's first navigation; a
         // registration issued while a manager is live only reloads the shell page itself.
         _shellStartedHostPageLoad = false;
@@ -369,6 +392,10 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     {
         if (_webViewManager is null || string.IsNullOrEmpty(payload))
         {
+            OpenHarmonyBridge.WriteStatus(
+                $"[maui] blazor message dropped: manager={_webViewManager is not null} len={payload?.Length ?? 0}");
+            Diag($"message dropped manager={_webViewManager is not null} len={payload?.Length ?? 0} " +
+                $"start={_startDiag}");
             return;
         }
         if (!OpenHarmonyHybridWebViewHandler.TryParseOriginEnvelope(
@@ -376,15 +403,60 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         {
             OpenHarmonyBridge.WriteStatus(
                 "[maui] blazor message rejected: missing or malformed document-origin envelope");
+            Diag("message rejected malformed-envelope");
             return;
         }
         if (origin is null || !IsAppOrigin(origin) || documentId.Length == 0 || documentId != _pageId)
         {
             OpenHarmonyBridge.WriteStatus(
-                "[maui] blazor message rejected: the reported origin/document is not this handler's page");
+                $"[maui] blazor message rejected: origin={origin?.ToString() ?? "<null>"} idMatch={documentId == _pageId} idLen={documentId.Length} pageLen={_pageId.Length}");
+            Diag($"message rejected origin={origin?.ToString() ?? "-"} idMatch={documentId == _pageId} " +
+                $"idLen={documentId.Length} pageLen={_pageId.Length}");
             return;
         }
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] blazor message accepted: {message.Substring(0, Math.Min(200, message.Length))}");
+        Diag($"message accepted head={message.Substring(0, Math.Min(48, message.Length))}");
         _webViewManager.MessageReceivedFromShell(new Uri(AppOrigin), message);
+        if (!_clickProbeDone && message.StartsWith("__bwv:[\"OnRenderCompleted\"", StringComparison.Ordinal))
+        {
+            _clickProbeDone = true;
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000).ConfigureAwait(false);
+                await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
+                    "try{" +
+                    "var b=document.querySelector('button');" +
+                    "var st='none';" +
+                    "try{window.Blazor._internal.attachWebRendererInterop(3,{invokeMethodAsync:function(m){console.log('BLZ_DIAG interop-call '+m);return Promise.resolve();}});st='not-attached';}" +
+                    "catch(e){st='attached:'+e.message;}" +
+                    "console.log('BLZ_DIAG attach-state='+st);" +
+                    "console.log('BLZ_DIAG own='+(b?Object.getOwnPropertyNames(b).join('|'):'none'));" +
+                    "console.log('BLZ_DIAG html='+(b?b.outerHTML.substring(0,300):'none'));" +
+                    "if(!window.__blzSendWrap){window.__blzSendWrap=true;" +
+                    "var orig=window.external.sendMessage.bind(window.external);" +
+                    "window.external.sendMessage=function(m){try{console.log('BLZ_DIAG send2 head='+(typeof m==='string'?m.substring(0,80):typeof m));}catch(e){}return orig(m);};" +
+                    "document.addEventListener('click',function(e){console.log('BLZ_DIAG doc-click trusted='+e.isTrusted+' tag='+(e.target&&e.target.tagName));},true);}" +
+                    "console.log('BLZ_DIAG rect='+(b?JSON.stringify(b.getBoundingClientRect()):'none'));" +
+                    "if(b){b.click();console.log('BLZ_DIAG synthetic click sent');}" +
+                    "setTimeout(function(){var p=document.querySelector('p');console.log('BLZ_DIAG after p='+(p?p.textContent:'none'));},1500);" +
+                    "}catch(e){console.log('BLZ_DIAG probe failed '+e);}").ConfigureAwait(false);
+            });
+        }
+    }
+
+    /// <summary>
+    /// Device diagnostics over the page console: the shell forwards console messages that start
+    /// with <c>BLZ_</c> to hilog (BlazorWebHost tag), which survives the managed status file's
+    /// flood of native web-engine stderr. Best effort; evaluable only once the ArkWeb page exists.
+    /// </summary>
+    internal static void Diag(string message)
+    {
+        string safe = message.Replace('\\', '/').Replace('\'', ' ').Replace('\n', ' ').Replace('\r', ' ');
+        string script = "try{console.log('BLZ_DIAG " + safe + "');}catch(e){}";
+        // Off the caller's stack: OnJsMessage runs inside the native message callback, and the
+        // eval round trip must not block that callback while the shell answers on its UI thread.
+        _ = Task.Run(() => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script));
     }
 
     /// <summary>True when the reported document url is on the Blazor app origin (B1).</summary>
@@ -427,6 +499,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         }
         // Since the page isn't loaded yet this completes synchronously; after a page attached it
         // enqueues the add through the manager's dispatcher.
+        OpenHarmonyBridge.WriteStatus($"[maui] blazor root components published: {_rootComponents.Count}");
         foreach (RootComponent rootComponent in _rootComponents)
         {
             _ = rootComponent.AddToWebViewManagerAsync(_webViewManager);
@@ -484,6 +557,41 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     }
 }
 
+/// <summary>Diagnostic <see cref="IDispatcher"/> that traces every queued dispatch (temporary).</summary>
+internal sealed class DiagDispatcher : IDispatcher
+{
+    private readonly IDispatcher _inner;
+
+    public DiagDispatcher(IDispatcher inner) => _inner = inner;
+
+    public bool IsDispatchRequired => _inner.IsDispatchRequired;
+
+    public bool Dispatch(Action action)
+    {
+        MethodInfo method = action.Method;
+        string name = $"{method.DeclaringType?.Name}.{method.Name}";
+        OpenHarmonyBlazorWebViewHandler.Diag($"dispatch enqueue {name}");
+        return _inner.Dispatch(() =>
+        {
+            OpenHarmonyBlazorWebViewHandler.Diag($"dispatch run {name}");
+            try
+            {
+                action();
+                OpenHarmonyBlazorWebViewHandler.Diag($"dispatch done {name}");
+            }
+            catch (Exception ex)
+            {
+                OpenHarmonyBlazorWebViewHandler.Diag($"dispatch threw {name} {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        });
+    }
+
+    public bool DispatchDelayed(TimeSpan delay, Action action) => _inner.DispatchDelayed(delay, action);
+
+    public IDispatcherTimer CreateTimer() => _inner.CreateTimer();
+}
+
 /// <summary>
 /// Platform <see cref="WebViewManager"/>: maps the base class's platform hooks to the ArkTS shell
 /// commands. Created by <see cref="OpenHarmonyBlazorWebViewHandler.StartWebViewCoreIfPossible"/>.
@@ -530,8 +638,10 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         if (_shellStartedHostPageLoad)
         {
             _shellStartedHostPageLoad = false;
+            OpenHarmonyBridge.WriteStatus($"[maui] blazor navigate skipped (shell started): {absoluteUri}");
             return;
         }
+        OpenHarmonyBridge.WriteStatus($"[maui] blazor navigate: {absoluteUri}");
         OpenHarmonyBridge.WebCommand(ShellLoadCommand, absoluteUri.ToString());
     }
 
@@ -549,6 +659,10 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
     /// </summary>
     protected override void SendMessage(string message)
     {
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] blazor send: {(message is null ? "<null>" : message.Substring(0, Math.Min(120, message.Length)))}");
+        OpenHarmonyBlazorWebViewHandler.Diag(
+            $"send head={(message is null ? "<null>" : message.Substring(0, Math.Min(50, message.Length)))}");
         if (string.IsNullOrEmpty(message))
         {
             return;
@@ -567,6 +681,9 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             "{window.external.receiveMessage(m);}" +
             "return 'ok';})(" +
             JsonSerializer.Serialize(_pageDocumentId, OpenHarmonySliceJsonContext.Default.String) + "," + JsonSerializer.Serialize(message, OpenHarmonySliceJsonContext.Default.String) + ")").ConfigureAwait(false);
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] blazor eval out ({message.Substring(0, Math.Min(120, message.Length))}) -> {result ?? "<null>"}");
+        OpenHarmonyBlazorWebViewHandler.Diag($"eval out head={message.Substring(0, Math.Min(400, message.Length))} result={result ?? "<null>"}");
         if (result is not null && result.Trim().Trim('"') == "skip")
         {
             OpenHarmonyBridge.WriteStatus(
@@ -580,7 +697,31 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
     /// way in from the slice assembly (verified by compiling this file with the package).
     /// </summary>
     internal void MessageReceivedFromShell(Uri uri, string message)
-        => MessageReceived(uri, message);
+    {
+        OpenHarmonyBridge.WriteStatus(
+            $"[maui] blazor dispatch in: {message.Substring(0, Math.Min(120, message.Length))}");
+        OpenHarmonyBlazorWebViewHandler.Diag($"dispatch in head={message.Substring(0, Math.Min(40, message.Length))}");
+        Task probe = Dispatcher.InvokeAsync(() => OpenHarmonyBlazorWebViewHandler.Diag("dispatcher tick"));
+        _ = probe.ContinueWith(
+            t => OpenHarmonyBlazorWebViewHandler.Diag(
+                $"dispatcher tick faulted: {t.Exception?.GetBaseException().GetType().Name}: {t.Exception?.GetBaseException().Message}"),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        try
+        {
+            MessageReceived(uri, message);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyBridge.WriteStatus($"[maui] blazor dispatch threw: {ex.GetType().Name}: {ex.Message}");
+            throw;
+        }
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            await Task.Delay(2000).ConfigureAwait(false);
+            bool pageAttached = await TryDispatchAsync(_ => { }).ConfigureAwait(false);
+            OpenHarmonyBlazorWebViewHandler.Diag($"page-attached={pageAttached}");
+        });
+    }
 }
 
 /// <summary>

@@ -16,6 +16,14 @@ public sealed class OpenHarmonyDispatcher : IDispatcher
     private readonly Timer _safetyNet;
     private readonly int _drainThreadId0 = Environment.CurrentManagedThreadId;
     private volatile int _drainThreadId;
+    // One drain at a time (FIX-BWVMount): frame ticks and the 50 ms safety net used to run
+    // Drain concurrently, and each wrote _drainThreadId on entry. An action running on thread
+    // A could then observe the id of thread B (or a stale one) and answer IsDispatchRequired
+    // with true, i.e. CheckAccess false; Blazor's Renderer.RenderRootComponentAsync asserts
+    // CheckAccess, so a BlazorWebView root component failed to render right after its attach
+    // (AttachToDocument had already reached the page). Serializing the drain keeps the id of
+    // the thread that is actually running dispatcher work.
+    private readonly object _drainGate = new();
 
     public OpenHarmonyDispatcher()
     {
@@ -55,22 +63,25 @@ public sealed class OpenHarmonyDispatcher : IDispatcher
 
     private void Drain()
     {
-        _drainThreadId = Environment.CurrentManagedThreadId;
-        while (_queue.TryDequeue(out Action? action))
+        lock (_drainGate)
         {
-            try
+            _drainThreadId = Environment.CurrentManagedThreadId;
+            while (_queue.TryDequeue(out Action? action))
             {
-                action();
+                try
+                {
+                    action();
+                }
+                catch (Exception e)
+                {
+                    OpenHarmonyBridge.WriteStatus($"dispatcher action failed: {e.GetType().Name}: {e.Message}");
+                }
             }
-            catch (Exception e)
+            long now = Environment.TickCount64;
+            foreach (OpenHarmonyDispatcherTimer timer in _timers.ToArray())
             {
-                OpenHarmonyBridge.WriteStatus($"dispatcher action failed: {e.GetType().Name}: {e.Message}");
+                timer.TickOnFrame(now);
             }
-        }
-        long now = Environment.TickCount64;
-        foreach (OpenHarmonyDispatcherTimer timer in _timers.ToArray())
-        {
-            timer.TickOnFrame(now);
         }
     }
 }

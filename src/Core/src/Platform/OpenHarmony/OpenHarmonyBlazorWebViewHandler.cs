@@ -49,12 +49,15 @@ using System.Collections.Specialized;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebView;
 using Microsoft.AspNetCore.Components.WebView.Maui;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
+using Microsoft.JSInterop;
+using Microsoft.JSInterop.Infrastructure;
 using Microsoft.Maui.Dispatching;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
@@ -94,7 +97,6 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
 
     // Last startup outcome, surfaced through the message-time BLZ_DIAG console probe.
     private string _startDiag = "not attempted";
-    private bool _clickProbeDone;
 
     public static readonly IPropertyMapper<IBlazorWebView, OpenHarmonyBlazorWebViewHandler> Mapper =
         new PropertyMapper<IBlazorWebView, OpenHarmonyBlazorWebViewHandler>(ViewMapper)
@@ -109,8 +111,20 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     // ArrayConverter<JsonElement[], JsonElement> and the attach message throws before the page
     // can attach. Touching the source-generated type info here keeps the array converter (and
     // its metadata) in the AOT image; the package's own options are untouched.
+    //
+    // FIX-JSCALL completes the set for the outbound half: IpcSender.BeginInvokeJS serializes
+    // JSCallResultType/JSCallType and IpcSender.Navigate serializes NavigationOptions through the
+    // same reflection-only options. Without the closed instantiations the renderer's attach
+    // interop call (fire-and-forget) dies in IpcCommon.Serialize, no interop methods register for
+    // the renderer, and DispatchEventAsync never runs (kit #39: EnumConverter<JSCallResultType>
+    // missing native code; injected clicks hit the button but count stayed 0).
     static OpenHarmonyBlazorWebViewHandler()
-        => _ = OpenHarmonySliceJsonContext.Default.GetTypeInfo(typeof(JsonElement[]));
+    {
+        _ = OpenHarmonySliceJsonContext.Default.GetTypeInfo(typeof(JsonElement[]));
+        _ = OpenHarmonySliceJsonContext.Default.GetTypeInfo(typeof(JSCallResultType));
+        _ = OpenHarmonySliceJsonContext.Default.GetTypeInfo(typeof(JSCallType));
+        _ = OpenHarmonySliceJsonContext.Default.GetTypeInfo(typeof(NavigationOptions));
+    }
 
     public OpenHarmonyBlazorWebViewHandler() : base(Mapper) { }
 
@@ -417,32 +431,12 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         OpenHarmonyBridge.WriteStatus(
             $"[maui] blazor message accepted: {message.Substring(0, Math.Min(200, message.Length))}");
         Diag($"message accepted head={message.Substring(0, Math.Min(48, message.Length))}");
+        // FIX-JSCALL: the FIX-BWVMount click probe used to attach a stub WebRenderer interop here
+        // (it succeeded only because the real attach had died on the missing JSCallResultType
+        // converter) and then clicked the button, so every later click was swallowed by the stub
+        // and the counter could never move. With the converters rooted the real attach wins; the
+        // probe is gone so a click exercises the real DispatchEventAsync path.
         _webViewManager.MessageReceivedFromShell(new Uri(AppOrigin), message);
-        if (!_clickProbeDone && message.StartsWith("__bwv:[\"OnRenderCompleted\"", StringComparison.Ordinal))
-        {
-            _clickProbeDone = true;
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(3000).ConfigureAwait(false);
-                await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
-                    "try{" +
-                    "var b=document.querySelector('button');" +
-                    "var st='none';" +
-                    "try{window.Blazor._internal.attachWebRendererInterop(3,{invokeMethodAsync:function(m){console.log('BLZ_DIAG interop-call '+m);return Promise.resolve();}});st='not-attached';}" +
-                    "catch(e){st='attached:'+e.message;}" +
-                    "console.log('BLZ_DIAG attach-state='+st);" +
-                    "console.log('BLZ_DIAG own='+(b?Object.getOwnPropertyNames(b).join('|'):'none'));" +
-                    "console.log('BLZ_DIAG html='+(b?b.outerHTML.substring(0,300):'none'));" +
-                    "if(!window.__blzSendWrap){window.__blzSendWrap=true;" +
-                    "var orig=window.external.sendMessage.bind(window.external);" +
-                    "window.external.sendMessage=function(m){try{console.log('BLZ_DIAG send2 head='+(typeof m==='string'?m.substring(0,80):typeof m));}catch(e){}return orig(m);};" +
-                    "document.addEventListener('click',function(e){console.log('BLZ_DIAG doc-click trusted='+e.isTrusted+' tag='+(e.target&&e.target.tagName));},true);}" +
-                    "console.log('BLZ_DIAG rect='+(b?JSON.stringify(b.getBoundingClientRect()):'none'));" +
-                    "if(b){b.click();console.log('BLZ_DIAG synthetic click sent');}" +
-                    "setTimeout(function(){var p=document.querySelector('p');console.log('BLZ_DIAG after p='+(p?p.textContent:'none'));},1500);" +
-                    "}catch(e){console.log('BLZ_DIAG probe failed '+e);}").ConfigureAwait(false);
-            });
-        }
     }
 
     /// <summary>

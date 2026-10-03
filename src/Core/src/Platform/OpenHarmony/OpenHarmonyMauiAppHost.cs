@@ -21,6 +21,15 @@ public sealed class OpenHarmonyMauiAppHost
     // The platform Create event can be delivered before Run creates the window; it is then
     // completed (Created, then Activated) when the window exists.
     private bool _createReceived;
+    // Serializes every entry point that reads or mutates the element tree. The managed app runs
+    // on the host's launch thread while the ArkTS shell delivers surface/frame/lifecycle/touch
+    // callbacks on the shell thread; without this, a JIT-slowed startup lets a callback wire
+    // handlers mid-connect (device WX-JIT: "Handler is already being set elsewhere",
+    // "PlatformView cannot be null here", non-concurrent collection corruption).
+    private readonly object _sync = new();
+    // Platform callbacks stay out of the tree until Run/TryAdoptWindow finished connecting it,
+    // so a callback can never observe a half-connected tree.
+    private bool _ready;
     // T21: font-scale reports that re-arranged the tree (the interaction-suite seam).
     internal int SystemFontScaleRelayouts { get; private set; }
 
@@ -59,9 +68,12 @@ public sealed class OpenHarmonyMauiAppHost
         {
             if (info.State == OpenHarmonySurfaceState.Created && info.Width > 0 && info.Height > 0)
             {
-                Arrange(info.Width, info.Height);
-                _dirty = true;
-                Render();
+                lock (_sync)
+                {
+                    Arrange(info.Width, info.Height);
+                    _dirty = true;
+                    Render();
+                }
             }
         };
 
@@ -81,7 +93,13 @@ public sealed class OpenHarmonyMauiAppHost
             }
         };
 
-        OpenHarmonyBridge.RedrawRequested += () => _dirty = true;
+        OpenHarmonyBridge.RedrawRequested += () =>
+        {
+            lock (_sync)
+            {
+                _dirty = true;
+            }
+        };
 
         // T21: the shell reports the system font scale (ArkTS Configuration.fontSizeScale ->
         // host.notifyFontScale -> this listener). A changed value re-measures/re-arranges the
@@ -90,16 +108,23 @@ public sealed class OpenHarmonyMauiAppHost
 
         OpenHarmonyBridge.Frame += _ =>
         {
-            // Activity indicators keep animating: advance the shared angle and redraw.
-            if (_renderer.HasAnimations(_window?.Content as IView))
+            lock (_sync)
             {
-                OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
-                _dirty = true;
-            }
-            if (_dirty)
-            {
-                _dirty = false;
-                Render();
+                if (!_ready)
+                {
+                    return;
+                }
+                // Activity indicators keep animating: advance the shared angle and redraw.
+                if (_renderer.HasAnimations(_window?.Content as IView))
+                {
+                    OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
+                    _dirty = true;
+                }
+                if (_dirty)
+                {
+                    _dirty = false;
+                    Render();
+                }
             }
         };
 
@@ -109,32 +134,35 @@ public sealed class OpenHarmonyMauiAppHost
             // provides one the events are best-effort (an exception must not stop the app).
             try
             {
-                switch (e)
+                lock (_sync)
                 {
-                    case OpenHarmonyLifecycleEvent.Create:
-                        // MAUI's window lifecycle starts with Created (the platform window now
-                        // exists); the platform event carries the activation, so raise Created
-                        // first and only once. Before Run the window does not exist yet, so Run
-                        // completes the activation for this event.
-                        _createReceived = true;
-                        EnsureWindowCreated();
-                        EnsureWindowActivated();
-                        OpenHarmonyAppLinks.OnHostReady();
-                        break;
-                    case OpenHarmonyLifecycleEvent.Foreground:
-                        // Heartbeat: the shell may have reset the window title while the app was
-                        // backgrounded and Window.Title only pushes on change (W9D §3). Pushed
-                        // before Resumed so a lifecycle guard cannot skip the chrome.
-                        OpenHarmonyWindowHandler.RepublishWindowChrome(_window);
-                        _window?.Resumed();
-                        OpenHarmonyAppLinks.OnHostReady();
-                        break;
-                    case OpenHarmonyLifecycleEvent.Background:
-                        _window?.Stopped();
-                        break;
-                    case OpenHarmonyLifecycleEvent.Destroy:
-                        _window?.Destroying();
-                        break;
+                    switch (e)
+                    {
+                        case OpenHarmonyLifecycleEvent.Create:
+                            // MAUI's window lifecycle starts with Created (the platform window now
+                            // exists); the platform event carries the activation, so raise Created
+                            // first and only once. Before Run the window does not exist yet, so Run
+                            // completes the activation for this event.
+                            _createReceived = true;
+                            EnsureWindowCreated();
+                            EnsureWindowActivated();
+                            OpenHarmonyAppLinks.OnHostReady();
+                            break;
+                        case OpenHarmonyLifecycleEvent.Foreground:
+                            // Heartbeat: the shell may have reset the window title while the app was
+                            // backgrounded and Window.Title only pushes on change (W9D §3). Pushed
+                            // before Resumed so a lifecycle guard cannot skip the chrome.
+                            OpenHarmonyWindowHandler.RepublishWindowChrome(_window);
+                            _window?.Resumed();
+                            OpenHarmonyAppLinks.OnHostReady();
+                            break;
+                        case OpenHarmonyLifecycleEvent.Background:
+                            _window?.Stopped();
+                            break;
+                        case OpenHarmonyLifecycleEvent.Destroy:
+                            _window?.Destroying();
+                            break;
+                    }
                 }
                 OpenHarmonyBridge.WriteStatus($"[maui] lifecycle {e} (window={_window?.GetType().Name})");
             }
@@ -178,8 +206,19 @@ public sealed class OpenHarmonyMauiAppHost
             return;
         }
         OpenHarmonyHandlerConnector.Context = _context;
-        OpenHarmonyHandlerConnector.ConnectTree(_window);
-        OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
+        lock (_sync)
+        {
+            // The tree is connected before platform callbacks are allowed in; a shell
+            // surface/frame callback that arrived during startup blocks here instead of
+            // wiring handlers mid-connect.
+            OpenHarmonyHandlerConnector.ConnectTree(_window);
+            OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
+            _ready = true;
+            if (_width > 0 && _height > 0)
+            {
+                Arrange(_width, _height);
+            }
+        }
         OpenHarmonyBridge.WriteStatus($"[maui] window created ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
         // The platform's Create lifecycle event activates the window (and may arrive before Run
         // when the shell is fast); Created must precede it either way. When Create arrived first
@@ -268,8 +307,12 @@ public sealed class OpenHarmonyMauiAppHost
         _created = false;
         _activated = false;
         OpenHarmonyHandlerConnector.Context = _context;
-        OpenHarmonyHandlerConnector.ConnectTree(_window);
-        OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
+        lock (_sync)
+        {
+            OpenHarmonyHandlerConnector.ConnectTree(_window);
+            OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
+            _ready = true;
+        }
         OpenHarmonyBridge.WriteStatus(
             $"[maui] window adopted ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
         EnsureWindowCreated();
@@ -291,41 +334,47 @@ public sealed class OpenHarmonyMauiAppHost
     /// </summary>
     internal void NotifyWindowClosed(IWindow window)
     {
-        if (!ReferenceEquals(_window, window))
+        lock (_sync)
         {
-            return;
+            if (!ReferenceEquals(_window, window))
+            {
+                return;
+            }
+            _window = null;
+            _created = false;
+            _activated = false;
+            _dirty = true;
         }
-        _window = null;
-        _created = false;
-        _activated = false;
-        _dirty = true;
         OpenHarmonyBridge.WriteStatus("[maui] window closed; the host has no live window");
     }
 
     /// <summary>Measures/arranges the current window content for the given surface size.</summary>
     public void Arrange(int width, int height)
     {
-        _width = width;
-        _height = height;
-        if (_window?.Content is not IView content)
+        lock (_sync)
         {
-            return;
-        }
-        // MAUI measures/arranges through handlers; Page/ContentView have no platform handler
-        // in this slice, so arrange the first descendant that has one.
-        OpenHarmonyHandlerConnector.ConnectTree(content);
-        var bounds = new Rect(0, 0, width, height);
-        // The shell reports the surface size; mirror it onto the virtual window so Window.Width/
-        // Height (and SizeChanged) are real values, like the other platforms' window handlers.
-        _window.FrameChanged(bounds);
-        // The window's avoid area is applied per page/content view through SafeAreaEdges (see
-        // OpenHarmonySafeAreaArrange); the surface itself is arranged edge to edge.
-        Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
-        OpenHarmonySafeAreaArrange.Arrange(content, bounds, bounds, insets);
-        IView? root = FindArrangableRoot(content);
-        if (root is not null && !ReferenceEquals(root, content))
-        {
-            OpenHarmonySafeAreaArrange.Arrange(root, bounds, bounds, insets);
+            _width = width;
+            _height = height;
+            if (!_ready || _window?.Content is not IView content)
+            {
+                return;
+            }
+            // MAUI measures/arranges through handlers; Page/ContentView have no platform handler
+            // in this slice, so arrange the first descendant that has one.
+            OpenHarmonyHandlerConnector.ConnectTree(content);
+            var bounds = new Rect(0, 0, width, height);
+            // The shell reports the surface size; mirror it onto the virtual window so Window.Width/
+            // Height (and SizeChanged) are real values, like the other platforms' window handlers.
+            _window.FrameChanged(bounds);
+            // The window's avoid area is applied per page/content view through SafeAreaEdges (see
+            // OpenHarmonySafeAreaArrange); the surface itself is arranged edge to edge.
+            Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
+            OpenHarmonySafeAreaArrange.Arrange(content, bounds, bounds, insets);
+            IView? root = FindArrangableRoot(content);
+            if (root is not null && !ReferenceEquals(root, content))
+            {
+                OpenHarmonySafeAreaArrange.Arrange(root, bounds, bounds, insets);
+            }
         }
     }
 
@@ -355,11 +404,14 @@ public sealed class OpenHarmonyMauiAppHost
 
     public bool Render()
     {
-        if (_window?.Content is not IView content || _width <= 0)
+        lock (_sync)
         {
-            return false;
+            if (!_ready || _window?.Content is not IView content || _width <= 0)
+            {
+                return false;
+            }
+            return _renderer.Render(content, _width, _height);
         }
-        return _renderer.Render(content, _width, _height);
     }
 
     /// <summary>
@@ -370,12 +422,15 @@ public sealed class OpenHarmonyMauiAppHost
     /// </summary>
     private void OnSystemFontScaleChanged()
     {
-        if (_width > 0 && _height > 0)
+        lock (_sync)
         {
-            Arrange(_width, _height);
-            SystemFontScaleRelayouts++;
+            if (_ready && _width > 0 && _height > 0)
+            {
+                Arrange(_width, _height);
+                SystemFontScaleRelayouts++;
+            }
+            _dirty = true;
         }
-        _dirty = true;
     }
 
     private bool _pinchWired;
@@ -389,25 +444,31 @@ public sealed class OpenHarmonyMauiAppHost
     /// </summary>
     public bool HandleTouch(bool down, bool up, float x, float y, int pointerId)
     {
-        EnsureInputWired();
-        // N5: an active overlay that disables touch passthrough owns the press/release; the page
-        // tree underneath is skipped so a control there never also receives the gesture.
-        if (OpenHarmonyWindowOverlayHost.ShouldConsumeTouch(down, up))
+        lock (_sync)
         {
-            return true;
+            EnsureInputWired();
+            // N5: an active overlay that disables touch passthrough owns the press/release; the page
+            // tree underneath is skipped so a control there never also receives the gesture.
+            if (OpenHarmonyWindowOverlayHost.ShouldConsumeTouch(down, up))
+            {
+                return true;
+            }
+            return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y, pointerId);
         }
-        return RootView is IView content && _renderer.HandleTouch(content, down, up, x, y, pointerId);
     }
 
     /// <summary>Cancels the gesture stream (the shell reports a canceled touch): CancelInteraction.</summary>
     public bool HandleCancel(float x, float y)
     {
-        EnsureInputWired();
-        if (OpenHarmonyWindowOverlayHost.ShouldConsumeCancel())
+        lock (_sync)
         {
-            return true;
+            EnsureInputWired();
+            if (OpenHarmonyWindowOverlayHost.ShouldConsumeCancel())
+            {
+                return true;
+            }
+            return _renderer.HandleCancel(x, y);
         }
-        return _renderer.HandleCancel(x, y);
     }
 
     private void EnsureInputWired()
@@ -430,6 +491,14 @@ public sealed class OpenHarmonyMauiAppHost
     /// reads it back at the caret, SELECT_TEXT selects the whole text).
     /// </summary>
     public bool HandleAccessibilityAction(int nodeId, int action)
+    {
+        lock (_sync)
+        {
+            return HandleAccessibilityActionCore(nodeId, action);
+        }
+    }
+
+    private bool HandleAccessibilityActionCore(int nodeId, int action)
     {
         if (!OpenHarmonyAccessibility.TryFindNode(nodeId, out OpenHarmonyAccessibilityNode node))
         {
@@ -612,16 +681,19 @@ public sealed class OpenHarmonyMauiAppHost
 
     private void ApplyPaste(IView target, string pasted)
     {
-        if (target is not ITextInput input)
+        lock (_sync)
         {
-            return;
+            if (target is not ITextInput input)
+            {
+                return;
+            }
+            string current = input.Text ?? string.Empty;
+            int index = Math.Clamp(input.CursorPosition, 0, current.Length);
+            int selection = Math.Clamp(input.SelectionLength, 0, current.Length - index);
+            string updated = current.Remove(index, selection).Insert(index, pasted);
+            SetEditableText(target, updated, index + pasted.Length);
+            _dirty = true;
         }
-        string current = input.Text ?? string.Empty;
-        int index = Math.Clamp(input.CursorPosition, 0, current.Length);
-        int selection = Math.Clamp(input.SelectionLength, 0, current.Length - index);
-        string updated = current.Remove(index, selection).Insert(index, pasted);
-        SetEditableText(target, updated, index + pasted.Length);
-        _dirty = true;
     }
 
     /// <summary>Writes the text through the DI clipboard (the documented text pasteboard path).</summary>
@@ -670,20 +742,26 @@ public sealed class OpenHarmonyMauiAppHost
 
     private void OnPinch(int phase, double scale, float x, float y)
     {
-        if (RootView is IView content)
+        lock (_sync)
         {
-            _renderer.HandlePinch(content, phase, scale, x, y);
+            if (_ready && RootView is IView content)
+            {
+                _renderer.HandlePinch(content, phase, scale, x, y);
+            }
         }
     }
 
     /// <summary>Handles a touch move (drag scrolling).</summary>
     public bool HandleMove(float x, float y)
     {
-        if (RootView is IView content)
+        lock (_sync)
         {
-            _renderer.HandlePointerMove(content, x, y);
+            if (RootView is IView content)
+            {
+                _renderer.HandlePointerMove(content, x, y);
+            }
+            return HandleMoveCore(x, y, 0);
         }
-        return HandleMoveCore(x, y, 0);
     }
 
     /// <summary>Handles a move of one pointer (the shell's touch stream carries the id).</summary>
@@ -691,8 +769,19 @@ public sealed class OpenHarmonyMauiAppHost
 
     // N5: a move that belongs to a suppressed press stays with the overlay.
     private bool HandleMoveCore(float x, float y, int pointerId)
-        => OpenHarmonyWindowOverlayHost.ShouldConsumeMove() || _renderer.HandleMove(x, y, pointerId);
+    {
+        lock (_sync)
+        {
+            return OpenHarmonyWindowOverlayHost.ShouldConsumeMove() || _renderer.HandleMove(x, y, pointerId);
+        }
+    }
 
-    public string Describe() => RootView is IView content ? _renderer.Describe(content) : "(no window content)";
+    public string Describe()
+    {
+        lock (_sync)
+        {
+            return RootView is IView content ? _renderer.Describe(content) : "(no window content)";
+        }
+    }
 
 }

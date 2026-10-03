@@ -78,8 +78,36 @@ public static class OpenHarmonyHandlerConnector
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type handlerType)
         => Activator.CreateInstance(handlerType) as IElementHandler;
 
+    /// <summary>
+    /// Serializes handler wiring. The runtime calls <see cref="ConnectTree"/> from the app's
+    /// launch thread (startup) and the shell calls it from its callback thread (surface/frame
+    /// arrange), and MAUI's <c>Element.SetHandler</c> is not re-entrant: two concurrent connects
+    /// of the same element race the check-then-assign and trip "Handler is already being set
+    /// elsewhere" (device JIT startup; also PlatformView-null and collection corruption). The
+    /// lock is re-entrant, so handlers can call back into the connector while their virtual view
+    /// is being connected.
+    /// </summary>
+    private static readonly object s_connectSync = new();
+
     /// <summary>Connects the slice handler of a single element when it has none.</summary>
     public static void Connect(IElement? element)
+    {
+        lock (s_connectSync)
+        {
+            ConnectCore(element);
+        }
+    }
+
+    /// <summary>Connects handlers for an element and its descendants (idempotent, thread-safe).</summary>
+    public static void ConnectTree(IElement? element)
+    {
+        lock (s_connectSync)
+        {
+            ConnectTreeCore(element);
+        }
+    }
+
+    private static void ConnectCore(IElement? element)
     {
         if (element is null || element.Handler is not null)
         {
@@ -93,25 +121,24 @@ public static class OpenHarmonyHandlerConnector
         }
     }
 
-    /// <summary>Connects handlers for an element and its descendants (idempotent).</summary>
-    public static void ConnectTree(IElement? element)
+    private static void ConnectTreeCore(IElement? element)
     {
-        Connect(element);
+        ConnectCore(element);
         if (element is ILayout layout)
         {
             foreach (IView child in layout)
             {
-                ConnectTree(child);
+                ConnectTreeCore(child);
             }
         }
         else if (element is Microsoft.Maui.Controls.NavigationPage navigation)
         {
             // A navigation page's visible content is the current page.
-            ConnectTree(navigation.CurrentPage);
+            ConnectTreeCore(navigation.CurrentPage);
         }
         else if (element is IContentView contentView)
         {
-            ConnectTree(contentView.PresentedContent);
+            ConnectTreeCore(contentView.PresentedContent);
         }
     }
 }

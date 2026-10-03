@@ -72,10 +72,11 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// <summary>
     /// Overlay slot this handler claimed while connected (MULTI-OVL); the slot tags every
     /// per-overlay command (frame/load/show/history/eval) and routes the shell's page events
-    /// back to this handler. MULTI-OVERLAY-FULL makes the claim owner-aware and LRU: a third
-    /// concurrent web control preempts the least-recently-used idle slot instead of falling back
-    /// to the legacy protocol, and a preempted handler is restored (with a load replay) the next
-    /// time it is used. -1 while suspended between a preemption and the restore.
+    /// back to this handler. MULTI-OVERLAY-FULL/SLOTS-DYNAMIC makes the claim owner-aware and
+    /// dynamic: a web control beyond the hot pair grows the shell's overlay set on demand (up to
+    /// the pool's MaxOverlays, default 4), and only a claim at the shell's capacity is served by
+    /// an LRU preemption; a preempted handler is restored (with a load replay) the next time it
+    /// is used. -1 while suspended between a preemption and the restore.
     /// </summary>
     private int _overlaySlot = -1;
 
@@ -1169,6 +1170,21 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             slot = eventSlot;
             effectiveState = rest;
+        }
+        if (effectiveState == "capacity")
+        {
+            // SLOTS-DYNAMIC: the shell advertises how many ArkWeb overlays it can declare
+            // (untagged "capacity" state, the count in the URL slot). The pool clamps itself to
+            // that capacity; a legacy 2-overlay shell preempts any claim beyond it through the
+            // usual suspend/replay path, so the managed side never tags a slot the shell cannot
+            // serve. The default (no event) is the pool's MaxOverlays, matching the lockstep
+            // shell.
+            if (int.TryParse(url, out int shellCapacity))
+            {
+                OpenHarmonyOverlays.SetShellCapacity(shellCapacity);
+                OpenHarmonyBridge.WriteStatus($"[maui] web capacity: {shellCapacity}");
+            }
+            return;
         }
         if (effectiveState == "activate")
         {

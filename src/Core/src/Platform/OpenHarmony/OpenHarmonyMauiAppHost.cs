@@ -122,6 +122,10 @@ public sealed class OpenHarmonyMauiAppHost
                         OpenHarmonyAppLinks.OnHostReady();
                         break;
                     case OpenHarmonyLifecycleEvent.Foreground:
+                        // Heartbeat: the shell may have reset the window title while the app was
+                        // backgrounded and Window.Title only pushes on change (W9D §3). Pushed
+                        // before Resumed so a lifecycle guard cannot skip the chrome.
+                        OpenHarmonyWindowHandler.RepublishWindowChrome(_window);
                         _window?.Resumed();
                         OpenHarmonyAppLinks.OnHostReady();
                         break;

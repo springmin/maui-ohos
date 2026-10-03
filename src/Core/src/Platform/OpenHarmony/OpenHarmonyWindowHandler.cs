@@ -151,6 +151,30 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
     /// <summary>Last title mapped from the window (the fallback when the chrome export is absent).</summary>
     public string? Title { get; private set; }
 
+    private static int s_titlePublishCount;
+
+    /// <summary>
+    /// How many title publications were attempted (the property mapping plus the lifecycle
+    /// heartbeat). The interaction harness has no shell window, so this is how a heartbeat is
+    /// observed off-device.
+    /// </summary>
+    internal static int TitlePublishCount => Volatile.Read(ref s_titlePublishCount);
+
+    /// <summary>
+    /// Lifecycle heartbeat: re-publishes the recorded title when the ability returns to the
+    /// foreground. The ArkUI shell may reset the window title while the app was backgrounded and
+    /// Window.Title is only pushed when the property changes, so the recorded value is sent again
+    /// (W9D §3: OnStart/Foreground was not wired).
+    /// </summary>
+    internal static void RepublishWindowChrome(IWindow? window)
+    {
+        if (window?.Handler is not OpenHarmonyWindowHandler handler)
+        {
+            return;
+        }
+        PublishTitle(handler.Title);
+    }
+
     /// <summary>The window's title-bar row, when the app set Window.TitleBar (see MapTitleBar).</summary>
     internal OpenHarmonyTitleBarRow? TitleBar { get; private set; }
 
@@ -174,6 +198,7 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         {
             return;
         }
+        Interlocked.Increment(ref s_titlePublishCount);
         if (!ExportAvailable(TitleEntryPoint, ref s_titleExport))
         {
             LogMissingOnce(TitleEntryPoint);

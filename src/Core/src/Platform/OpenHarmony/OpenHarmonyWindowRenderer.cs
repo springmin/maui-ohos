@@ -48,7 +48,57 @@ public sealed class OpenHarmonyWindowRenderer
     /// </summary>
     internal static Action<int>? RenderPhaseTick { get; set; }
 
+    /// <summary>
+    /// Draw-cost probe seam: invoked once per view that has a platform view, immediately before
+    /// that view draws itself (shadow and content), with a coarse node kind - see the
+    /// <c>DrawKind*</c> constants. A probe substitutes the canvas factory with a timing canvas
+    /// and attributes the canvas work measured between two ticks to the kind of the node that
+    /// produced it; the walk's own glue (property reads, child enumeration, flow maps) stays
+    /// un-attributed and is the residual of the frame's draw total. Null in production, so a
+    /// call site costs one null check and the probe never changes drawing.
+    /// </summary>
+    internal static Action<int>? DrawCostTick { get; set; }
+
+    /// <summary>Node kinds reported through <see cref="DrawCostTick"/>.</summary>
+    internal const int DrawKindText = 0;
+    internal const int DrawKindImage = 1;
+    internal const int DrawKindShape = 2;
+    internal const int DrawKindContainer = 3;
+    internal const int DrawKindOther = 4;
+
+    /// <summary>
+    /// Coarse classification of what a node's own draw spends its time on, by the same branch
+    /// order the platform view's Draw uses: an image or shape node is classified by its payload
+    /// even when it also carries text, a text node by its text, everything else by whether it
+    /// hosts children.
+    /// </summary>
+    private static int DrawKindOf(IView view, OpenHarmonyView platform)
+    {
+        if (platform.ImageBytes is { Length: > 0 })
+        {
+            return DrawKindImage;
+        }
+        if (platform.IsShape || platform.IsBorder)
+        {
+            return DrawKindShape;
+        }
+        if (platform.IsTextEntry || !string.IsNullOrEmpty(platform.Text))
+        {
+            return DrawKindText;
+        }
+        return view is ILayout ? DrawKindContainer : DrawKindOther;
+    }
+
     private readonly MauiCanvas _canvas;
+
+    /// <summary>
+    /// Surface rectangle of the frame being drawn, used by the off-surface cull
+    /// (<see cref="CanSkipOwnDrawing"/>). Set at the start of every draw pass; frames that do
+    /// not call into the walk (tests) leave the default, which disables culling by letting every
+    /// frame intersect.
+    /// </summary>
+    private RectF _drawSurface = new(float.NegativeInfinity, float.NegativeInfinity,
+        float.PositiveInfinity, float.PositiveInfinity);
 
     // Layout revalidation gate. IView.Measure does not consult the per-element measure cache
     // (that cache only serves the obsolete GetSizeRequest path), so re-running Measure/Arrange
@@ -122,6 +172,9 @@ public sealed class OpenHarmonyWindowRenderer
         bool showsTitleBar = titleBar is { IsVisible: true };
         float titleBarHeight = showsTitleBar ? titleBar!.Height : 0f;
         float contentHeight = Math.Max(0f, height - titleBarHeight);
+        // The draw walk culls nodes whose own pixels cannot land on this surface; the rectangle
+        // is only consulted by the platform-view branch of DrawView.
+        _drawSurface = new RectF(0, 0, width, height);
         // The insets are read once and both gate the layout pass and feed the arrange below.
         Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
         int softInput = OpenHarmonySafeArea.GetSoftInputInset();
@@ -658,8 +711,11 @@ public sealed class OpenHarmonyWindowRenderer
     /// Draws one view and its subtree. <paramref name="map"/> is the flow map of this view's
     /// logical-to-canvas space; <paramref name="parentRightToLeft"/> is its parent's resolved
     /// direction (MatchParent inheritance; see <see cref="OpenHarmonyFlowDirection"/>).
+    /// <paramref name="shifted"/> is true once an ancestor translated the canvas (a view
+    /// translation, scale/rotation or a scroll offset), which makes a child's logical frame no
+    /// longer the rectangle its pixels land in: the off-surface cull is disabled from there on.
     /// </summary>
-    private void DrawView(IView view, in OpenHarmonyFlowMap map, bool parentRightToLeft)
+    private void DrawView(IView view, in OpenHarmonyFlowMap map, bool parentRightToLeft, bool shifted = false)
     {
         if (view.Visibility != Visibility.Visible)
         {
@@ -671,6 +727,9 @@ public sealed class OpenHarmonyWindowRenderer
         // restores the transform; alpha is a backend field outside that stack, so it is
         // captured and written back with the same discipline. The state lives outside the
         // platform-view branch so every exit (including the early returns below) can pop it.
+        // Every transform input is read once: under the device interpreter each IView property
+        // read is a virtual call through the bindable store, and the old code read Opacity,
+        // TranslationX/Y, Scale and Rotation twice on the common (untransformed) path.
         bool transformed = false;
         float previousAlpha = 1f;
         bool clipped = false;
@@ -687,19 +746,26 @@ public sealed class OpenHarmonyWindowRenderer
             bool dimmed = !view.IsEnabled ||
                           (view as Microsoft.Maui.Controls.VisualElement)?.IsEnabled == false;
             platform.Dimmed = dimmed;
-            transformed = view.Opacity < 1.0 || view.TranslationX != 0 || view.TranslationY != 0 ||
-                          view.Scale != 1.0 || view.Rotation != 0;
+            double opacity = view.Opacity;
+            double translationX = view.TranslationX;
+            double translationY = view.TranslationY;
+            double scale = view.Scale;
+            double rotation = view.Rotation;
+            transformed = opacity < 1.0 || translationX != 0 || translationY != 0 ||
+                          scale != 1.0 || rotation != 0;
+            // Only a geometric transform moves pixels: the off-surface cull stays disabled
+            // below a translated/scaled/rotated node, and the scroll branch disables it too.
+            bool movesPixels = translationX != 0 || translationY != 0 || scale != 1.0 || rotation != 0;
             previousAlpha = _canvas.Alpha;
             if (transformed)
             {
                 _canvas.SaveState();
-                double effectiveOpacity = view.Opacity;
-                _canvas.Alpha = (float)Math.Clamp(effectiveOpacity, 0, 1);
-                if (view.TranslationX != 0 || view.TranslationY != 0)
+                _canvas.Alpha = (float)Math.Clamp(opacity, 0, 1);
+                if (translationX != 0 || translationY != 0)
                 {
-                    _canvas.Translate((float)view.TranslationX, (float)view.TranslationY);
+                    _canvas.Translate((float)translationX, (float)translationY);
                 }
-                if (view.Rotation != 0 || view.Scale != 1.0)
+                if (rotation != 0 || scale != 1.0)
                 {
                     // Rotation and scale pivot at the view's anchor (AnchorX/AnchorY, 0.5 by
                     // default = the frame centre); the anchor is not clamped, matching the
@@ -708,12 +774,12 @@ public sealed class OpenHarmonyWindowRenderer
                     float anchorX = frame.X + (float)view.AnchorX * frame.Width;
                     float anchorY = frame.Y + (float)view.AnchorY * frame.Height;
                     TransformPivotObserved?.Invoke(anchorX, anchorY);
-                    _canvas.Rotate((float)view.Rotation, anchorX, anchorY);
-                    if (view.Scale != 1.0)
+                    _canvas.Rotate((float)rotation, anchorX, anchorY);
+                    if (scale != 1.0)
                     {
                         // ICanvas.Scale has no centre overload: translate around the anchor.
                         _canvas.Translate(anchorX, anchorY);
-                        _canvas.Scale((float)view.Scale, (float)view.Scale);
+                        _canvas.Scale((float)scale, (float)scale);
                         _canvas.Translate(-anchorX, -anchorY);
                     }
                 }
@@ -735,14 +801,18 @@ public sealed class OpenHarmonyWindowRenderer
                     }
                 }
             }
-            platform.DrawShadow(_canvas);
-            platform.Draw(_canvas);
-            if (platform.ShellTitleViewRow is { } shellTitleView)
+            if (!CanSkipOwnDrawing(view, platform, opacity, shifted || movesPixels))
             {
-                // T15: the rich Shell.TitleView is arranged in canvas space by the chrome;
-                // draw it over the bar (its own content replaces the title text), clipped to
-                // the band so a descendant cannot spill into the page content.
-                DrawShellTitleView(shellTitleView, platform.FlowRightToLeft);
+                DrawCostTick?.Invoke(DrawKindOf(view, platform));
+                platform.DrawShadow(_canvas);
+                platform.Draw(_canvas);
+                if (platform.ShellTitleViewRow is { } shellTitleView)
+                {
+                    // T15: the rich Shell.TitleView is arranged in canvas space by the chrome;
+                    // draw it over the bar (its own content replaces the title text), clipped to
+                    // the band so a descendant cannot spill into the page content.
+                    DrawShellTitleView(shellTitleView, platform.FlowRightToLeft);
+                }
             }
             if (platform.PopupVisible)
             {
@@ -762,9 +832,9 @@ public sealed class OpenHarmonyWindowRenderer
             {
                 _carouselViews.Add(platform);
             }
-            OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
             if (platform.IsFlyoutPage)
             {
+                OpenHarmonyFlowMap flyoutChildMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
                 // Detail fills the window; the flyout is an overlay clipped to its panel. Only the
                 // first two children are drawn, so the walk stops there instead of materialising
                 // the list the iterator version needed.
@@ -786,7 +856,7 @@ public sealed class OpenHarmonyWindowRenderer
                 }
                 if (flyoutDetail is not null)
                 {
-                    DrawView(flyoutDetail, childMap, flowRightToLeft);
+                    DrawView(flyoutDetail, flyoutChildMap, flowRightToLeft, shifted);
                 }
                 if (platform.FlyoutPresented && flyoutContent is not null)
                 {
@@ -798,7 +868,7 @@ public sealed class OpenHarmonyWindowRenderer
                     float panelWidth = platform.FlyoutWidth;
                     float panelX = flowRightToLeft ? flyoutFrame.Right - panelWidth : flyoutFrame.X;
                     _canvas.ClipRectangle(panelX, flyoutFrame.Y, panelWidth, flyoutFrame.Height);
-                    DrawView(flyoutContent, childMap, flowRightToLeft);
+                    DrawView(flyoutContent, flyoutChildMap, flowRightToLeft, shifted);
                     _canvas.RestoreState();
                 }
                 RestoreViewState(_canvas, transformed, previousAlpha, clipped);
@@ -806,32 +876,100 @@ public sealed class OpenHarmonyWindowRenderer
             }
             if (platform.IsScrollView)
             {
-                // Clip to the viewport and translate the content by the scroll offsets.
+                // Clip to the viewport and translate the content by the scroll offsets. The
+                // translation can pull any child into the surface, so the subtree's cull is off.
                 _canvas.SaveState();
                 RectF scrollFrame = platform.CanvasFrame;
                 _canvas.ClipRectangle(scrollFrame.X, scrollFrame.Y, scrollFrame.Width, scrollFrame.Height);
                 _canvas.Translate(-platform.ScrollOffsetX, -platform.ScrollOffsetY);
+                OpenHarmonyFlowMap scrollChildMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
                 foreach (IView child in ChildrenInZOrder(view))
                 {
-                    DrawView(child, childMap, flowRightToLeft);
+                    DrawView(child, scrollChildMap, flowRightToLeft, shifted: true);
                 }
                 _canvas.RestoreState();
                 RestoreViewState(_canvas, transformed, previousAlpha, clipped);
                 return;
             }
-            foreach (IView child in ChildrenInZOrder(view))
+            bool childShifted = shifted || movesPixels;
+            // The child map (a view.Frame read plus the flow arithmetic) is only needed when
+            // there is a first child: leaf nodes - the majority of a page - skip it entirely.
+            var children = ChildrenInZOrder(view);
+            if (!children.MoveNext())
             {
-                DrawView(child, childMap, flowRightToLeft);
+                RestoreViewState(_canvas, transformed, previousAlpha, clipped);
+                return;
             }
+            OpenHarmonyFlowMap childMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
+            do
+            {
+                DrawView(children.Current, childMap, flowRightToLeft, childShifted);
+            }
+            while (children.MoveNext());
             RestoreViewState(_canvas, transformed, previousAlpha, clipped);
             return;
         }
         OpenHarmonyFlowMap noPlatformChildMap = map.ForChild(LogicalFrameOf(view), flowRightToLeft);
         foreach (IView child in ChildrenInZOrder(view))
         {
-            DrawView(child, noPlatformChildMap, flowRightToLeft);
+            DrawView(child, noPlatformChildMap, flowRightToLeft, shifted);
         }
         RestoreViewState(_canvas, transformed, previousAlpha, clipped);
+    }
+
+    /// <summary>
+    /// True when a view's own drawing can be skipped without changing the frame: it is fully
+    /// invisible (a zero-opacity subtree) or its canvas rectangle lies outside the surface with
+    /// no canvas shift in between, and it owns no deferred overlay that has to keep registering.
+    /// The caller still descends into the children: a child is not bound by its parent's frame
+    /// unless a clip says so, and each child runs this same test against its own rectangle.
+    /// </summary>
+    private bool CanSkipOwnDrawing(IView view, OpenHarmonyView platform, double opacity, bool shifted)
+    {
+        if (opacity <= 0)
+        {
+            return true;
+        }
+        if (shifted)
+        {
+            // An ancestor translation/scale/rotation (or a scroll offset) can move any of this
+            // node's pixels into the surface, so its logical frame says nothing.
+            return false;
+        }
+        RectF frame = platform.CanvasFrame;
+        if (frame.Width <= 0 || frame.Height <= 0)
+        {
+            return false;  // the platform view already no-ops; keep the walk boring
+        }
+        if (frame.Right >= _drawSurface.X && frame.X <= _drawSurface.Right &&
+            frame.Bottom >= _drawSurface.Y && frame.Y <= _drawSurface.Bottom)
+        {
+            return false;  // intersects the surface
+        }
+        // Deferred overlays (popup, toolbar overflow, flyout panel) and the carousel indicator
+        // register while their owner draws, even when the owner itself is off the surface; the
+        // rich Shell.TitleView row is arranged into the title bar and follows the same rule. An
+        // Image draws through its decode pipeline: skipping an off-surface image would leave its
+        // preview/final passes unrequested until it scrolls into view (the suite pins that a
+        // render drives both passes), so image views always draw.
+        if (platform.PopupVisible || platform.ToolbarOverflowOpen || platform.FlyoutOpen ||
+            platform.ShellTitleViewRow is not null || view is Microsoft.Maui.Controls.CarouselView ||
+            view is Microsoft.Maui.Controls.Image || platform.ImageBytes is { Length: > 0 })
+        {
+            return false;
+        }
+        // A shadow paints outside the frame: only skip when the shadow's own extent also misses
+        // the surface. The (bindable) shadow read happens only for a node outside the surface.
+        float margin = 0f;
+        if (view.Shadow is { Opacity: > 0, Radius: > 0 } shadow)
+        {
+            margin = shadow.Radius +
+                     (float)Math.Max(Math.Abs(shadow.Offset.X), Math.Abs(shadow.Offset.Y)) + 2f;
+        }
+        return frame.Right + margin < _drawSurface.X ||
+               frame.X - margin > _drawSurface.Right ||
+               frame.Bottom + margin < _drawSurface.Y ||
+               frame.Y - margin > _drawSurface.Bottom;
     }
 
     /// <summary>

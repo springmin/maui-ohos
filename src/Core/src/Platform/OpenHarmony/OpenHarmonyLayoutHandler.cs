@@ -12,6 +12,23 @@ public sealed class OpenHarmonyLayoutHandler : OpenHarmonyViewHandler<ILayout>, 
 
     protected override OpenHarmonyView CreatePlatformView() => new();
 
+    // AUTODISCONNECT: a layout removal (Clear/Remove/indexer update) keeps the removed child's
+    // Element handler connected (MAUI semantics), so the web controls' ArkWeb overlays would
+    // stay claimed. Watch the layout's subtree and release/re-claim through the owner contract;
+    // the page and content-view handlers watch their own subtrees too, and the calls are
+    // idempotent.
+    protected override void ConnectHandler(OpenHarmonyView platformView)
+    {
+        base.ConnectHandler(platformView);
+        OpenHarmonyOverlaySlotWatch.Watch(VirtualView as Microsoft.Maui.Controls.Element);
+    }
+
+    protected override void DisconnectHandler(OpenHarmonyView platformView)
+    {
+        OpenHarmonyOverlaySlotWatch.Unwatch(VirtualView as Microsoft.Maui.Controls.Element);
+        base.DisconnectHandler(platformView);
+    }
+
     // Drive MAUI's cross-platform layout pipeline: Measure/Arrange on the virtual view are
     // routed through the layout's own measure/arrange logic (as the platform handlers do).
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)

@@ -55,7 +55,7 @@ using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHybridWebView>, IOpenHarmonyOverlaySlotOwner
+public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHandler<IHybridWebView>, IOpenHarmonyOverlaySlotOwner, IOpenHarmonyOverlaySlotLifetime
 {
     /// <summary>Message prefix the stock HybridWebView JavaScript uses for raw messages.</summary>
     internal const string RawMessagePrefix = "__RawMessage|";
@@ -111,6 +111,13 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
 
     /// <summary>True while this handler lost its slot to an LRU preemption (registration replay).</summary>
     private bool _overlayPreempted;
+
+    /// <summary>
+    /// True while this handler was removed from the visual tree (AUTODISCONNECT). The slot was
+    /// released (a dynamic slot is destroyed in the shell); the next arrange or re-attach
+    /// re-claims a slot and replays the registration. Cleared by <see cref="EnsureOverlaySlot"/>.
+    /// </summary>
+    private bool _overlayDetached;
 
     /// <summary>True after a frame/load was sent for the current claim (the victim heuristic).</summary>
     private bool _overlayEngaged;
@@ -271,13 +278,15 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         OpenHarmonyOverlays.Release(_overlaySlot, this);
         _overlaySlot = -1;
         _overlayEngaged = false;
+        _overlayDetached = false;
         base.DisconnectHandler(platformView);
     }
 
     /// <summary>
     /// MULTI-OVERLAY-FULL restore hook: claims a slot when this handler has none (a preemption
-    /// left it suspended) and reports whether the claim is a restore that has to replay its
-    /// registration. A live claim is only touched (LRU bookkeeping). Never throws.
+    /// or an AUTODISCONNECT detach left it suspended) and reports whether the claim is a restore
+    /// that has to replay its registration. A live claim is only touched (LRU bookkeeping).
+    /// Never throws.
     /// </summary>
     private bool EnsureOverlaySlot()
     {
@@ -292,9 +301,11 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             return false;
         }
         _overlaySlot = slot;
-        if (_overlayPreempted)
+        bool replay = _overlayPreempted || _overlayDetached;
+        _overlayPreempted = false;
+        _overlayDetached = false;
+        if (replay)
         {
-            _overlayPreempted = false;
             OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay restored: slot {slot}");
             return true;
         }
@@ -333,6 +344,55 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay preempted: slot {slot}");
     }
 
+    /// <summary>
+    /// AUTODISCONNECT: the hybrid was removed from its layout. Drop the claim (the shell
+    /// destroys a dynamic slot), keep the handler connected (MAUI semantics) and mark the
+    /// control for a registration replay so a re-add rebuilds the page. Idempotent.
+    /// </summary>
+    void IOpenHarmonyOverlaySlotLifetime.OnOverlaySlotDetached()
+    {
+        _overlayDetached = true;
+        if (_overlaySlot < 0)
+        {
+            return;
+        }
+        int slot = _overlaySlot;
+        _overlaySlot = -1;
+        _overlayEngaged = false;
+        // Hide before the release: a hot slot keeps its ArkWeb component, and the tagged hide is
+        // sent while the slot still exists (after a dynamic destroy it would be deferred and
+        // replayed onto the next incarnation of the slot).
+        OpenHarmonyBridge.WebCommand("hide", OpenHarmonyOverlays.Tag(slot));
+        OpenHarmonyOverlays.Release(slot, this);
+        OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay detached: slot {slot}");
+    }
+
+    /// <summary>
+    /// AUTODISCONNECT: the hybrid re-entered the visual tree. A detached/preempted handler
+    /// re-claims a slot and replays its registration; a live claim is only touched.
+    /// </summary>
+    void IOpenHarmonyOverlaySlotLifetime.OnOverlaySlotAttached()
+    {
+        if (_overlaySlot >= 0)
+        {
+            _overlayDetached = false;
+            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            return;
+        }
+        if (!_overlayDetached && !_overlayPreempted)
+        {
+            return;
+        }
+        if (EnsureOverlaySlot())
+        {
+            ReplayOverlay();
+        }
+        if (_overlaySlot >= 0)
+        {
+            _overlayEngaged = true;
+        }
+    }
+
     /// <summary>True while this hybrid's overlay is showing (the pool preempts idle owners first).</summary>
     bool IOpenHarmonyOverlaySlotOwner.IsOverlaySlotEngaged => _overlaySlot >= 0 && _overlayEngaged;
 
@@ -347,7 +407,17 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         // preemption must NOT restore from an arrange (a layout pass runs for every control, so
         // restoring here would let two suspended hybrids preempt each other forever); an
         // explicit use (registration/eval/raw message) or a first-time claim does it.
-        if (!_overlayPreempted)
+        // AUTODISCONNECT: a detached handler is not arranged while it is gone, so an arrange
+        // after a detach means it was re-attached: restore and replay here (safety net; the
+        // attach signal normally did it).
+        if (_overlayDetached)
+        {
+            if (EnsureOverlaySlot())
+            {
+                ReplayOverlay();
+            }
+        }
+        else if (!_overlayPreempted)
         {
             EnsureOverlaySlot();
         }
@@ -376,6 +446,13 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     {
         // MULTI-OVERLAY-FULL: a suspended handler claims (or re-claims) a slot here; the
         // registration below is the load/attach replay, so no extra replay pass is needed.
+        // AUTODISCONNECT: a detached hybrid must not re-claim/register (a pending-context
+        // replay or a HybridRoot change would otherwise resurrect the overlay of a control
+        // that is out of the tree); the attach signal registers again with the current root.
+        if (_overlayDetached)
+        {
+            return;
+        }
         EnsureOverlaySlot();
         OpenHarmonyAppContext? context = OpenHarmonyBridge.Context;
         if (context is null || string.IsNullOrEmpty(context.AppDir))

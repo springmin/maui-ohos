@@ -17,6 +17,22 @@ public sealed class OpenHarmonyContentViewHandler : OpenHarmonyViewHandler<Templ
 
     protected override OpenHarmonyView CreatePlatformView() => new();
 
+    // AUTODISCONNECT: a ContentView's Content swap removes the old content from the logical
+    // tree; watching the view's subtree releases an overlay owned by a removed web control and
+    // re-claims it when it is set back (the page/layout watchers cover the nested cases too,
+    // and the owner calls are idempotent).
+    protected override void ConnectHandler(OpenHarmonyView platformView)
+    {
+        base.ConnectHandler(platformView);
+        OpenHarmonyOverlaySlotWatch.Watch(VirtualView);
+    }
+
+    protected override void DisconnectHandler(OpenHarmonyView platformView)
+    {
+        OpenHarmonyOverlaySlotWatch.Unwatch(VirtualView);
+        base.DisconnectHandler(platformView);
+    }
+
     private IView? Content => (VirtualView as IContentView)?.PresentedContent as IView;
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)

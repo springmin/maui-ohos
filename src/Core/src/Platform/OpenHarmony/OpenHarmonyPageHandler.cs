@@ -17,6 +17,22 @@ public sealed class OpenHarmonyPageHandler : OpenHarmonyViewHandler<Page>
 
     protected override OpenHarmonyView CreatePlatformView() => new();
 
+    // AUTODISCONNECT: the page is the outermost element ancestor of its content, so watching its
+    // subtree catches every web-control removal under the page (a layout Clear/Remove, a content
+    // swap, a whole-subtree removal) even when the intermediate handlers are disconnected. The
+    // calls are idempotent with the layout/content-view watchers.
+    protected override void ConnectHandler(OpenHarmonyView platformView)
+    {
+        base.ConnectHandler(platformView);
+        OpenHarmonyOverlaySlotWatch.Watch(VirtualView);
+    }
+
+    protected override void DisconnectHandler(OpenHarmonyView platformView)
+    {
+        OpenHarmonyOverlaySlotWatch.Unwatch(VirtualView);
+        base.DisconnectHandler(platformView);
+    }
+
     private IView? PageContent => (VirtualView as IContentView)?.PresentedContent as IView;
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)

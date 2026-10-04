@@ -429,6 +429,29 @@ requires both walks to follow `CurrentItem`/`CurrentPage`. The pixel suite
 `shell current page draws under the shell` (red) and `shell item switch repaints the new page`
 (lime); the pre-fix slice fails the two shell checks against the canvas fill.
 
+## FlyoutPage in the accessibility walk
+
+SOAK-JI traced the device `--a11y-probe` `nodeCount=1` to the walk root: the accessibility walk
+starts at `IWindow.Content`, the hello-maui-app window is a `FlyoutPage`, and
+`OpenHarmonyAccessibility.PushChildren` had no FlyoutPage branch (the compositor's
+`ChildEnumerator` has had the flyout phases since the flyout support landed: `Detail` always
+visible, `Flyout` only while `IsPresented`). The shadow tree therefore stopped at the root and
+published exactly one node; the shell's self-check dialog reads that number through
+`host.accessibilityNodeCount()`.
+
+`PushChildren` now mirrors the compositor: it pushes `FlyoutPage.Detail` unconditionally and
+`FlyoutPage.Flyout` while `IsPresented`, so a flyout-rooted window publishes the detail page's
+subtree (the sample's Home tab content) and follows a presented panel. rc.1's `FlyoutPage` is not
+an `IContentView`, so the presented-content branch cannot reach either pane.
+
+Pinned by two interaction checks in `ohos-workload/test/maui-platform-verify` (591 -> 593,
+floor 573 -> 575): `a11y-flyout detail` publishes a FlyoutPage and requires the detail label node
+in the tree (parent non-zero, node count > 1; the pre-fix slice publishes only the root, which is
+also the negative control), and `a11y-flyout panel` sets `IsPresented` and requires the flyout
+label in the tree with the detail kept. Device (probe5 AOT, FIX-A11YFLYOUT + FIX-PREEMPT-RAW
+shell abc 370240 / `4b439e83…`): the self-check dialog reads `nodeCount=70` on the Home state
+(content-page nodes) where it read 1 before.
+
 ## Media playback (`OpenHarmonyMediaPlayer`, T20)
 
 MAUI has no media-player abstraction; the MediaElement-shaped consumer is the CommunityToolkit.Maui

@@ -800,6 +800,21 @@ public static partial class OpenHarmonyAccessibility
         {
             s_buildChildren.Add(shellPage);
         }
+        // FIX-A11YFLYOUT: the compositor's ChildEnumerator yields a flyout page's detail page
+        // (always visible) and its panel while presented, so the shadow tree publishes what the
+        // frame draws. The hello-maui-app window is a FlyoutPage: without this branch the walk
+        // stopped at the root and the device --a11y-probe reported nodeCount=1. rc.1's FlyoutPage
+        // is not an IContentView, so the presented-content branch cannot reach either pane.
+        if (view is Microsoft.Maui.Controls.FlyoutPage flyoutPage && flyoutPage.Detail is IView detail)
+        {
+            s_buildChildren.Add(detail);
+        }
+        if (view is Microsoft.Maui.Controls.FlyoutPage presentedFlyout &&
+            presentedFlyout.IsPresented &&
+            presentedFlyout.Flyout is IView flyoutContent)
+        {
+            s_buildChildren.Add(flyoutContent);
+        }
         if (view is IContentView contentView && contentView.PresentedContent is IView presented && !ReferenceEquals(presented, view))
         {
             s_buildChildren.Add(presented);

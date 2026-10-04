@@ -39,7 +39,37 @@ public sealed class OpenHarmonyWindowRenderer
     /// </summary>
     internal static Action<IView, RectF>? ShellTitleViewDrawn { get; set; }
 
+    /// <summary>
+    /// Test/diagnostic seam: invoked as each <see cref="Render"/> phase completes, with the
+    /// phase index (0 = render entry, 1 = measure+arrange, 2 = surface begin + background fill,
+    /// 3 = content draw, 4 = chrome and floating overlays, 5 = accessibility publish, i.e.
+    /// immediately before the present). Null in production, so every call site costs one null
+    /// check and a frame-pacing probe can split a frame without a timer inside the compositor.
+    /// </summary>
+    internal static Action<int>? RenderPhaseTick { get; set; }
+
     private readonly MauiCanvas _canvas;
+
+    // Layout revalidation gate. IView.Measure does not consult the per-element measure cache
+    // (that cache only serves the obsolete GetSizeRequest path), so re-running Measure/Arrange
+    // every frame re-walks the whole tree; on the device interpreter build that measured at
+    // ~14 ms of a ~49 ms frame while the tree was static between frames. The gate re-runs the
+    // layout pass only when the tree invalidated its measure or edited its layout since the last
+    // pass (OpenHarmonyLayoutInvalidation's handler-invoke version, plus the root's
+    // MeasureInvalidated event for handler-less subtrees), when the render root or surface size
+    // changed, or when the safe-area insets/title bar row changed (both alter the content's
+    // frame without invalidating the content's own measure).
+    private IView? _layoutRoot;
+    private Microsoft.Maui.Controls.VisualElement? _layoutWatched;
+    private EventHandler? _layoutInvalidatedHandler;
+    private volatile bool _layoutDirty = true;
+    private int _layoutVersion;
+    private int _layoutWidth = -1;
+    private int _layoutHeight = -1;
+    private Thickness _layoutInsets;
+    private int _layoutSoftInput;
+    private bool _layoutShowsTitleBar;
+    private float _layoutTitleBarHeight;
 
     public OpenHarmonyWindowRenderer()
     {
@@ -87,24 +117,45 @@ public sealed class OpenHarmonyWindowRenderer
     /// </remarks>
     public bool Render(IView content, int width, int height)
     {
+        RenderPhaseTick?.Invoke(0);
         OpenHarmonyTitleBarRow? titleBar = ResolveTitleBar(content);
         bool showsTitleBar = titleBar is { IsVisible: true };
         float titleBarHeight = showsTitleBar ? titleBar!.Height : 0f;
         float contentHeight = Math.Max(0f, height - titleBarHeight);
-        content.Measure(width, contentHeight);
-        if (showsTitleBar)
+        // The insets are read once and both gate the layout pass and feed the arrange below.
+        Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
+        int softInput = OpenHarmonySafeArea.GetSoftInputInset();
+        if (NeedsLayout(content, width, height, insets, softInput, showsTitleBar, titleBarHeight))
         {
-            // Pages and navigation pages have no platform layout in this slice, so their
-            // presented content is arranged by the page-aware walk (the app host uses it too)
-            // inside the frame left below the row.
-            OpenHarmonySafeAreaArrange.Arrange(content, new Rect(0, titleBarHeight, width, contentHeight),
-                new Rect(0, 0, width, height), OpenHarmonySafeArea.GetWindowInsets());
-        }
-        else
-        {
-            content.Arrange(new Rect(0, 0, width, height));
+            // Consumed before the pass: an invalidation raised while measuring/arranging (or a
+            // MeasureInvalidated event racing this reset) must stay pending for the next frame
+            // instead of being swallowed by the reset.
+            _layoutDirty = false;
+            _layoutVersion = OpenHarmonyLayoutInvalidation.Version;
+            content.Measure(width, contentHeight);
+            if (showsTitleBar)
+            {
+                // Pages and navigation pages have no platform layout in this slice, so their
+                // presented content is arranged by the page-aware walk (the app host uses it too)
+                // inside the frame left below the row.
+                OpenHarmonySafeAreaArrange.Arrange(content, new Rect(0, titleBarHeight, width, contentHeight),
+                    new Rect(0, 0, width, height), insets);
+            }
+            else
+            {
+                content.Arrange(new Rect(0, 0, width, height));
+            }
+            _layoutRoot = content;
+            _layoutWidth = width;
+            _layoutHeight = height;
+            _layoutInsets = insets;
+            _layoutSoftInput = softInput;
+            _layoutShowsTitleBar = showsTitleBar;
+            _layoutTitleBarHeight = titleBarHeight;
+            WatchLayout(content);
         }
 
+        RenderPhaseTick?.Invoke(1);
         bool surfaceReady = SurfaceBegin is not null ? SurfaceBegin(width, height) : HostCanvas.Begin(width, height);
         if (!surfaceReady)
         {
@@ -123,7 +174,9 @@ public sealed class OpenHarmonyWindowRenderer
         _flyoutPanelView = null;
         _toolbarOverflowView = null;
         _carouselViews.Clear();
+        RenderPhaseTick?.Invoke(2);
         DrawView(content, OpenHarmonyFlowMap.Identity, contentRightToLeft);
+        RenderPhaseTick?.Invoke(3);
         if (showsTitleBar)
         {
             // The window title bar is chrome above the page: arranged into the top row, drawn
@@ -160,6 +213,7 @@ public sealed class OpenHarmonyWindowRenderer
             // drawn with its own view, before the children it would otherwise sit under).
             toolbarOverflow.DrawToolbarOverflow(_canvas);
         }
+        RenderPhaseTick?.Invoke(4);
         OpenHarmonyAlertHost.SetSurface(width, height);
         OpenHarmonyView.SetSurfaceViewport(width, height);
         DrawAlertOverlay();
@@ -170,6 +224,7 @@ public sealed class OpenHarmonyWindowRenderer
         {
             DrawDiagnosticsOverlay(content);
         }
+        RenderPhaseTick?.Invoke(5);
         if (SurfacePresent is not null)
         {
             SurfacePresent();
@@ -179,6 +234,50 @@ public sealed class OpenHarmonyWindowRenderer
             HostCanvas.Present();
         }
         return true;
+    }
+
+    /// <summary>
+    /// True when the upcoming frame must re-run Measure/Arrange: the render root or surface size
+    /// changed, the tree invalidated its measure or edited its layout since the last pass (the
+    /// handler-invoke version and the root's MeasureInvalidated event), the safe-area insets
+    /// moved (keyboard/avoid area), or the window title bar row appeared/disappeared/resized
+    /// (the row steals layout space from the content without invalidating the content's own
+    /// measure).
+    /// </summary>
+    private bool NeedsLayout(IView content, int width, int height, Thickness insets, int softInput,
+        bool showsTitleBar, float titleBarHeight)
+        => !ReferenceEquals(_layoutRoot, content)
+           || width != _layoutWidth
+           || height != _layoutHeight
+           || _layoutDirty
+           || _layoutVersion != OpenHarmonyLayoutInvalidation.Version
+           || softInput != _layoutSoftInput
+           || insets != _layoutInsets
+           || showsTitleBar != _layoutShowsTitleBar
+           || titleBarHeight != _layoutTitleBarHeight;
+
+    /// <summary>
+    /// Subscribes to the render root's <c>MeasureInvalidated</c> so the next frame re-runs the
+    /// layout pass; called after each pass. Descendant invalidations reach the root through
+    /// <c>OnChildMeasureInvalidated</c> propagation, and a root swap unsubscribes the previous
+    /// root (so a modal page cannot keep the old root's tree alive).
+    /// </summary>
+    private void WatchLayout(IView content)
+    {
+        if (ReferenceEquals(_layoutWatched, content))
+        {
+            return;
+        }
+        if (_layoutWatched is not null && _layoutInvalidatedHandler is not null)
+        {
+            _layoutWatched.MeasureInvalidated -= _layoutInvalidatedHandler;
+        }
+        _layoutWatched = content as Microsoft.Maui.Controls.VisualElement;
+        if (_layoutWatched is not null)
+        {
+            _layoutInvalidatedHandler ??= (_, _) => _layoutDirty = true;
+            _layoutWatched.MeasureInvalidated += _layoutInvalidatedHandler;
+        }
     }
 
     /// <summary>Outlines every view of the tree with its type name (visual diagnostics).</summary>

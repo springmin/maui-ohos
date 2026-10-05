@@ -66,13 +66,21 @@ public sealed class OpenHarmonyMauiAppHost
 
         OpenHarmonyBridge.SurfaceChanged += info =>
         {
-            if (info.State == OpenHarmonySurfaceState.Created && info.Width > 0 && info.Height > 0)
+            if (CanArrangeSurface(info))
             {
                 lock (_sync)
                 {
                     Arrange(info.Width, info.Height);
                     _dirty = true;
                     Render();
+                }
+                if (info.State == OpenHarmonySurfaceState.Changed)
+                {
+                    // A0 multi-window form adaptation: a live resize/split/free-window size
+                    // change re-arranges the tree for the new surface (see CanArrangeSurface).
+                    // The status line lets the shell's dotnet-status poll carry the resize to
+                    // hilog on a device.
+                    OpenHarmonyBridge.WriteStatus($"[maui] window size {info.Width}x{info.Height}");
                 }
             }
         };
@@ -347,6 +355,14 @@ public sealed class OpenHarmonyMauiAppHost
         }
         OpenHarmonyBridge.WriteStatus("[maui] window closed; the host has no live window");
     }
+
+    /// <summary>
+    /// True for a surface report the host can arrange for: the first Created publish and every
+    /// live Changed one (window resize, split, 2in1 free-window size change) with a positive
+    /// size. Destroyed and the transient 0x0 report keep the last arranged frame.
+    /// </summary>
+    internal static bool CanArrangeSurface(OpenHarmonySurfaceInfo info)
+        => info.State != OpenHarmonySurfaceState.Destroyed && info.Width > 0 && info.Height > 0;
 
     /// <summary>Measures/arranges the current window content for the given surface size.</summary>
     public void Arrange(int width, int height)

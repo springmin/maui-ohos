@@ -1,0 +1,474 @@
+// In-app subwindow (MULTIWINDOW-M) for the OpenHarmony MAUI slice.
+//
+// The ArkTS shell creates an application subwindow under the main window with
+// window.createSubWindowWithOptions (no ACL; window type TYPE_FLOAT would need the
+// system-only SYSTEM_FLOAT_WINDOW permission and is deliberately out of reach). Commands
+// travel managed -> shell through host.registerSubWindowSink, reported by the shell through
+// host.notifySubWindowEvent -> ohos_host_sub_window_event_listener, which this class registers
+// in a module initializer. The payloads are small JSON documents, opaque to the native host,
+// so the shell and the slice can extend the command/event set without a host rebuild.
+//
+// Honest degradation (matches the platform-limits doc E2 and the multiwindow prestudy A1):
+// the application still has ONE managed surface/renderer, so the subwindow hosts shell-drawn
+// ArkUI content, not a second MAUI visual tree. The managed side owns the lifecycle, geometry
+// and interaction contract (this class); per-window surface/renderer state is the L remainder.
+// Every native call is guarded: off-device (desktop harness) or with an older host library the
+// feature reports unavailable and no call throws.
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Maui.Graphics;
+
+namespace Microsoft.Maui.Platform;
+
+/// <summary>Kind of an in-app subwindow event reported by the ArkTS shell.</summary>
+public enum OpenHarmonySubWindowEventKind
+{
+    /// <summary>The shell created and showed the subwindow; the payload carries its rect + id.</summary>
+    Created = 0,
+    /// <summary>The subwindow became visible (window event WINDOW_SHOWN).</summary>
+    Shown = 1,
+    /// <summary>The subwindow was hidden (window event WINDOW_HIDDEN).</summary>
+    Hidden = 2,
+    /// <summary>The subwindow moved; the payload carries x/y.</summary>
+    Moved = 3,
+    /// <summary>The subwindow resized; the payload carries w/h.</summary>
+    Resized = 4,
+    /// <summary>The subwindow was destroyed.</summary>
+    Closed = 5,
+    /// <summary>A touch landed inside the subwindow content; see <see cref="OpenHarmonySubWindowTouchEventArgs"/>.</summary>
+    Touch = 6,
+    /// <summary>The shell could not create or drive the subwindow; the payload carries a reason.</summary>
+    Failed = 7,
+    /// <summary>The shell-drawn subwindow page finished loading; the payload carries its window id.</summary>
+    PageReady = 8,
+    /// <summary>The main window went hidden; the child is suspended with it.</summary>
+    Suspended = 9,
+    /// <summary>The main window came back and the child was restored.</summary>
+    Resumed = 10,
+}
+
+/// <summary>One subwindow state report (kind, geometry, window id, failure detail).</summary>
+public sealed class OpenHarmonySubWindowEventArgs : EventArgs
+{
+    internal OpenHarmonySubWindowEventArgs(
+        OpenHarmonySubWindowEventKind kind, int windowId, Rect bounds, int code, string? message)
+    {
+        Kind = kind;
+        WindowId = windowId;
+        Bounds = bounds;
+        Code = code;
+        Message = message;
+    }
+
+    /// <summary>The event kind.</summary>
+    public OpenHarmonySubWindowEventKind Kind { get; }
+
+    /// <summary>The shell window id (0 when no subwindow exists).</summary>
+    public int WindowId { get; }
+
+    /// <summary>The last known subwindow rectangle (in window pixels).</summary>
+    public Rect Bounds { get; }
+
+    /// <summary>A failure code for <see cref="OpenHarmonySubWindowEventKind.Failed"/>; 0 otherwise.</summary>
+    public int Code { get; }
+
+    /// <summary>A failure message for <see cref="OpenHarmonySubWindowEventKind.Failed"/>.</summary>
+    public string? Message { get; }
+}
+
+/// <summary>One touch reported from the subwindow's shell-drawn content.</summary>
+public sealed class OpenHarmonySubWindowTouchEventArgs : EventArgs
+{
+    internal OpenHarmonySubWindowTouchEventArgs(int action, float x, float y, int pointerCount)
+    {
+        Action = action;
+        X = x;
+        Y = y;
+        PointerCount = pointerCount;
+    }
+
+    /// <summary>Touch type (0 down, 1 up, 2 move, 3 cancel - the ArkUI TouchType order).</summary>
+    public int Action { get; }
+
+    /// <summary>X in subwindow coordinates.</summary>
+    public float X { get; }
+
+    /// <summary>Y in subwindow coordinates.</summary>
+    public float Y { get; }
+
+    /// <summary>The number of active pointers reported with the touch.</summary>
+    public int PointerCount { get; }
+}
+
+/// <summary>
+/// Application subwindow lifecycle/geometry host. <see cref="IsSupported"/> is the shell's
+/// availability probe; the other members degrade to false/no-op without a device shell.
+/// </summary>
+public static partial class OpenHarmonySubWindow
+{
+    private const string HostLibrary = "libopenharmonyhost.so";
+
+    /// <summary>Command op: create (payload name/x/y/w/h/title).</summary>
+    public const int CreateCommand = 0;
+    /// <summary>Command op: move (payload x/y).</summary>
+    public const int MoveCommand = 1;
+    /// <summary>Command op: resize (payload w/h).</summary>
+    public const int ResizeCommand = 2;
+    /// <summary>Command op: show.</summary>
+    public const int ShowCommand = 3;
+    /// <summary>Command op: hide.</summary>
+    public const int HideCommand = 4;
+    /// <summary>Command op: close/destroy.</summary>
+    public const int CloseCommand = 5;
+    // The shell's availability probe (mirrors kSubWindowProbeOp in host_napi.cpp).
+    private const int ProbeCommand = 99;
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sub_window_event_listener")]
+    private static partial void SubWindowEventListener(IntPtr callback);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_sub_window_command", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int SubWindowCommandNative(int op, string payload);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SubWindowEventCallback(int op, IntPtr payloadUtf8);
+
+    private static unsafe IntPtr s_callback = (IntPtr)(delegate* unmanaged[Cdecl]<int, IntPtr, void>)&OnNativeEvent;
+
+    private static readonly object s_sync = new();
+    private static bool s_registered;
+    private static bool s_available = true;
+    private static int s_supported = -1;   // -1 unknown, 0 no shell sink, 1 shell sink registered
+    private static bool s_open;
+    private static bool s_visible;
+    private static bool s_suspended;
+    private static bool s_contentReady;
+    private static int s_windowId;
+    private static Rect s_bounds = Rect.Zero;
+
+    /// <summary>
+    /// Test/embedding seam: when set, commands go through this delegate instead of the native
+    /// library (the headless suite drives the command payloads with it).
+    /// </summary>
+    internal static Func<int, string, bool>? CommandSender { get; set; }
+
+    /// <summary>Raised for every subwindow state report (created/shown/hidden/moved/...).</summary>
+    public static event EventHandler<OpenHarmonySubWindowEventArgs>? Changed;
+
+    /// <summary>Raised for every touch inside the subwindow's shell-drawn content.</summary>
+    public static event EventHandler<OpenHarmonySubWindowTouchEventArgs>? Touched;
+
+    /// <summary>True when the shell registered its subwindow sink (a device with the M shell).</summary>
+    public static bool IsSupported
+    {
+        get
+        {
+            lock (s_sync)
+            {
+                if (s_supported >= 0)
+                {
+                    return s_supported == 1;
+                }
+            }
+            bool supported = false;
+            if (s_available)
+            {
+                try
+                {
+                    supported = SubWindowCommandNative(ProbeCommand, string.Empty) >= 1;
+                }
+                catch (DllNotFoundException)
+                {
+                    s_available = false;
+                }
+                catch (EntryPointNotFoundException)
+                {
+                    s_available = false;
+                }
+            }
+            lock (s_sync)
+            {
+                s_supported = supported ? 1 : 0;
+            }
+            return supported;
+        }
+    }
+
+    /// <summary>True between the shell's Created and Closed reports.</summary>
+    public static bool IsOpen
+    {
+        get { lock (s_sync) { return s_open; } }
+    }
+
+    /// <summary>True while the shell reports the subwindow shown (and the main window not suspended).</summary>
+    public static bool IsVisible
+    {
+        get { lock (s_sync) { return s_visible && !s_suspended; } }
+    }
+
+    /// <summary>True while the main window is hidden and the child is suspended with it.</summary>
+    public static bool IsSuspended
+    {
+        get { lock (s_sync) { return s_suspended; } }
+    }
+
+    /// <summary>True once the shell-drawn subwindow page reported ready.</summary>
+    public static bool IsContentReady
+    {
+        get { lock (s_sync) { return s_contentReady; } }
+    }
+
+    /// <summary>The shell window id of the subwindow (0 when none).</summary>
+    public static int WindowId
+    {
+        get { lock (s_sync) { return s_windowId; } }
+    }
+
+    /// <summary>The last known subwindow rectangle in window pixels.</summary>
+    public static Rect Bounds
+    {
+        get { lock (s_sync) { return s_bounds; } }
+    }
+
+    /// <summary>Registers the native event listener; a guarded no-op off-device.</summary>
+    public static void Register()
+    {
+        if (s_registered)
+        {
+            return;
+        }
+        s_registered = true;
+        try
+        {
+            SubWindowEventListener(s_callback);
+        }
+        catch (DllNotFoundException)
+        {
+            s_available = false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            s_available = false;
+        }
+    }
+
+    /// <summary>Creates (or reports, when already open) the application subwindow.</summary>
+    public static bool Create(string name, int x, int y, int width, int height, string? title = null)
+        => Send(CreateCommand, BuildCreatePayload(name, x, y, width, height, title));
+
+    /// <summary>Moves the subwindow to (x, y) in window pixels.</summary>
+    public static bool Move(int x, int y) => Send(MoveCommand, BuildRectPayload("x", x, "y", y));
+
+    /// <summary>Resizes the subwindow to width x height (pixels, clamped by the shell).</summary>
+    public static bool Resize(int width, int height) => Send(ResizeCommand, BuildRectPayload("w", width, "h", height));
+
+    /// <summary>Shows the subwindow (a no-op when none exists yet; Create shows it).</summary>
+    public static bool Show() => Send(ShowCommand, "{}");
+
+    /// <summary>Hides the subwindow without destroying it.</summary>
+    public static bool Hide() => Send(HideCommand, "{}");
+
+    /// <summary>Destroys the subwindow and its shell-drawn content.</summary>
+    public static bool Close() => Send(CloseCommand, "{}");
+
+    private static bool Send(int op, string payload)
+    {
+        Func<int, string, bool>? sender = CommandSender;
+        if (sender is not null)
+        {
+            return sender(op, payload);
+        }
+        if (!s_available)
+        {
+            return false;
+        }
+        try
+        {
+            return SubWindowCommandNative(op, payload) == 0;
+        }
+        catch (DllNotFoundException)
+        {
+            s_available = false;
+            return false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            s_available = false;
+            return false;
+        }
+    }
+
+    // One small JSON writer (Utf8JsonWriter is reflection-free, so this stays NativeAOT-safe).
+    private static string BuildCreatePayload(string name, int x, int y, int width, int height, string? title)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("name", name ?? string.Empty);
+            writer.WriteNumber("x", x);
+            writer.WriteNumber("y", y);
+            writer.WriteNumber("w", width);
+            writer.WriteNumber("h", height);
+            if (!string.IsNullOrEmpty(title))
+            {
+                writer.WriteString("title", title);
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string BuildRectPayload(string firstKey, int firstValue, string secondKey, int secondValue)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber(firstKey, firstValue);
+            writer.WriteNumber(secondKey, secondValue);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// The shell reports one event (host.notifySubWindowEvent). Parses the payload, updates the
+    /// published state and raises <see cref="Changed"/>/<see cref="Touched"/>. A malformed
+    /// payload is turned into a Failed report instead of throwing.
+    /// </summary>
+    internal static void HandleNativeEvent(int op, string payload)
+    {
+        var kind = (OpenHarmonySubWindowEventKind)op;
+        int windowId;
+        Rect bounds;
+        int code = 0;
+        string? message = null;
+        OpenHarmonySubWindowTouchEventArgs? touch = null;
+        bool raiseChanged = true;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(string.IsNullOrEmpty(payload) ? "{}" : payload);
+            JsonElement root = document.RootElement;
+            lock (s_sync)
+            {
+                windowId = ReadInt(root, "id", s_windowId);
+                bounds = new Rect(
+                    ReadInt(root, "x", (int)s_bounds.X),
+                    ReadInt(root, "y", (int)s_bounds.Y),
+                    ReadInt(root, "w", (int)s_bounds.Width),
+                    ReadInt(root, "h", (int)s_bounds.Height));
+                switch (kind)
+                {
+                    case OpenHarmonySubWindowEventKind.Created:
+                        s_open = true;
+                        s_visible = true;
+                        s_windowId = windowId;
+                        s_bounds = bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Shown:
+                        s_visible = true;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Hidden:
+                        s_visible = false;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Moved:
+                    case OpenHarmonySubWindowEventKind.Resized:
+                        s_bounds = bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Closed:
+                        s_open = false;
+                        s_visible = false;
+                        s_contentReady = false;
+                        s_windowId = 0;
+                        s_bounds = Rect.Zero;
+                        bounds = Rect.Zero;
+                        windowId = 0;
+                        break;
+                    case OpenHarmonySubWindowEventKind.PageReady:
+                        s_windowId = windowId;
+                        s_contentReady = true;
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Suspended:
+                        s_suspended = true;
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Resumed:
+                        s_suspended = false;
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Touch:
+                        touch = new OpenHarmonySubWindowTouchEventArgs(
+                            ReadInt(root, "action", 0),
+                            (float)ReadDouble(root, "x", 0),
+                            (float)ReadDouble(root, "y", 0),
+                            ReadInt(root, "count", 1));
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Failed:
+                        code = ReadInt(root, "code", -1);
+                        message = root.TryGetProperty("message", out JsonElement messageElement)
+                            ? messageElement.GetString()
+                            : null;
+                        bounds = s_bounds;
+                        break;
+                    default:
+                        // An event kind this slice does not know (a newer shell): ignore the
+                        // state and skip the Changed report so a forward-compatible shell cannot
+                        // move this side's contract by accident.
+                        raiseChanged = false;
+                        bounds = s_bounds;
+                        break;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            lock (s_sync)
+            {
+                windowId = s_windowId;
+                bounds = s_bounds;
+            }
+            kind = OpenHarmonySubWindowEventKind.Failed;
+            code = -1;
+            message = "malformed subwindow payload";
+        }
+
+        if (touch is not null)
+        {
+            Touched?.Invoke(null, touch);
+        }
+        if (raiseChanged)
+        {
+            Changed?.Invoke(null, new OpenHarmonySubWindowEventArgs(kind, windowId, bounds, code, message));
+        }
+    }
+
+    private static int ReadInt(JsonElement root, string name, int fallback)
+        => root.TryGetProperty(name, out JsonElement element) && element.ValueKind == JsonValueKind.Number
+            && element.TryGetInt32(out int value) ? value : fallback;
+
+    private static double ReadDouble(JsonElement root, string name, double fallback)
+        => root.TryGetProperty(name, out JsonElement element) && element.ValueKind == JsonValueKind.Number
+            ? element.GetDouble() : fallback;
+
+    /// <summary>Native-shaped thunk: the shell reports a subwindow event (op, JSON payload).</summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnNativeEvent(int op, IntPtr payloadUtf8)
+    {
+        // A reverse P/Invoke entry: an exception must not unwind into the native frame.
+        try
+        {
+            HandleNativeEvent(op, Marshal.PtrToStringUTF8(payloadUtf8) ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            OpenHarmonyStatus.NativeCallbackFailed("subwindow event", ex);
+        }
+    }
+
+    [ModuleInitializer]
+    internal static void Initialize() => Register();
+}

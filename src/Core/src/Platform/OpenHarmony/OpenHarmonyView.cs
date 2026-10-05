@@ -281,7 +281,7 @@ public class OpenHarmonyView
         }
     }
 
-    private static string MaskPassword(string text)
+    internal static string MaskPassword(string text)
         => text.Length == 0 ? text : new string('\u2022', text.Length);
 
     /// <summary>Clamps input to <paramref name="maxLength"/> (0/MaxValue = unlimited).</summary>

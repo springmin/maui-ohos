@@ -661,6 +661,17 @@ public static partial class OpenHarmonyAccessibility
         string? text = view is IText textPart && !string.IsNullOrEmpty(textPart.Text) ? textPart.Text
             : view is ILabel label && !string.IsNullOrEmpty(label.Text) ? label.Text
             : null;
+        // SEC-SCAN-4: a password entry must not publish its plaintext through the shadow tree.
+        // The compositor already masks the drawn text (OpenHarmonyView.DisplayText); an enabled
+        // screen reader could otherwise read the password verbatim from the published node. The
+        // platform flag is authoritative when the handler is connected; the virtual IEntry flag
+        // covers a view that has no platform view yet.
+        bool passwordEntry = view is IEntry { IsPassword: true } ||
+            (view.Handler?.PlatformView is OpenHarmonyView passwordPlatform && passwordPlatform.IsPassword);
+        if (text is not null && passwordEntry)
+        {
+            text = OpenHarmonyView.MaskPassword(text);
+        }
         string? description = view is VisualElement element ? SemanticProperties.GetDescription(element) : null;
         string? hint = view is VisualElement hintElement ? SemanticProperties.GetHint(hintElement) : null;
         bool enabled = view is not VisualElement visual || visual.IsEnabled;

@@ -113,6 +113,12 @@ public sealed class OpenHarmonyMauiAppHost
         }
     };
 
+        // MULTIWINDOW-L M4: the shell's subwindow channel carries the child window's focus
+        // (Active/Inactive), its own input (text/composition/submit), hardware keys and Back,
+        // plus the main-window suspension/resume. Each is routed to the window that owns the
+        // event's surface id, so two windows never share keyboard or lifecycle state.
+        OpenHarmonySubWindow.Changed += OnSubWindowChanged;
+
         OpenHarmonyBridge.Touch += args =>
         {
             bool handled = args.Action switch
@@ -239,6 +245,13 @@ public sealed class OpenHarmonyMauiAppHost
                 Arrange(_width, _height);
             }
         }
+        // MULTIWINDOW-L M4: the primary window's platform handler carries the host window id so
+        // its elements resolve their window for per-window focus/input routing.
+        if (_window.Handler is OpenHarmonyWindowHandler primaryWindowHandler)
+        {
+            primaryWindowHandler.WindowId = OpenHarmonyWindowSurface.PrimaryWindowId;
+        }
+        SetWindowId(_window, OpenHarmonyWindowSurface.PrimaryWindowId);
         OpenHarmonyBridge.WriteStatus($"[maui] window created ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
         // The platform's Create lifecycle event activates the window (and may arrive before Run
         // when the shell is fast); Created must precede it either way. When Create arrived first
@@ -333,6 +346,11 @@ public sealed class OpenHarmonyMauiAppHost
             OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
             _ready = true;
         }
+        if (_window.Handler is OpenHarmonyWindowHandler adoptedWindowHandler)
+        {
+            adoptedWindowHandler.WindowId = OpenHarmonyWindowSurface.PrimaryWindowId;
+        }
+        SetWindowId(_window, OpenHarmonyWindowSurface.PrimaryWindowId);
         OpenHarmonyBridge.WriteStatus(
             $"[maui] window adopted ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
         EnsureWindowCreated();
@@ -507,6 +525,7 @@ public sealed class OpenHarmonyMauiAppHost
                 _pendingSurfaceOrder.Remove(windowId);
                 surface.OnSurface(pending);
             }
+            SetWindowId(window, windowId);
             host.Adopt(window);
             return windowId;
         }
@@ -754,6 +773,200 @@ public sealed class OpenHarmonyMauiAppHost
         }
     }
 
+    /// <summary>
+    /// Routes one shell subwindow event (see <see cref="OpenHarmonySubWindow.Changed"/>) to the
+    /// window that owns the event's surface id. The child window's focus (Active/Inactive), its
+    /// own text input, hardware keys and Back, plus the main window's suspension (Suspended) and
+    /// the child's close are all consumed here; the primary window's process lifecycle is
+    /// untouched (the single-window path stays exactly as it was).
+    /// </summary>
+    private void OnSubWindowChanged(object? sender, OpenHarmonySubWindowEventArgs e)
+    {
+        switch (e.Kind)
+        {
+            case OpenHarmonySubWindowEventKind.Active:
+                FindSecondaryBySurface(e.SurfaceId)?.Activated();
+                break;
+            case OpenHarmonySubWindowEventKind.Inactive:
+                FindSecondaryBySurface(e.SurfaceId)?.Deactivated();
+                break;
+            case OpenHarmonySubWindowEventKind.Suspended:
+                // The main window went hidden (or the Home focus-loss chain fired): every child
+                // window stops with it (the shell's single managed child today).
+                StopSecondaryWindows();
+                break;
+            case OpenHarmonySubWindowEventKind.Resumed:
+                ResumeSecondaryWindows();
+                break;
+            case OpenHarmonySubWindowEventKind.TextInput:
+                // Only the host that owns the addressed window dispatches: a process with more
+                // than one host (the test harness) must not deliver the child's text twice.
+                if (FindSecondaryBySurface(e.SurfaceId) is not null)
+                {
+                    OpenHarmonyWindowInputRouter.DispatchText(e.SurfaceId, e.Text ?? string.Empty);
+                }
+                break;
+            case OpenHarmonySubWindowEventKind.TextComposition:
+                if (FindSecondaryBySurface(e.SurfaceId) is not null)
+                {
+                    OpenHarmonyWindowInputRouter.DispatchComposition(e.SurfaceId, e.Text ?? string.Empty, e.CompositionOffset);
+                }
+                break;
+            case OpenHarmonySubWindowEventKind.TextSubmitted:
+                if (FindSecondaryBySurface(e.SurfaceId) is not null)
+                {
+                    OpenHarmonyWindowInputRouter.DispatchSubmitted(e.SurfaceId, e.Text);
+                }
+                break;
+            case OpenHarmonySubWindowEventKind.Key:
+                if (FindSecondaryBySurface(e.SurfaceId) is not null)
+                {
+                    OpenHarmonyKeyListener.DispatchWindow(e.SurfaceId, e.KeyCode, e.KeyEventType);
+                }
+                break;
+            case OpenHarmonySubWindowEventKind.Back:
+                if (FindSecondaryBySurface(e.SurfaceId) is not null)
+                {
+                    OpenHarmonyWindowInputRouter.DispatchBack(e.SurfaceId);
+                }
+                break;
+            case OpenHarmonySubWindowEventKind.Closed:
+                // SEC5B-L3 belt: the shell's Closed report may arrive without the surface
+                // Destroyed report (page teardown order), which used to leave the managed
+                // session in Application.Windows. Close the matching session here; a session
+                // already closed by the surface report is a no-op.
+                CloseSecondaryBySurface(e.SurfaceId);
+                break;
+        }
+    }
+
+    /// <summary>The live secondary window whose id is the shell surface id (single-child
+    /// fallback when the event carries no id).</summary>
+    private OpenHarmonyWindowHost? FindSecondaryBySurface(string surfaceId)
+    {
+        lock (_sync)
+        {
+            if (_secondaryWindows.Count == 0)
+            {
+                return null;
+            }
+            if (surfaceId.Length > 0)
+            {
+                return _secondaryWindows.TryGetValue(surfaceId, out OpenHarmonyWindowHost? exact) ? exact : null;
+            }
+            foreach (OpenHarmonyWindowHost host in _secondaryWindows.Values)
+            {
+                return host;
+            }
+            return null;
+        }
+    }
+
+    private void StopSecondaryWindows()
+    {
+        foreach (OpenHarmonyWindowHost host in SecondaryWindows)
+        {
+            host.Stopped();
+        }
+    }
+
+    private void ResumeSecondaryWindows()
+    {
+        foreach (OpenHarmonyWindowHost host in SecondaryWindows)
+        {
+            host.Resumed();
+        }
+    }
+
+    /// <summary>Closes the managed session of a shell child that reported Closed, raising
+    /// Destroying outside the host lock (the same tail as the surface-Destroyed path).</summary>
+    private void CloseSecondaryBySurface(string surfaceId)
+    {
+        IWindow? destroyedWindow = null;
+        lock (_sync)
+        {
+            if (surfaceId.Length > 0)
+            {
+                if (_secondaryWindows.Remove(surfaceId, out OpenHarmonyWindowHost? host))
+                {
+                    destroyedWindow = host.Window;
+                    host.Reset();
+                }
+                else if (_awaitingWindows.Remove(surfaceId, out IWindow? awaiting))
+                {
+                    destroyedWindow = awaiting;
+                }
+            }
+            else if (_secondaryWindows.Count == 1)
+            {
+                string onlyId = string.Empty;
+                foreach (string id in _secondaryWindows.Keys)
+                {
+                    onlyId = id;
+                }
+                if (onlyId.Length > 0 && _secondaryWindows.Remove(onlyId, out OpenHarmonyWindowHost? only))
+                {
+                    destroyedWindow = only.Window;
+                    only.Reset();
+                }
+            }
+        }
+        if (destroyedWindow is not null)
+        {
+            try
+            {
+                destroyedWindow.Destroying();
+            }
+            catch (Exception ex)
+            {
+                OpenHarmonyBridge.WriteStatus($"[maui] window Destroying failed: {ex.GetType().Name}");
+            }
+            OpenHarmonyBridge.WriteStatus("[maui] subwindow closed; the managed window was destroyed");
+        }
+    }
+
+    /// <summary>
+    /// The host window id a view belongs to: the window of the element's tree. The window
+    /// handler's stamp is the fast path; the host's own table covers a window whose handler is
+    /// not connected (or not an OpenHarmonyWindowHandler) yet. Unknown/off-window views resolve
+    /// to the primary id (the historical single-window path), which keeps every existing caller
+    /// behaviorally unchanged.
+    /// </summary>
+    internal static string ResolveWindowId(IView? view)
+    {
+        if (view is Microsoft.Maui.Controls.VisualElement element &&
+            element.Window is IWindow window)
+        {
+            if (window.Handler is OpenHarmonyWindowHandler handler)
+            {
+                return handler.WindowId;
+            }
+            if (s_windowIdTable.TryGetValue(window, out WindowIdBox? box))
+            {
+                return box.Id;
+            }
+        }
+        return OpenHarmonyWindowSurface.PrimaryWindowId;
+    }
+
+    /// <summary>Window id carrier for the static table (ConditionalWeakTable needs a class
+    /// value; the window must not be rooted by the registry).</summary>
+    private sealed class WindowIdBox
+    {
+        public WindowIdBox(string id) => Id = id;
+
+        public string Id { get; }
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IWindow, WindowIdBox> s_windowIdTable = new();
+
+    /// <summary>Records the host window id of a realized window (idempotent).</summary>
+    internal static void SetWindowId(IWindow window, string windowId)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        s_windowIdTable.AddOrUpdate(window, new WindowIdBox(windowId));
+    }
+
     private static bool DispatchSecondaryTouch(OpenHarmonyWindowHost host, OpenHarmonyTouchEventArgs args)
     {
         bool handled = args.Action switch
@@ -994,7 +1207,9 @@ public sealed class OpenHarmonyMauiAppHost
         }
         // Modal focus trap: while an alert is open, stale background nodes are inert; only the
         // alert's own subtree accepts actions (its buttons route through the same tap path).
-        if (OpenHarmonyAlertHost.Current is not null && !OpenHarmonyAccessibility.IsModalNode(nodeId))
+        // M4: only an alert owned by the primary window gates the primary provider's actions.
+        if (OpenHarmonyAlertHost.CurrentFor(OpenHarmonyWindowSurface.PrimaryWindowId) is not null
+            && !OpenHarmonyAccessibility.IsModalNode(nodeId))
         {
             return false;
         }

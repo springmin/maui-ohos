@@ -47,6 +47,20 @@ public enum OpenHarmonySubWindowEventKind
     Suspended = 9,
     /// <summary>The main window came back and the child was restored.</summary>
     Resumed = 10,
+    /// <summary>MULTIWINDOW-L M4: the child window gained focus (WINDOW_ACTIVE).</summary>
+    Active = 11,
+    /// <summary>MULTIWINDOW-L M4: the child window lost focus (WINDOW_INACTIVE).</summary>
+    Inactive = 12,
+    /// <summary>MULTIWINDOW-L M4: text typed into the child's input control.</summary>
+    TextInput = 13,
+    /// <summary>MULTIWINDOW-L M4: IME preview text from the child's input control.</summary>
+    TextComposition = 14,
+    /// <summary>MULTIWINDOW-L M4: the child input's return key.</summary>
+    TextSubmitted = 15,
+    /// <summary>MULTIWINDOW-L M4: a hardware key pressed while the child XComponent had focus.</summary>
+    Key = 16,
+    /// <summary>MULTIWINDOW-L M4: the system Back key on the child window.</summary>
+    Back = 17,
 }
 
 /// <summary>One subwindow state report (kind, geometry, window id, failure detail).</summary>
@@ -54,7 +68,8 @@ public sealed class OpenHarmonySubWindowEventArgs : EventArgs
 {
     internal OpenHarmonySubWindowEventArgs(
         OpenHarmonySubWindowEventKind kind, int windowId, Rect bounds, int code, string? message,
-        string? surfaceId = null)
+        string? surfaceId = null, string? text = null, int compositionOffset = 0,
+        int keyCode = 0, int keyEventType = 0)
     {
         Kind = kind;
         WindowId = windowId;
@@ -62,6 +77,10 @@ public sealed class OpenHarmonySubWindowEventArgs : EventArgs
         Code = code;
         Message = message;
         SurfaceId = surfaceId ?? string.Empty;
+        Text = text;
+        CompositionOffset = compositionOffset;
+        KeyCode = keyCode;
+        KeyEventType = keyEventType;
     }
 
     /// <summary>The event kind.</summary>
@@ -82,6 +101,20 @@ public sealed class OpenHarmonySubWindowEventArgs : EventArgs
     /// <summary>The managed surface id (the shell XComponent id) when the event carries one
     /// (MULTIWINDOW-L M3); empty for the shell-drawn M path.</summary>
     public string SurfaceId { get; }
+
+    /// <summary>MULTIWINDOW-L M4: text for <see cref="OpenHarmonySubWindowEventKind.TextInput"/>,
+    /// <see cref="OpenHarmonySubWindowEventKind.TextComposition"/> and
+    /// <see cref="OpenHarmonySubWindowEventKind.TextSubmitted"/>; null otherwise.</summary>
+    public string? Text { get; }
+
+    /// <summary>M4: the IME preview offset of a composition event (0 otherwise).</summary>
+    public int CompositionOffset { get; }
+
+    /// <summary>M4: the raw ArkUI key code of a <see cref="OpenHarmonySubWindowEventKind.Key"/> event.</summary>
+    public int KeyCode { get; }
+
+    /// <summary>M4: the ArkUI key type of a key event (0 down, 1 up).</summary>
+    public int KeyEventType { get; }
 }
 
 /// <summary>One touch reported from the subwindow's shell-drawn content.</summary>
@@ -128,6 +161,9 @@ public static partial class OpenHarmonySubWindow
     public const int HideCommand = 4;
     /// <summary>Command op: close/destroy.</summary>
     public const int CloseCommand = 5;
+    /// <summary>MULTIWINDOW-L M4: route a per-window ArkUI focus/keyboard request into the child
+    /// page (payload surfaceId/show/caret/text; the shell forwards it to the child's input).</summary>
+    public const int TextFocusCommand = 6;
     // The shell's availability probe (mirrors kSubWindowProbeOp in host_napi.cpp).
     private const int ProbeCommand = 99;
 
@@ -150,6 +186,7 @@ public static partial class OpenHarmonySubWindow
     private static bool s_visible;
     private static bool s_suspended;
     private static bool s_contentReady;
+    private static bool s_focused;
     private static int s_windowId;
     private static Rect s_bounds = Rect.Zero;
     // M3: the managed surface id (the shell XComponent id) once the shell reports one.
@@ -219,6 +256,13 @@ public static partial class OpenHarmonySubWindow
     public static bool IsSuspended
     {
         get { lock (s_sync) { return s_suspended; } }
+    }
+
+    /// <summary>MULTIWINDOW-L M4: true while the child window holds window focus (the shell's
+    /// WINDOW_ACTIVE report; false after WINDOW_INACTIVE or a close).</summary>
+    public static bool IsFocused
+    {
+        get { lock (s_sync) { return s_focused; } }
     }
 
     /// <summary>True once the shell-drawn subwindow page reported ready.</summary>
@@ -296,6 +340,34 @@ public static partial class OpenHarmonySubWindow
 
     /// <summary>Destroys the subwindow and its shell-drawn content.</summary>
     public static bool Close() => Send(CloseCommand, "{}");
+
+    /// <summary>
+    /// MULTIWINDOW-L M4: asks the child page to give ArkUI focus to its own hidden input
+    /// (<paramref name="focused"/> true) or back to its surface (false). The managed text
+    /// handlers of a secondary window use this instead of the process-global keyboard/focus
+    /// exports, so the system IME follows the window the element belongs to. The payload also
+    /// carries the current managed text so the child input continues from the same value.
+    /// </summary>
+    public static bool RequestTextFocus(string windowId, bool focused, int caret, string? text = null)
+        => Send(TextFocusCommand, BuildTextFocusPayload(windowId, focused, caret, text));
+
+    private static string BuildTextFocusPayload(string windowId, bool focused, int caret, string? text)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("surfaceId", windowId ?? string.Empty);
+            writer.WriteNumber("show", focused ? 1 : 0);
+            writer.WriteNumber("caret", caret);
+            if (!string.IsNullOrEmpty(text))
+            {
+                writer.WriteString("text", text);
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     private static bool Send(int op, string payload)
     {
@@ -376,6 +448,10 @@ public static partial class OpenHarmonySubWindow
         int code = 0;
         string? message = null;
         string surfaceId = string.Empty;
+        string? text = null;
+        int compositionOffset = 0;
+        int keyCode = 0;
+        int keyEventType = 0;
         OpenHarmonySubWindowTouchEventArgs? touch = null;
         bool raiseChanged = true;
         try
@@ -390,6 +466,14 @@ public static partial class OpenHarmonySubWindow
                     ReadInt(root, "y", (int)s_bounds.Y),
                     ReadInt(root, "w", (int)s_bounds.Width),
                     ReadInt(root, "h", (int)s_bounds.Height));
+                // M4: every event may carry the managed surface id; the per-window routes need
+                // it even for text/key/back/closed, and an event without one falls back to the
+                // live child's id (the shell-drawn M path carries none and has no managed window).
+                surfaceId = ReadString(root, "surfaceId");
+                if (surfaceId.Length == 0)
+                {
+                    surfaceId = s_surfaceId;
+                }
                 switch (kind)
                 {
                     case OpenHarmonySubWindowEventKind.Created:
@@ -417,6 +501,7 @@ public static partial class OpenHarmonySubWindow
                         s_open = false;
                         s_visible = false;
                         s_contentReady = false;
+                        s_focused = false;
                         s_windowId = 0;
                         s_surfaceId = string.Empty;
                         s_bounds = Rect.Zero;
@@ -439,6 +524,44 @@ public static partial class OpenHarmonySubWindow
                         break;
                     case OpenHarmonySubWindowEventKind.Resumed:
                         s_suspended = false;
+                        bounds = s_bounds;
+                        break;
+                    // MULTIWINDOW-L M4: window focus + the child page's own input. The shell
+                    // reports them under the child's surface id; the app host routes them to the
+                    // window that owns that surface (Active/Inactive) or to the window's text
+                    // handlers (TextInput/TextComposition/TextSubmitted) and key hook (Key).
+                    case OpenHarmonySubWindowEventKind.Active:
+                        s_focused = true;
+                        surfaceId = ReadString(root, "surfaceId");
+                        if (surfaceId.Length > 0)
+                        {
+                            s_surfaceId = surfaceId;
+                        }
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Inactive:
+                        s_focused = false;
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.TextInput:
+                        text = ReadString(root, "text");
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.TextComposition:
+                        text = ReadString(root, "value");
+                        compositionOffset = ReadInt(root, "offset", 0);
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.TextSubmitted:
+                        text = ReadString(root, "text");
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Key:
+                        keyCode = ReadInt(root, "code", 0);
+                        keyEventType = ReadInt(root, "type", 0);
+                        bounds = s_bounds;
+                        break;
+                    case OpenHarmonySubWindowEventKind.Back:
                         bounds = s_bounds;
                         break;
                     case OpenHarmonySubWindowEventKind.Touch:
@@ -485,7 +608,9 @@ public static partial class OpenHarmonySubWindow
         }
         if (raiseChanged)
         {
-            Changed?.Invoke(null, new OpenHarmonySubWindowEventArgs(kind, windowId, bounds, code, message, surfaceId));
+            Changed?.Invoke(null, new OpenHarmonySubWindowEventArgs(
+                kind, windowId, bounds, code, message, surfaceId, text, compositionOffset,
+                keyCode, keyEventType));
         }
     }
 

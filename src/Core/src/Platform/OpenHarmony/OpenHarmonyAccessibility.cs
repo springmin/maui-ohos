@@ -156,12 +156,75 @@ public static partial class OpenHarmonyAccessibility
     }
 
     private static Frame s_frame = Frame.Empty;
+    // MULTIWINDOW-L M4: one shadow frame per window. The primary window's frame lives in
+    // s_frame (the historical Volatile.Read path, zero change); a secondary window's frame is
+    // kept in this table so its render pass can no longer overwrite the primary tree (the M3
+    // regression: both windows called Refresh/Publish, last renderer won).
+    private static readonly object s_framesLock = new();
+    private static readonly Dictionary<string, Frame> s_windowFrames = new(StringComparer.Ordinal);
 
-    /// <summary>Nodes of the last published frame (root first, parents before children).</summary>
+    /// <summary>Nodes of the last published primary frame (root first, parents before children).</summary>
     public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_frame).Nodes;
+
+    /// <summary>Nodes of a window's last shadow frame (the primary id returns the published
+    /// frame; a secondary window's frame is built and kept locally in M4 - see
+    /// <see cref="Publish(string)"/>).</summary>
+    internal static IReadOnlyList<OpenHarmonyAccessibilityNode> NodesForWindow(string windowId)
+        => FrameOf(windowId).Nodes;
+
+    /// <summary>Number of windows with a shadow frame (primary included when published).</summary>
+    internal static int FrameWindowCount
+    {
+        get
+        {
+            if (Volatile.Read(ref s_frame) == Frame.Empty)
+            {
+                lock (s_framesLock)
+                {
+                    return s_windowFrames.Count;
+                }
+            }
+            lock (s_framesLock)
+            {
+                return s_windowFrames.Count + 1;
+            }
+        }
+    }
+
+    /// <summary>Secondary-window publish passes that were kept local (no per-window provider yet).</summary>
+    internal static int SecondaryPublishes { get; private set; }
+
+    /// <summary>Nodes of the last kept secondary frame (diagnostics).</summary>
+    internal static int LastSecondaryPublishedCount { get; private set; }
+
+    private static Frame FrameOf(string windowId)
+    {
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            return Volatile.Read(ref s_frame);
+        }
+        lock (s_framesLock)
+        {
+            return s_windowFrames.TryGetValue(windowId, out Frame? frame) ? frame : Frame.Empty;
+        }
+    }
+
+    private static void StoreFrame(string windowId, Frame frame)
+    {
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            Volatile.Write(ref s_frame, frame);
+            return;
+        }
+        lock (s_framesLock)
+        {
+            s_windowFrames[windowId] = frame;
+        }
+    }
 
     private const string HostLibrary = "libopenharmonyhost.so";
     private static bool _available = true;
+    private static bool _secondaryProviderLogged;
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
     private static partial int AccessibilityBegin(int count);
@@ -466,7 +529,10 @@ public static partial class OpenHarmonyAccessibility
     /// <summary>Whether the last publish pass would have talked to the host (observable off-device).</summary>
     public static bool WouldPublish { get; private set; }
 
-    private static OpenHarmonyAccessibilityNode[] s_previousList = Array.Empty<OpenHarmonyAccessibilityNode>();
+    // One baseline per window (M4 partition): the diff of a secondary frame must not compare
+    // against the primary window's previous list.
+    private static readonly object s_previousListsLock = new();
+    private static readonly Dictionary<string, OpenHarmonyAccessibilityNode[]> s_previousLists = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Changes detected between the last two published frames, as ArkUI accessibility event type
@@ -486,12 +552,17 @@ public static partial class OpenHarmonyAccessibility
     /// </summary>
     public const int EventAnnouncement = 0x10000000;
 
-    private static int DiffFrames(OpenHarmonyAccessibilityNode[] current)
+    private static int DiffFrames(string windowId, OpenHarmonyAccessibilityNode[] current)
     {
         // Read the baseline snapshot, compare against the frame being published, then make the
         // frame the new baseline with a single reference swap: no Clear/AddRange on a collection
         // another thread could be enumerating.
-        OpenHarmonyAccessibilityNode[] previous = Volatile.Read(ref s_previousList);
+        OpenHarmonyAccessibilityNode[] previous;
+        lock (s_previousListsLock)
+        {
+            previous = s_previousLists.TryGetValue(windowId, out OpenHarmonyAccessibilityNode[]? list)
+                ? list : Array.Empty<OpenHarmonyAccessibilityNode>();
+        }
         int events = 0;
         if (previous.Length != current.Length)
         {
@@ -519,12 +590,22 @@ public static partial class OpenHarmonyAccessibility
                 events |= EventPageStateUpdate;
             }
         }
-        Volatile.Write(ref s_previousList, current);
+        lock (s_previousListsLock)
+        {
+            s_previousLists[windowId] = current;
+        }
         return events;
     }
 
     /// <summary>Rebuilds the shadow tree for a rendered frame (only when something moved).</summary>
-    public static void Refresh(IView root)
+    public static void Refresh(IView root) => Refresh(OpenHarmonyWindowSurface.PrimaryWindowId, root);
+
+    /// <summary>
+    /// MULTIWINDOW-L M4: rebuilds one window's shadow tree. Each window keeps its own frame
+    /// (so a secondary render can no longer overwrite the primary's published tree) and only the
+    /// window that owns an open alert republishes the alert's modal nodes.
+    /// </summary>
+    public static void Refresh(string windowId, IView root)
     {
         // The build buffers are render-thread state and are reused across frames: an unchanged
         // frame walks the tree, reuses every previous node and view and swaps nothing, so it
@@ -532,14 +613,15 @@ public static partial class OpenHarmonyAccessibility
         // snapshot (plus a node record per position that actually moved).
         lock (s_buildLock)
         {
-            Frame previous = Volatile.Read(ref s_frame);
+            Frame previous = FrameOf(windowId);
             s_buildNodes.Clear();
             s_buildViews.Clear();
             s_buildPending.Clear();
             // An open alert is modal: the background tree stays in the frame with its content,
             // but every background node is republished non-focusable and the alert's own nodes
-            // are appended after it as the only focusable region (the focus trap).
-            OpenHarmonyAlertState? alert = OpenHarmonyAlertHost.Current;
+            // are appended after it as the only focusable region (the focus trap). Only the
+            // window the alert belongs to appends them.
+            OpenHarmonyAlertState? alert = OpenHarmonyAlertHost.CurrentFor(windowId);
             bool changed = Visit(root, previous, alert is not null);
             s_walkRoot = null;
             s_titleBarView = null;
@@ -552,7 +634,7 @@ public static partial class OpenHarmonyAccessibility
             // Publish the completed frame with atomic reference swaps: a callback on the
             // accessibility thread either sees the previous complete frame or this one, never a
             // partial rebuild, and the arrays themselves are never mutated after publication.
-            Volatile.Write(ref s_frame, new Frame(s_buildNodes.ToArray(), s_buildViews.ToArray(), modalRootId));
+            StoreFrame(windowId, new Frame(s_buildNodes.ToArray(), s_buildViews.ToArray(), modalRootId));
         }
     }
 
@@ -560,12 +642,36 @@ public static partial class OpenHarmonyAccessibility
     /// Hands the shadow tree to the host, which turns it into ArkUI accessibility element
     /// information served by the registered provider callbacks. Degrades to a no-op off-device.
     /// </summary>
-    public static void Publish()
+    public static void Publish() => Publish(OpenHarmonyWindowSurface.PrimaryWindowId);
+
+    /// <summary>
+    /// MULTIWINDOW-L M4: publishes one window's shadow tree. The primary window keeps the
+    /// historical provider path (native begin/node/commit, event diff, status probe); a
+    /// secondary window's frame is diffed and kept locally, because the host provider is bound
+    /// to the main window's NodeContent and there is no per-window provider yet (documented
+    /// degrade: the primary tree is never overwritten and the subwindow tree stays addressable
+    /// for a later provider).
+    /// </summary>
+    public static void Publish(string windowId)
     {
-        Frame frame = Volatile.Read(ref s_frame);
+        Frame frame = FrameOf(windowId);
         OpenHarmonyAccessibilityNode[] nodes = frame.Nodes;
         // The event source is managed state, so the diff runs even when the host is unavailable.
-        PendingEventCount = DiffFrames(nodes);
+        int events = DiffFrames(windowId, nodes);
+        if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+            if (nodes.Length > 0 && !_secondaryProviderLogged)
+            {
+                _secondaryProviderLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    $"[maui] accessibility: window '{windowId}' keeps its shadow frame locally " +
+                    "(no per-window provider yet; the main provider is unchanged)");
+            }
+            return;
+        }
+        PendingEventCount = events;
         if (!_available || nodes.Length == 0)
         {
             LastPublishedCount = 0;

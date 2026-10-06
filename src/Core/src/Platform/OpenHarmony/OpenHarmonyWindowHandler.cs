@@ -71,6 +71,14 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
 
     protected override OpenHarmonyView CreatePlatformElement() => new();
 
+    /// <summary>
+    /// MULTIWINDOW-L M4: the host's window id for this window ("main" until the app host assigns
+    /// the secondary id at adoption). Elements resolve their window through
+    /// <see cref="OpenHarmonyMauiAppHost.ResolveWindowId"/> so per-window focus/input routing can
+    /// pick the right window instead of the process-global keyboard/focus exports.
+    /// </summary>
+    internal string WindowId { get; set; } = OpenHarmonyWindowSurface.PrimaryWindowId;
+
     public static void MapContent(OpenHarmonyWindowHandler handler, IWindow window)
     {
         // The app host renders window.Content. The window lifecycle is also where the

@@ -30,6 +30,13 @@ internal sealed class OpenHarmonyWindowHost
     private bool _dirty = true;
     private bool _created;
     private bool _activated;
+    // MULTIWINDOW-L M4: the focus/background half of the IWindow lifecycle. The shell reports
+    // the child window's WINDOW_ACTIVE/INACTIVE (focus) and the main window's hidden/Home
+    // suspension; these flags keep Activated/Deactivated/Stopped/Resumed a well-formed sequence
+    // (no double Stopped/Resumed, Deactivated only after Activated) the same way the primary
+    // host's process lifecycle does.
+    private bool _deactivated;
+    private bool _stopped;
     // Platform callbacks stay out of the tree until the window finished connecting it, so a
     // callback can never observe a half-connected tree.
     private bool _ready;
@@ -49,6 +56,30 @@ internal sealed class OpenHarmonyWindowHost
 
     /// <summary>The host-assigned window id (the id the shell's surface registry reported).</summary>
     public string WindowId { get; }
+
+    // MULTIWINDOW-L M4 (fonts): the secondary window re-arranges its own tree when the system
+    // font scale changes (the primary host does the same through its own subscription). The
+    // subscription lives exactly as long as the adoption: Reset unsubscribes, so a closed
+    // session cannot be rooted by the static scale event.
+    private bool _fontScaleSubscribed;
+
+    private void OnSystemFontScaleChanged()
+    {
+        int width;
+        int height;
+        lock (_sync)
+        {
+            if (!_ready || _width <= 0 || _height <= 0)
+            {
+                return;
+            }
+            width = _width;
+            height = _height;
+            _dirty = true;
+        }
+        Arrange(width, height);
+        Render();
+    }
 
     /// <summary>The window's surface state (fed by the app host's window-id routing).</summary>
     public OpenHarmonyWindowSurface Surface { get; }
@@ -93,12 +124,27 @@ internal sealed class OpenHarmonyWindowHost
         _window = window;
         _created = false;
         _activated = false;
+        _deactivated = false;
+        _stopped = false;
         OpenHarmonyHandlerConnector.Context = _app.Context;
         lock (_sync)
         {
             OpenHarmonyHandlerConnector.ConnectTree(_window);
             OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
             _ready = true;
+        }
+        // MULTIWINDOW-L M4: stamp the window id on the window's own platform handler (and the
+        // host's window table), so elements of this window can resolve which window they belong
+        // to (per-window focus / input routing; see OpenHarmonyMauiAppHost.ResolveWindowId).
+        if (_window.Handler is OpenHarmonyWindowHandler windowHandler)
+        {
+            windowHandler.WindowId = WindowId;
+        }
+        OpenHarmonyMauiAppHost.SetWindowId(_window, WindowId);
+        if (!_fontScaleSubscribed)
+        {
+            OpenHarmonySystemFontScale.Changed += OnSystemFontScaleChanged;
+            _fontScaleSubscribed = true;
         }
         OpenHarmonyBridge.WriteStatus(
             $"[maui] window '{WindowId}' adopted ({_window.GetType().Name}), content={_window.Content?.GetType().Name}");
@@ -115,11 +161,18 @@ internal sealed class OpenHarmonyWindowHost
     /// later report for the same id is recorded until a window adopts it again.</summary>
     internal void Reset()
     {
+        if (_fontScaleSubscribed)
+        {
+            OpenHarmonySystemFontScale.Changed -= OnSystemFontScaleChanged;
+            _fontScaleSubscribed = false;
+        }
         lock (_sync)
         {
             _window = null;
             _created = false;
             _activated = false;
+            _deactivated = false;
+            _stopped = false;
             _dirty = true;
         }
     }
@@ -205,12 +258,10 @@ internal sealed class OpenHarmonyWindowHost
     {
         lock (_sync)
         {
-            // N5: an active overlay that disables touch passthrough owns the press/release; the
-            // page tree underneath is skipped so a control there never also receives the gesture.
-            if (OpenHarmonyWindowOverlayHost.ShouldConsumeTouch(down, up))
-            {
-                return true;
-            }
+            // MULTIWINDOW-L M4: the process-global overlay host is still primary-window state
+            // (its SurfacePresent hook is bypassed by this window's renderer), so a primary
+            // overlay must not consume this window's touches. The window's own tree handles
+            // them; per-window overlays arrive with the M4 remainder.
             return Content is IView content && Renderer.HandleTouch(content, down, up, x, y, pointerId);
         }
     }
@@ -220,10 +271,6 @@ internal sealed class OpenHarmonyWindowHost
     {
         lock (_sync)
         {
-            if (OpenHarmonyWindowOverlayHost.ShouldConsumeCancel())
-            {
-                return true;
-            }
             return Renderer.HandleCancel(x, y);
         }
     }
@@ -233,7 +280,7 @@ internal sealed class OpenHarmonyWindowHost
     {
         lock (_sync)
         {
-            return OpenHarmonyWindowOverlayHost.ShouldConsumeMove() || Renderer.HandleMove(x, y, pointerId);
+            return Renderer.HandleMove(x, y, pointerId);
         }
     }
 
@@ -264,6 +311,101 @@ internal sealed class OpenHarmonyWindowHost
 
     /// <summary>Frame ticks this window's renderer consumed (M3 routing evidence).</summary>
     internal int FrameTicks { get; private set; }
+
+    // MULTIWINDOW-L M4 lifecycle counters (off-device assertions; also readable on a device
+    // through the status line's per-window close report).
+    internal int ActivatedCount { get; private set; }
+    internal int DeactivatedCount { get; private set; }
+    internal int StoppedCount { get; private set; }
+    internal int ResumedCount { get; private set; }
+
+    /// <summary>True between a Stopped and its Resumed (the window is backgrounded).</summary>
+    internal bool IsStopped { get { lock (_sync) { return _stopped; } } }
+
+    /// <summary>True while the window lost focus (Deactivated without a later Activated).</summary>
+    internal bool IsDeactivated { get { lock (_sync) { return _deactivated; } } }
+
+    /// <summary>
+    /// Focus returned to this window (the shell's child WINDOW_ACTIVE): raises IWindow.Activated
+    /// for a window Controls has deactivated. Controls throws when Activated runs twice without
+    /// an intervening Deactivated, and Stopped does not deactivate the window, so a focus gain
+    /// on a merely backgrounded window only clears the stopped flag (the Resumed path raises the
+    /// lifecycle event).
+    /// </summary>
+    internal void Activated()
+    {
+        IWindow? window;
+        lock (_sync)
+        {
+            window = _window;
+            if (window is null)
+            {
+                return;
+            }
+            if (_activated)
+            {
+                _stopped = false;
+                return;
+            }
+            _activated = true;
+            _deactivated = false;
+            _stopped = false;
+            ActivatedCount++;
+        }
+        window.Activated();
+    }
+
+    /// <summary>Focus left this window (the shell's child WINDOW_INACTIVE): Deactivated once.</summary>
+    internal void Deactivated()
+    {
+        IWindow? window;
+        lock (_sync)
+        {
+            window = _window;
+            if (window is null || !_activated)
+            {
+                return;
+            }
+            _activated = false;
+            _deactivated = true;
+            DeactivatedCount++;
+        }
+        window.Deactivated();
+    }
+
+    /// <summary>The app left the foreground (main window hidden / Home focus loss): Stopped once.</summary>
+    internal void Stopped()
+    {
+        IWindow? window;
+        lock (_sync)
+        {
+            window = _window;
+            if (window is null || _stopped || !_created)
+            {
+                return;
+            }
+            _stopped = true;
+            StoppedCount++;
+        }
+        window.Stopped();
+    }
+
+    /// <summary>The app came back: Resumed once after a Stopped.</summary>
+    internal void Resumed()
+    {
+        IWindow? window;
+        lock (_sync)
+        {
+            window = _window;
+            if (window is null || !_stopped)
+            {
+                return;
+            }
+            _stopped = false;
+            ResumedCount++;
+        }
+        window.Resumed();
+    }
 
     /// <summary>Diagnostic description of this window's tree (the headless harness reads it).</summary>
     public string Describe()

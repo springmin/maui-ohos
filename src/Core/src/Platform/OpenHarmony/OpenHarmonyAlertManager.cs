@@ -25,6 +25,9 @@ public sealed class OpenHarmonyAlertManager : IAlertManager
     {
         OpenHarmonyAlertHost.Show(new OpenHarmonyAlertState
         {
+            // MULTIWINDOW-L M4: the alert belongs to the window that asked; only that window
+            // draws and hit-tests the dialog.
+            WindowId = OpenHarmonyMauiAppHost.ResolveWindowId(page),
             Title = arguments.Title,
             Message = arguments.Message,
             Accept = arguments.Accept,
@@ -50,6 +53,7 @@ public sealed class OpenHarmonyAlertManager : IAlertManager
         }
         OpenHarmonyAlertHost.Show(new OpenHarmonyAlertState
         {
+            WindowId = OpenHarmonyMauiAppHost.ResolveWindowId(page),
             Kind = OpenHarmonyAlertKind.ActionSheet,
             Title = arguments.Title,
             Message = null,
@@ -70,6 +74,7 @@ public sealed class OpenHarmonyAlertManager : IAlertManager
         // The prompt edits text through the same keyboard bridge as Entry/Editor.
         OpenHarmonyAlertHost.Show(new OpenHarmonyAlertState
         {
+            WindowId = OpenHarmonyMauiAppHost.ResolveWindowId(page),
             Kind = OpenHarmonyAlertKind.Prompt,
             Title = arguments.Title,
             Message = arguments.Message,

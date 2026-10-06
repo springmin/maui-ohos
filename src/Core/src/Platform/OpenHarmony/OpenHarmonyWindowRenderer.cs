@@ -291,12 +291,15 @@ public sealed class OpenHarmonyWindowRenderer
             toolbarOverflow.DrawToolbarOverflow(_canvas);
         }
         RenderPhaseTick?.Invoke(4);
-        OpenHarmonyAlertHost.SetSurface(width, height);
+        // MULTIWINDOW-L M4: per-window overlay/accessibility ownership. The alert geometry is
+        // written by its owner window only, the alert is drawn/hit-tested by its owner window
+        // only, and each window's shadow frame is built and published under its own window id.
+        OpenHarmonyAlertHost.SetSurface(RenderWindowId, width, height);
         OpenHarmonyView.SetSurfaceViewport(width, height);
         DrawAlertOverlay();
         OpenHarmonyDiagnostics.Reset();
-        OpenHarmonyAccessibility.Refresh(content);
-        OpenHarmonyAccessibility.Publish();
+        OpenHarmonyAccessibility.Refresh(RenderWindowId, content);
+        OpenHarmonyAccessibility.Publish(RenderWindowId);
         if (OpenHarmonyDiagnostics.Enabled)
         {
             DrawDiagnosticsOverlay(content);
@@ -405,10 +408,15 @@ public sealed class OpenHarmonyWindowRenderer
         }
     }
 
+    /// <summary>The host window id of the surface this renderer draws into ("main" for the
+    /// primary window and for the off-device seams that have no surface).</summary>
+    private string RenderWindowId
+        => WindowSurface is { } surface ? surface.WindowId : OpenHarmonyWindowSurface.PrimaryWindowId;
+
     /// <summary>Draws the alert overlay (scrim, dialog box, buttons) when one is open.</summary>
     private void DrawAlertOverlay()
     {
-        if (OpenHarmonyAlertHost.Current is not { } alert)
+        if (OpenHarmonyAlertHost.CurrentFor(RenderWindowId) is not { } alert)
         {
             return;
         }
@@ -1465,8 +1473,9 @@ public sealed class OpenHarmonyWindowRenderer
     internal bool HandleTouch(IView root, bool down, bool up, float x, float y, int pointerId)
     {
         _lastRoot = root;
-        // An open alert owns all touches until a button is chosen.
-        if (OpenHarmonyAlertHost.Current is { } alertState)
+        // An open alert owns all touches until a button is chosen - but only in the window it
+        // belongs to (M4 partition); the other window keeps its normal input.
+        if (OpenHarmonyAlertHost.CurrentFor(RenderWindowId) is { } alertState)
         {
             if (down)
             {

@@ -24,11 +24,20 @@ internal sealed class OpenHarmonyAlertState
     public Action<string>? CompleteOption { get; init; }
     public Action<string?>? CompleteText { get; init; }
     public string PromptText { get; set; } = string.Empty;
+    /// <summary>MULTIWINDOW-L M4: the host window id this alert belongs to. Only that window
+    /// draws/hit-tests the dialog; the other window's frame never shows a foreign alert.</summary>
+    public string WindowId { get; set; } = OpenHarmonyWindowSurface.PrimaryWindowId;
 }
 
 internal static class OpenHarmonyAlertHost
 {
     public static OpenHarmonyAlertState? Current { get; private set; }
+
+    /// <summary>MULTIWINDOW-L M4: the open alert when it belongs to <paramref name="windowId"/>,
+    /// null otherwise. Drawing, hit-testing and the accessibility modal nodes go through this
+    /// accessor so two windows never render (or route touches into) the same dialog.</summary>
+    public static OpenHarmonyAlertState? CurrentFor(string windowId)
+        => Current is { } current && current.WindowId == windowId ? current : null;
 
     public static double Width { get; private set; }
     public static double Height { get; private set; }
@@ -49,10 +58,18 @@ internal static class OpenHarmonyAlertHost
         Changed?.Invoke();
     }
 
-    public static void SetSurface(double width, double height)
+    /// <summary>
+    /// M4: records the surface size of a window's render. A non-owner window must not move the
+    /// open dialog, so its size is only stored while no alert is open (the geometry the dialog
+    /// was laid out with belongs to its owner's surface).
+    /// </summary>
+    public static void SetSurface(string windowId, double width, double height)
     {
-        Width = width;
-        Height = height;
+        if (Current is null || Current.WindowId == windowId)
+        {
+            Width = width;
+            Height = height;
+        }
     }
 
     /// <summary>Dialog geometry (shared by drawing and hit testing).</summary>

@@ -284,6 +284,27 @@ internal sealed class OpenHarmonyWindowHost
         }
     }
 
+    /// <summary>
+    /// MULTIWINDOW-L M4-04: dispatches one phase of this window's own pinch stream through the
+    /// window's renderer (the managed hit-test stays per window; the primary window keeps the
+    /// untagged pinch path in the app host).
+    /// </summary>
+    public bool HandlePinch(int phase, double scale, float x, float y)
+    {
+        lock (_sync)
+        {
+            bool handled = Content is IView content && Renderer.HandlePinch(content, phase, scale, x, y);
+            if (handled)
+            {
+                PinchCount++;
+            }
+            return handled;
+        }
+    }
+
+    /// <summary>Pinch phases this window's renderer handled (M4-04 routing evidence).</summary>
+    internal int PinchCount { get; private set; }
+
     /// <summary>The frame tick: advances this window's animation state and paints the dirty
     /// surface (the device's secondary frame routing arrives with M3; off-device tests drive it).</summary>
     internal void OnFrame()

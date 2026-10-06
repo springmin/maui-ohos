@@ -112,6 +112,16 @@ public sealed class OpenHarmonyMauiAppHost
             RouteFrame(id);
         }
     };
+    // MULTIWINDOW-L M4-04: the shell computes each window's pinch stream from that window's own
+    // touches; a primary-tagged report belongs to the legacy untagged path above, every other id
+    // goes to its window's renderer.
+    OpenHarmonyBridge.WindowPinch += (id, phase, scale, x, y) =>
+    {
+        if (id != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            RoutePinch(id, phase, scale, x, y);
+        }
+    };
 
         // MULTIWINDOW-L M4: the shell's subwindow channel carries the child window's focus
         // (Active/Inactive), its own input (text/composition/submit), hardware keys and Back,
@@ -770,6 +780,27 @@ public sealed class OpenHarmonyMauiAppHost
             }
             host.OnFrame();
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Routes one pinch phase to its window's renderer (MULTIWINDOW-L M4-04). The primary
+    /// window's pinch keeps the untagged bridge path; a secondary window's stream is dispatched
+    /// through its own renderer so the managed pinch hit-test can only reach that window's tree.
+    /// Returns true when the target window consumed the phase.
+    /// </summary>
+    internal bool RoutePinch(string windowId, int phase, double scale, float x, float y)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(windowId);
+        lock (_sync)
+        {
+            if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+            {
+                OnPinch(phase, scale, x, y);
+                return true;
+            }
+            return _secondaryWindows.TryGetValue(windowId, out OpenHarmonyWindowHost? host)
+                && host.HandlePinch(phase, scale, x, y);
         }
     }
 

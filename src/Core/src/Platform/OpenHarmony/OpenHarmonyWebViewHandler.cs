@@ -1422,6 +1422,18 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                 }
                 return;
             }
+            if (effectiveState == "capacity")
+            {
+                // A shell variant that carries the count in the event URL (the primary page's
+                // shape) instead of the state; accepted so a mixed pairing can never drop the
+                // advertisement silently (the first device round's failure mode).
+                if (int.TryParse(url, out int urlCapacity))
+                {
+                    OpenHarmonyChildWeb.SetCapacity(childWindow, urlCapacity);
+                    OpenHarmonyBridge.WriteStatus($"[maui] child web capacity: {childWindow} {urlCapacity}");
+                }
+                return;
+            }
             if (!OpenHarmonyOverlays.TryParseEventState(effectiveState, out int childSlot, out string childState))
             {
                 // A child-tagged state without a slot tag is not part of this wire; ignore it.

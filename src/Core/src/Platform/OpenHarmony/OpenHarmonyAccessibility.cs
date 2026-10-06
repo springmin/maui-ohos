@@ -230,9 +230,15 @@ public static partial class OpenHarmonyAccessibility
     private static bool _available = true;
     private static bool _secondaryProviderLogged;
     private static bool _secondaryProviderAttachedLogged;
+    private static bool _windowActionListenerLogged;
     // 0 unknown, 1 the per-window publish exports are present, -1 the host predates them
     // (cached like the announce-export probe; an old host keeps the local-frame degrade).
     private static int s_windowProviderExport;
+    // Windows whose frame was already handed to an attached per-instance provider: the first
+    // publish of a window bypasses the unchanged-frame skip (its frame may predate the attach),
+    // after that only changed frames go out, matching the primary publish discipline.
+    private static readonly object s_windowProviderLock = new();
+    private static readonly HashSet<string> s_providerPublishedWindows = new(StringComparer.Ordinal);
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
     private static partial int AccessibilityBegin(int count);
@@ -381,6 +387,12 @@ public static partial class OpenHarmonyAccessibility
         try
         {
             SetWindowActionListener(_windowActionThunk);
+            if (!_windowActionListenerLogged)
+            {
+                _windowActionListenerLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    "[maui] accessibility: per-window action listener registered");
+            }
         }
         catch (EntryPointNotFoundException)
         {
@@ -873,6 +885,18 @@ public static partial class OpenHarmonyAccessibility
             }
             return;
         }
+        // The provider's first frame always goes out (it may have been built before the shell
+        // reported the ContentSlot), and after that only changed frames do - the same
+        // skip-unchanged discipline the primary publish applies.
+        bool firstProviderPublish;
+        lock (s_windowProviderLock)
+        {
+            firstProviderPublish = !s_providerPublishedWindows.Contains(windowId);
+        }
+        if (!firstProviderPublish && events == 0)
+        {
+            return;
+        }
         try
         {
             AccessibilityBeginFor(windowId, nodes.Length);
@@ -890,13 +914,18 @@ public static partial class OpenHarmonyAccessibility
             {
                 SendEventFor(windowId, events);
             }
+            lock (s_windowProviderLock)
+            {
+                s_providerPublishedWindows.Add(windowId);
+            }
             SecondaryProviderPublishes++;
             LastSecondaryPublishedCount = nodes.Length;
             if (!_secondaryProviderAttachedLogged)
             {
                 _secondaryProviderAttachedLogged = true;
                 Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
-                    $"[maui] accessibility: window '{windowId}' published through its own provider instance");
+                    $"[maui] accessibility: window '{windowId}' published {nodes.Length} nodes " +
+                    "through its own provider instance");
             }
         }
         catch (DllNotFoundException)

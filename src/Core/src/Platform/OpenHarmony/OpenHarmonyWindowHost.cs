@@ -305,6 +305,20 @@ internal sealed class OpenHarmonyWindowHost
     /// <summary>Pinch phases this window's renderer handled (M4-04 routing evidence).</summary>
     internal int PinchCount { get; private set; }
 
+    /// <summary>
+    /// MULTIWINDOW-L2 a: executes an accessibility action routed from this window's provider
+    /// instance. The app host's shared action core runs under this window's tree lock, so the
+    /// action resolves against this window's frame/view tree and marks this window dirty; the
+    /// primary window's provider path is not involved.
+    /// </summary>
+    internal bool HandleAccessibilityAction(int nodeId, int action)
+    {
+        lock (_sync)
+        {
+            return _app.HandleAccessibilityActionCore(WindowId, nodeId, action);
+        }
+    }
+
     /// <summary>The frame tick: advances this window's animation state and paints the dirty
     /// surface (the device's secondary frame routing arrives with M3; off-device tests drive it).</summary>
     internal void OnFrame()

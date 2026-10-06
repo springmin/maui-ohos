@@ -957,24 +957,25 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>
-    /// The host window id a view belongs to: the window of the element's tree. The window
-    /// handler's stamp is the fast path; the host's own table covers a window whose handler is
-    /// not connected (or not an OpenHarmonyWindowHandler) yet. Unknown/off-window views resolve
-    /// to the primary id (the historical single-window path), which keeps every existing caller
-    /// behaviorally unchanged.
+    /// The host window id a view belongs to: the window of the element's tree. The host's own
+    /// id table is the authoritative source: it is stamped before the window's element tree
+    /// connects (see TryOpenWindow/Adopt), so handlers that resolve while they are being
+    /// connected still see the secondary id; the window handler's stamp is the fallback for a
+    /// window the table does not know. Unknown/off-window views resolve to the primary id (the
+    /// historical single-window path), which keeps every existing caller behaviorally unchanged.
     /// </summary>
     internal static string ResolveWindowId(IView? view)
     {
         if (view is Microsoft.Maui.Controls.VisualElement element &&
             element.Window is IWindow window)
         {
-            if (window.Handler is OpenHarmonyWindowHandler handler)
-            {
-                return handler.WindowId;
-            }
             if (s_windowIdTable.TryGetValue(window, out WindowIdBox? box))
             {
                 return box.Id;
+            }
+            if (window.Handler is OpenHarmonyWindowHandler handler)
+            {
+                return handler.WindowId;
             }
         }
         return OpenHarmonyWindowSurface.PrimaryWindowId;
@@ -1213,6 +1214,10 @@ public sealed class OpenHarmonyMauiAppHost
         OpenHarmonyBridge.RegisterPinchListener();
         OpenHarmonyBridge.Pinch += OnPinch;
         OpenHarmonyAccessibility.SetActionHandler((nodeId, action) => HandleAccessibilityAction(nodeId, action));
+        // MULTIWINDOW-L2 a: actions from a per-window (instance) provider carry their window id;
+        // the primary provider keeps the legacy two-argument handler above (zero change).
+        OpenHarmonyAccessibility.SetWindowActionHandler(
+            (windowId, nodeId, action) => HandleAccessibilityAction(windowId, nodeId, action));
     }
 
     /// <summary>
@@ -1223,44 +1228,70 @@ public sealed class OpenHarmonyMauiAppHost
     /// reads it back at the caret, SELECT_TEXT selects the whole text).
     /// </summary>
     public bool HandleAccessibilityAction(int nodeId, int action)
+        => HandleAccessibilityAction(OpenHarmonyWindowSurface.PrimaryWindowId, nodeId, action);
+
+    /// <summary>
+    /// MULTIWINDOW-L2 a: executes an action routed from a provider instance. The window id
+    /// decides which frame the node id resolves against and which renderer/view tree the action
+    /// executes on; the primary window takes the historical lock and path unchanged.
+    /// </summary>
+    internal bool HandleAccessibilityAction(string windowId, int nodeId, int action)
     {
-        lock (_sync)
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
         {
-            return HandleAccessibilityActionCore(nodeId, action);
+            lock (_sync)
+            {
+                return HandleAccessibilityActionCore(windowId, nodeId, action);
+            }
         }
+        // The window host runs the shared core under its own tree lock, so a secondary action
+        // cannot race that window's arrange/render.
+        return FindSecondaryWindow(windowId)?.HandleAccessibilityAction(nodeId, action) ?? false;
     }
 
-    private bool HandleAccessibilityActionCore(int nodeId, int action)
+    /// <summary>The action core: shared by the primary host and every secondary window host;
+    /// the window id selects the frame, the renderer, the root and the dirty flag. The window
+    /// host calls it under its own tree lock (same thread, so the dirty-flag lock is reentrant).</summary>
+    internal bool HandleAccessibilityActionCore(string windowId, int nodeId, int action)
     {
-        if (!OpenHarmonyAccessibility.TryFindNode(nodeId, out OpenHarmonyAccessibilityNode node))
+        bool primary = windowId == OpenHarmonyWindowSurface.PrimaryWindowId;
+        OpenHarmonyWindowHost? secondary = primary ? null : FindSecondaryWindow(windowId);
+        if (!primary && secondary is null)
+        {
+            return false;
+        }
+        if (!OpenHarmonyAccessibility.TryFindNode(windowId, nodeId, out OpenHarmonyAccessibilityNode node))
         {
             return false;
         }
         // Modal focus trap: while an alert is open, stale background nodes are inert; only the
         // alert's own subtree accepts actions (its buttons route through the same tap path).
-        // M4: only an alert owned by the primary window gates the primary provider's actions.
-        if (OpenHarmonyAlertHost.CurrentFor(OpenHarmonyWindowSurface.PrimaryWindowId) is not null
-            && !OpenHarmonyAccessibility.IsModalNode(nodeId))
+        // One alert belongs to exactly one window, so a foreign window's dialog never gates here.
+        if (OpenHarmonyAlertHost.CurrentFor(windowId) is not null
+            && !OpenHarmonyAccessibility.IsModalNode(windowId, nodeId))
         {
             return false;
         }
-        OpenHarmonyAccessibility.TryFindView(nodeId, out IView? target);
+        OpenHarmonyAccessibility.TryFindView(windowId, nodeId, out IView? target);
+        Action markDirty = primary ? () => _dirty = true : secondary!.MarkDirty;
+        OpenHarmonyWindowRenderer renderer = primary ? _renderer : secondary!.Renderer;
+        IView? content = primary ? RootView : secondary!.Content;
         switch ((OpenHarmonyAccessibilityAction)action)
         {
             case OpenHarmonyAccessibilityAction.Click:
-                return ClickAccessibilityNode(node);
+                return ClickAccessibilityNode(node, content, renderer, markDirty);
             case OpenHarmonyAccessibilityAction.ScrollForward:
-                return ScrollAccessibilityNode(target, forward: true);
+                return ScrollAccessibilityNode(target, forward: true, markDirty);
             case OpenHarmonyAccessibilityAction.ScrollBackward:
-                return ScrollAccessibilityNode(target, forward: false);
+                return ScrollAccessibilityNode(target, forward: false, markDirty);
             case OpenHarmonyAccessibilityAction.Copy:
-                return CopyAccessibilityNode(target, node, cut: false);
+                return CopyAccessibilityNode(target, node, cut: false, markDirty);
             case OpenHarmonyAccessibilityAction.Cut:
-                return CopyAccessibilityNode(target, node, cut: true);
+                return CopyAccessibilityNode(target, node, cut: true, markDirty);
             case OpenHarmonyAccessibilityAction.Paste:
-                return PasteAccessibilityNode(target);
+                return PasteAccessibilityNode(target, markDirty);
             case OpenHarmonyAccessibilityAction.SelectText:
-                return SelectAllAccessibilityNode(target);
+                return SelectAllAccessibilityNode(target, markDirty);
             default:
                 // Never advertised: SET_TEXT/SET_CURSOR_POSITION need a value payload the listener
                 // does not carry, and this slice has no long-press path. Stale requests stay unhandled.
@@ -1269,9 +1300,10 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>CLICK simulates a tap at the node centre, exactly what a real touch would do.</summary>
-    private bool ClickAccessibilityNode(OpenHarmonyAccessibilityNode node)
+    private static bool ClickAccessibilityNode(OpenHarmonyAccessibilityNode node, IView? content,
+        OpenHarmonyWindowRenderer renderer, Action markDirty)
     {
-        if (RootView is not IView content)
+        if (content is null)
         {
             return false;
         }
@@ -1279,14 +1311,14 @@ public sealed class OpenHarmonyMauiAppHost
         float y = (float)(node.Bounds.Y + node.Bounds.Height / 2);
         // Two phases like a real touch: the renderer's press tracking only fires a button's Tap on
         // the release phase, so a single down+up call would only set Pressed and never click.
-        _renderer.HandleTouch(content, true, false, x, y);
-        _renderer.HandleTouch(content, false, true, x, y);
-        _dirty = true;
+        renderer.HandleTouch(content, true, false, x, y);
+        renderer.HandleTouch(content, false, true, x, y);
+        markDirty();
         return true;
     }
 
     /// <summary>Scrolls an IScrollView by most of a viewport, or steps an ISlider by 10% of its range.</summary>
-    private bool ScrollAccessibilityNode(IView? target, bool forward)
+    private static bool ScrollAccessibilityNode(IView? target, bool forward, Action markDirty)
     {
         if (target?.Handler?.PlatformView is not OpenHarmonyView platform)
         {
@@ -1322,7 +1354,7 @@ public sealed class OpenHarmonyMauiAppHost
                 }
                 platform.ScrollOffsetChanged?.Invoke();
             }
-            _dirty = true;
+            markDirty();
             return true;
         }
         if (target is ISlider slider)
@@ -1334,14 +1366,14 @@ public sealed class OpenHarmonyMauiAppHost
             {
                 slider.Value = value;
             }
-            _dirty = true;
+            markDirty();
             return true;
         }
         return false;
     }
 
     /// <summary>COPY/CUT put the node's text on the system clipboard; CUT clears the editable text.</summary>
-    private bool CopyAccessibilityNode(IView? target, OpenHarmonyAccessibilityNode node, bool cut)
+    private bool CopyAccessibilityNode(IView? target, OpenHarmonyAccessibilityNode node, bool cut, Action markDirty)
     {
         string? text = target is IText textPart && !string.IsNullOrEmpty(textPart.Text) ? textPart.Text : node.Text;
         if (string.IsNullOrEmpty(text))
@@ -1353,12 +1385,12 @@ public sealed class OpenHarmonyMauiAppHost
         {
             SetEditableText(target, string.Empty);
         }
-        _dirty = true;
+        markDirty();
         return true;
     }
 
     /// <summary>SELECT_TEXT selects the whole editable text (caret at the end).</summary>
-    private bool SelectAllAccessibilityNode(IView? target)
+    private static bool SelectAllAccessibilityNode(IView? target, Action markDirty)
     {
         if (target is not ITextInput input)
         {
@@ -1367,22 +1399,22 @@ public sealed class OpenHarmonyMauiAppHost
         int length = (input.Text ?? string.Empty).Length;
         input.CursorPosition = length;
         input.SelectionLength = length;
-        _dirty = true;
+        markDirty();
         return true;
     }
 
     /// <summary>PASTE reads the clipboard and applies the edit on the UI thread when one is available.</summary>
-    private bool PasteAccessibilityNode(IView? target)
+    private bool PasteAccessibilityNode(IView? target, Action markDirty)
     {
         if (target is not ITextInput)
         {
             return false;
         }
-        _ = PasteClipboardAsync(target);
+        _ = PasteClipboardAsync(target, markDirty);
         return true;
     }
 
-    private async Task PasteClipboardAsync(IView target)
+    private async Task PasteClipboardAsync(IView target, Action markDirty)
     {
         try
         {
@@ -1400,10 +1432,10 @@ public sealed class OpenHarmonyMauiAppHost
                 as Microsoft.Maui.Dispatching.IDispatcher;
             if (dispatcher is not null && dispatcher.IsDispatchRequired)
             {
-                dispatcher.Dispatch(() => ApplyPaste(target, text));
+                dispatcher.Dispatch(() => ApplyPaste(target, text, markDirty));
                 return;
             }
-            ApplyPaste(target, text);
+            ApplyPaste(target, text, markDirty);
         }
         catch (Exception ex)
         {
@@ -1413,7 +1445,7 @@ public sealed class OpenHarmonyMauiAppHost
         }
     }
 
-    private void ApplyPaste(IView target, string pasted)
+    private void ApplyPaste(IView target, string pasted, Action markDirty)
     {
         lock (_sync)
         {
@@ -1426,7 +1458,7 @@ public sealed class OpenHarmonyMauiAppHost
             int selection = Math.Clamp(input.SelectionLength, 0, current.Length - index);
             string updated = current.Remove(index, selection).Insert(index, pasted);
             SetEditableText(target, updated, index + pasted.Length);
-            _dirty = true;
+            markDirty();
         }
     }
 

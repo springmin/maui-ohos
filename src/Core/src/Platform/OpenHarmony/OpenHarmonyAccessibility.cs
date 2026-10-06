@@ -167,8 +167,7 @@ public static partial class OpenHarmonyAccessibility
     public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_frame).Nodes;
 
     /// <summary>Nodes of a window's last shadow frame (the primary id returns the published
-    /// frame; a secondary window's frame is built and kept locally in M4 - see
-    /// <see cref="Publish(string)"/>).</summary>
+    /// frame; a secondary window's frame is built per window - see <see cref="Publish(string)"/>).</summary>
     internal static IReadOnlyList<OpenHarmonyAccessibilityNode> NodesForWindow(string windowId)
         => FrameOf(windowId).Nodes;
 
@@ -191,8 +190,13 @@ public static partial class OpenHarmonyAccessibility
         }
     }
 
-    /// <summary>Secondary-window publish passes that were kept local (no per-window provider yet).</summary>
+    /// <summary>Secondary-window publish passes that were kept local (no per-window provider).</summary>
     internal static int SecondaryPublishes { get; private set; }
+
+    /// <summary>Secondary-window publish passes handed to an attached per-window provider
+    /// (MULTIWINDOW-L2 a: zero while no instance provider is attached, e.g. an old host or the
+    /// W0-degraded platform path).</summary>
+    internal static int SecondaryProviderPublishes { get; private set; }
 
     /// <summary>Nodes of the last kept secondary frame (diagnostics).</summary>
     internal static int LastSecondaryPublishedCount { get; private set; }
@@ -225,6 +229,10 @@ public static partial class OpenHarmonyAccessibility
     private const string HostLibrary = "libopenharmonyhost.so";
     private static bool _available = true;
     private static bool _secondaryProviderLogged;
+    private static bool _secondaryProviderAttachedLogged;
+    // 0 unknown, 1 the per-window publish exports are present, -1 the host predates them
+    // (cached like the announce-export probe; an old host keeps the local-frame degrade).
+    private static int s_windowProviderExport;
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
     private static partial int AccessibilityBegin(int count);
@@ -256,6 +264,45 @@ public static partial class OpenHarmonyAccessibility
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
     private static partial int ProviderStatus();
+
+    // MULTIWINDOW-L2 a (W1): the per-window provider path. The host keeps one shadow-table
+    // partition per provider instance (the instance string the NAPI layer registered with
+    // OH_ArkUI_AccessibilityProviderRegisterCallbackWithInstance), so a secondary window's
+    // publish can no longer overwrite the primary window's table. Every entry is optional: a
+    // host library built before these exports keeps the M4 behaviour (the frame stays local),
+    // which the WindowProviderExportAvailable probe and the catches in PublishSecondary cover.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityBeginFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance, int count);
+
+    // The argument order of the per-window publish mirrors the legacy ohos_host_accessibility_node
+    // contract (id, parent, role, text, description, hint, x, y, w, h, flags, actions, range*, checked),
+    // with the instance string in front; openharmony_host.h and host_a11y_table.c must agree.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityNodeFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance,
+        int id, int parentId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? hint,
+        float x, float y, float width, float height, int flags, int actions,
+        double rangeMin, double rangeMax, double rangeCurrent, int @checked);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityCommitFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ProviderStatusFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int SendEventFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance, int eventType);
+
+    /// <summary>Reverse callback for per-window actions: the window id (UTF-8) the provider was
+    /// registered under, the node id and the ArkUI action bit.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void WindowActionListener(IntPtr windowIdUtf8, int nodeId, int action);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_set_window_action_listener")]
+    private static partial void SetWindowActionListener(IntPtr callback);
 
     // The dedicated text-carrying announcement export (host_napi.cpp): it builds an
     // ANNOUNCE_FOR_ACCESSIBILITY event, sets the announced text on it and sends it through the
@@ -294,6 +341,9 @@ public static partial class OpenHarmonyAccessibility
 
     private static unsafe IntPtr _actionThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnAction;
     private static Action<int, int>? _actionHandler;
+    private static unsafe IntPtr _windowActionThunk =
+        (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, int, void>)&OnWindowAction;
+    private static Action<string, int, int>? _windowActionHandler;
 
     /// <summary>Receives accessibility actions (CLICK, SET_TEXT, SCROLL...) from the framework.</summary>
     public static void SetActionHandler(Action<int, int>? handler)
@@ -306,6 +356,35 @@ public static partial class OpenHarmonyAccessibility
         try
         {
             SetActionListener(_actionThunk);
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+    }
+
+    /// <summary>
+    /// Receives actions from the per-window providers (MULTIWINDOW-L2 a). The first argument is
+    /// the provider instance (= the window id the shell handed to attachAccessibilityNodeFor),
+    /// so the handler can route the action into the owning window's renderer/view instead of the
+    /// primary one. Registering is best effort: a host library without the export leaves the
+    /// per-window providers actionless (their nodes stay readable) while the primary path is
+    /// untouched.
+    /// </summary>
+    internal static void SetWindowActionHandler(Action<string, int, int>? handler)
+    {
+        _windowActionHandler = handler;
+        if (!_available || handler is null)
+        {
+            return;
+        }
+        try
+        {
+            SetWindowActionListener(_windowActionThunk);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Old host: per-window providers cannot route actions; keep the primary path.
         }
         catch (Exception)
         {
@@ -353,6 +432,26 @@ public static partial class OpenHarmonyAccessibility
         {
             Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
                 $"[maui] accessibility action handler failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnWindowAction(IntPtr windowIdUtf8, int nodeId, int action)
+    {
+        // Same reverse P/Invoke boundary as OnAction. The window id string is owned by the host
+        // (the instance string it registered) and only valid for the duration of this call, so it
+        // is copied before the handler runs.
+        try
+        {
+            string windowId = windowIdUtf8 != IntPtr.Zero
+                ? Marshal.PtrToStringUTF8(windowIdUtf8) ?? string.Empty
+                : string.Empty;
+            _windowActionHandler?.Invoke(windowId, nodeId, action);
+        }
+        catch (Exception ex)
+        {
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                $"[maui] accessibility window action handler failed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
@@ -472,12 +571,21 @@ public static partial class OpenHarmonyAccessibility
 
     /// <summary>Finds a published node by id (used to route actions back to a hit test).</summary>
     public static bool TryFindNode(int id, out OpenHarmonyAccessibilityNode node)
+        => TryFindNode(OpenHarmonyWindowSurface.PrimaryWindowId, id, out node);
+
+    /// <summary>
+    /// MULTIWINDOW-L2 a: finds a node in one window's own frame. Node ids are positional
+    /// (id = index + 1), so the same numeric id exists in every window; the window id decides
+    /// which frame (and therefore which view tree) the id is resolved against. The primary
+    /// overload above keeps the historical single-frame behaviour for existing callers.
+    /// </summary>
+    internal static bool TryFindNode(string windowId, int id, out OpenHarmonyAccessibilityNode node)
     {
         // One immutable index snapshot: an action arriving while Refresh rebuilds the tree routes
         // with the last complete frame (never a half-swapped one and never a partially updated
         // rectangle), so a click cannot be misrouted onto torn bounds. Node ids are the frame's
         // positional slots (id = index + 1), so the lookup is a direct index into the snapshot.
-        Frame frame = Volatile.Read(ref s_frame);
+        Frame frame = FrameOf(windowId);
         if (id >= 1 && id <= frame.Nodes.Length && frame.Nodes[id - 1].Id == id)
         {
             node = frame.Nodes[id - 1];
@@ -493,8 +601,13 @@ public static partial class OpenHarmonyAccessibility
     /// no view; the alert itself handles the action) or its view has gone away.
     /// </summary>
     public static bool TryFindView(int id, out IView view)
+        => TryFindView(OpenHarmonyWindowSurface.PrimaryWindowId, id, out view);
+
+    /// <summary>MULTIWINDOW-L2 a: the per-window variant of <see cref="TryFindView(int, out IView)"/>;
+    /// a node id only resolves against its own window's frame.</summary>
+    internal static bool TryFindView(string windowId, int id, out IView view)
     {
-        Frame frame = Volatile.Read(ref s_frame);
+        Frame frame = FrameOf(windowId);
         if (id >= 1 && id <= frame.Views.Length && frame.Nodes[id - 1].Id == id
             && frame.Views[id - 1] is { } found)
         {
@@ -512,8 +625,13 @@ public static partial class OpenHarmonyAccessibility
     /// (the host's focusable-bit scans) cannot leave the dialog.
     /// </summary>
     internal static bool IsModalNode(int id)
+        => IsModalNode(OpenHarmonyWindowSurface.PrimaryWindowId, id);
+
+    /// <summary>MULTIWINDOW-L2 a: the per-window modal test; an alert owned by one window only
+    /// traps that window's frame.</summary>
+    internal static bool IsModalNode(string windowId, int id)
     {
-        Frame frame = Volatile.Read(ref s_frame);
+        Frame frame = FrameOf(windowId);
         return frame.ModalRootId != 0
             && id >= frame.ModalRootId
             && id <= frame.Nodes.Length
@@ -645,12 +763,12 @@ public static partial class OpenHarmonyAccessibility
     public static void Publish() => Publish(OpenHarmonyWindowSurface.PrimaryWindowId);
 
     /// <summary>
-    /// MULTIWINDOW-L M4: publishes one window's shadow tree. The primary window keeps the
-    /// historical provider path (native begin/node/commit, event diff, status probe); a
-    /// secondary window's frame is diffed and kept locally, because the host provider is bound
-    /// to the main window's NodeContent and there is no per-window provider yet (documented
-    /// degrade: the primary tree is never overwritten and the subwindow tree stays addressable
-    /// for a later provider).
+    /// MULTIWINDOW-L M4/L2: publishes one window's shadow tree. The primary window keeps the
+    /// historical provider path (native begin/node/commit, event diff, status probe)
+    /// byte-for-byte. A secondary window publishes into its own host table partition when its
+    /// instance provider is attached (MULTIWINDOW-L2 a, RegisterCallbackWithInstance); without
+    /// one the frame is diffed and kept locally (the M4 degrade - the primary tree is never
+    /// overwritten and the subwindow tree stays addressable).
     /// </summary>
     public static void Publish(string windowId)
     {
@@ -660,15 +778,7 @@ public static partial class OpenHarmonyAccessibility
         int events = DiffFrames(windowId, nodes);
         if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
         {
-            SecondaryPublishes++;
-            LastSecondaryPublishedCount = nodes.Length;
-            if (nodes.Length > 0 && !_secondaryProviderLogged)
-            {
-                _secondaryProviderLogged = true;
-                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
-                    $"[maui] accessibility: window '{windowId}' keeps its shadow frame locally " +
-                    "(no per-window provider yet; the main provider is unchanged)");
-            }
+            PublishSecondary(windowId, frame, nodes, events);
             return;
         }
         PendingEventCount = events;
@@ -711,6 +821,114 @@ public static partial class OpenHarmonyAccessibility
         {
             _available = false;
             LastPublishedCount = 0;
+        }
+    }
+
+    /// <summary>True when the host library exports the per-window publish probe (cached).</summary>
+    private static bool WindowProviderExportAvailable
+    {
+        get
+        {
+            int known = Volatile.Read(ref s_windowProviderExport);
+            if (known != 0)
+            {
+                return known > 0;
+            }
+            bool available;
+            try
+            {
+                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
+                    NativeLibrary.TryGetExport(handle, "ohos_host_accessibility_provider_status_for", out _);
+            }
+            catch (Exception)
+            {
+                available = false;
+            }
+            Volatile.Write(ref s_windowProviderExport, available ? 1 : -1);
+            return available;
+        }
+    }
+
+    /// <summary>
+    /// MULTIWINDOW-L2 a: publishes a secondary window's frame. When the host attached a
+    /// per-instance provider for this window (the shell reported the child NodeContent through
+    /// attachAccessibilityNodeFor, host status 1), the nodes go through the *_for exports into
+    /// that window's table partition and the diffed events are sent on that provider; the
+    /// primary table and primary provider are never addressed. Otherwise the frame is kept
+    /// locally exactly as in M4 (documented degrade; no partial publish, no double presentation).
+    /// </summary>
+    private static void PublishSecondary(string windowId, Frame frame, OpenHarmonyAccessibilityNode[] nodes, int events)
+    {
+        bool attached = nodes.Length > 0 && WindowProviderExportAvailable && WindowProviderAttached(windowId);
+        if (!attached)
+        {
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+            if (nodes.Length > 0 && !_secondaryProviderLogged)
+            {
+                _secondaryProviderLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    $"[maui] accessibility: window '{windowId}' keeps its shadow frame locally " +
+                    "(no per-window provider attached; the main provider is unchanged)");
+            }
+            return;
+        }
+        try
+        {
+            AccessibilityBeginFor(windowId, nodes.Length);
+            foreach (OpenHarmonyAccessibilityNode node in nodes)
+            {
+                int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
+                bool modal = frame.ModalRootId != 0 && node.Id >= frame.ModalRootId;
+                AccessibilityNodeFor(windowId, node.Id, node.ParentId, node.Role, node.Text, node.Description,
+                    node.Hint, node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags,
+                    ActionMask(node.Role, modal),
+                    node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
+            }
+            AccessibilityCommitFor(windowId);
+            if (events != 0)
+            {
+                SendEventFor(windowId, events);
+            }
+            SecondaryProviderPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+            if (!_secondaryProviderAttachedLogged)
+            {
+                _secondaryProviderAttachedLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    $"[maui] accessibility: window '{windowId}' published through its own provider instance");
+            }
+        }
+        catch (DllNotFoundException)
+        {
+            // The host vanished after the probe: keep the frame local, primary state untouched.
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Volatile.Write(ref s_windowProviderExport, -1);
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+        }
+        catch (Exception)
+        {
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+        }
+    }
+
+    /// <summary>Status 1 means the per-instance provider for this window is attached; any other
+    /// status (0/3/4, an unknown instance or a missing export) keeps the local-frame degrade.</summary>
+    private static bool WindowProviderAttached(string windowId)
+    {
+        try
+        {
+            return ProviderStatusFor(windowId) == 1;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 

@@ -122,7 +122,19 @@ public sealed class OpenHarmonyWindowRenderer
     private float _layoutTitleBarHeight;
 
     public OpenHarmonyWindowRenderer()
+        : this(null)
     {
+    }
+
+    /// <summary>
+    /// A renderer bound to one window's surface (M2): the draw target resolves through the
+    /// surface's Begin/Present, so a secondary window does not share the primary's host canvas.
+    /// The primary window keeps the parameterless construction (the DI singleton) and the
+    /// historical static test seams, which still win when set.
+    /// </summary>
+    internal OpenHarmonyWindowRenderer(OpenHarmonyWindowSurface? windowSurface)
+    {
+        WindowSurface = windowSurface;
         _canvas = CanvasFactory?.Invoke() ?? new MauiCanvas();
         // A changed IView.Shadow must repaint; the drawing below reads the shadow directly.
         OpenHarmonyShadow.Install();
@@ -139,6 +151,12 @@ public sealed class OpenHarmonyWindowRenderer
     }
 
     private static bool s_alertRedrawWired;
+
+    /// <summary>
+    /// The window's surface (M2), or null for a renderer constructed for a detached tree (the
+    /// suite's ad-hoc renderers and the primary renderer before the app host binds it).
+    /// </summary>
+    internal OpenHarmonyWindowSurface? WindowSurface { get; set; }
 
     public Color BackgroundColor { get; set; } = Colors.DarkSlateBlue;
 
@@ -209,7 +227,13 @@ public sealed class OpenHarmonyWindowRenderer
         }
 
         RenderPhaseTick?.Invoke(1);
-        bool surfaceReady = SurfaceBegin is not null ? SurfaceBegin(width, height) : HostCanvas.Begin(width, height);
+        // Draw target resolution: the static test seams first (the interaction/pixel suites set
+        // them process-wide), then the window's own surface (M2), then the shared host canvas.
+        bool surfaceReady = SurfaceBegin is not null
+            ? SurfaceBegin(width, height)
+            : WindowSurface is not null
+                ? WindowSurface.Begin(width, height)
+                : HostCanvas.Begin(width, height);
         if (!surfaceReady)
         {
             // No surface yet (or the host refuses); the tree is still arranged.
@@ -267,20 +291,36 @@ public sealed class OpenHarmonyWindowRenderer
             toolbarOverflow.DrawToolbarOverflow(_canvas);
         }
         RenderPhaseTick?.Invoke(4);
-        OpenHarmonyAlertHost.SetSurface(width, height);
+        // MULTIWINDOW-L M4: per-window overlay/accessibility ownership. The alert geometry is
+        // written by its owner window only, the alert is drawn/hit-tested by its owner window
+        // only, and each window's shadow frame is built and published under its own window id.
+        OpenHarmonyAlertHost.SetSurface(RenderWindowId, width, height);
         OpenHarmonyView.SetSurfaceViewport(width, height);
         DrawAlertOverlay();
         OpenHarmonyDiagnostics.Reset();
-        OpenHarmonyAccessibility.Refresh(content);
-        OpenHarmonyAccessibility.Publish();
+        OpenHarmonyAccessibility.Refresh(RenderWindowId, content);
+        OpenHarmonyAccessibility.Publish(RenderWindowId);
         if (OpenHarmonyDiagnostics.Enabled)
         {
             DrawDiagnosticsOverlay(content);
         }
         RenderPhaseTick?.Invoke(5);
-        if (SurfacePresent is not null)
+        if (WindowSurface is { } secondarySurface &&
+            secondarySurface.WindowId != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            // MULTIWINDOW-L M3: a secondary window always presents through its own surface. The
+            // process-wide SurfacePresent hook (window overlay/tooltip, a primary-window feature
+            // until the M4 partition) must not capture another window's frame; the primary keeps
+            // the historical precedence below.
+            secondarySurface.Present();
+        }
+        else if (SurfacePresent is not null)
         {
             SurfacePresent();
+        }
+        else if (WindowSurface is not null)
+        {
+            WindowSurface.Present();
         }
         else
         {
@@ -368,10 +408,15 @@ public sealed class OpenHarmonyWindowRenderer
         }
     }
 
+    /// <summary>The host window id of the surface this renderer draws into ("main" for the
+    /// primary window and for the off-device seams that have no surface).</summary>
+    private string RenderWindowId
+        => WindowSurface is { } surface ? surface.WindowId : OpenHarmonyWindowSurface.PrimaryWindowId;
+
     /// <summary>Draws the alert overlay (scrim, dialog box, buttons) when one is open.</summary>
     private void DrawAlertOverlay()
     {
-        if (OpenHarmonyAlertHost.Current is not { } alert)
+        if (OpenHarmonyAlertHost.CurrentFor(RenderWindowId) is not { } alert)
         {
             return;
         }
@@ -1428,8 +1473,9 @@ public sealed class OpenHarmonyWindowRenderer
     internal bool HandleTouch(IView root, bool down, bool up, float x, float y, int pointerId)
     {
         _lastRoot = root;
-        // An open alert owns all touches until a button is chosen.
-        if (OpenHarmonyAlertHost.Current is { } alertState)
+        // An open alert owns all touches until a button is chosen - but only in the window it
+        // belongs to (M4 partition); the other window keeps its normal input.
+        if (OpenHarmonyAlertHost.CurrentFor(RenderWindowId) is { } alertState)
         {
             if (down)
             {

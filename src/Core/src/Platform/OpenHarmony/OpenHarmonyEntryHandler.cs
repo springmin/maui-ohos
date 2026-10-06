@@ -132,20 +132,66 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         OpenHarmonyBridge.RequestRedraw();
     }
 
+    // MULTIWINDOW-L M4: the per-window port this entry registers while connected. The global
+    // subscriptions below stay for the primary window's path (window-gated since SEC-SCAN-5c); the
+    // port carries the child window's own text from the shell's tagged subwindow channel.
+    private OpenHarmonyWindowTextPort? _windowTextPort;
+
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        OpenHarmonyBridge.TextInput += OnTextInput;
-        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition += OnTextComposition;
+        OpenHarmonyBridge.TextInput += OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition += OnGlobalTextComposition;
+        if (VirtualView is IView ownerView)
+        {
+            _windowTextPort = new OpenHarmonyWindowTextPort(
+                ownerView, OnTextInput, OnTextComposition, OnTextSubmitted);
+            OpenHarmonyWindowInputRouter.RegisterText(_windowTextPort);
+        }
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
-        OpenHarmonyBridge.TextInput -= OnTextInput;
-        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition -= OnTextComposition;
+        OpenHarmonyBridge.TextInput -= OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition -= OnGlobalTextComposition;
+        if (_windowTextPort is not null)
+        {
+            OpenHarmonyWindowInputRouter.UnregisterText(_windowTextPort);
+            _windowTextPort = null;
+        }
         base.DisconnectHandler(platformView);
+    }
+
+    // SEC-SCAN-5c: the global bridge is the primary window's path; a secondary window's focused
+    // view keeps its platform IsFocused across a window switch, so the raw subscription would let
+    // the primary window's keystrokes reach this window too. The tagged port above is the
+    // secondary window's only text source (the callbacks below stay shared with the port).
+    private bool IsPrimaryWindow => OpenHarmonyWindowInputRouter.IsPrimaryWindow(VirtualView as IView);
+
+    private void OnGlobalTextSubmitted()
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextSubmitted();
+        }
+    }
+
+    private void OnGlobalTextInput(string text)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextInput(text);
+        }
+    }
+
+    private void OnGlobalTextComposition(string value, int offset)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextComposition(value, offset);
+        }
     }
 
     private void OnTextSubmitted()
@@ -233,7 +279,21 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
         // A read-only entry focuses (focus ring, selection) but never opens the soft keyboard;
         // ArkUI focus stays on the managed surface so typing cannot reach the shell's input.
         bool editable = !PlatformView.IsReadOnly;
-        if (focused && editable)
+        string windowId = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            // MULTIWINDOW-L M4: a secondary window's input lives in the child page
+            // (pages/SubWindow.ets), so the process-global keyboard/focus exports would target
+            // the primary window's input. Ask the child page to focus its own input and seed it
+            // with the managed text (focus) or return focus to its surface (unfocus).
+            if (focused && editable && PlatformView.CursorPosition < 0)
+            {
+                PlatformView.CursorPosition = PlatformView.Text?.Length ?? 0;
+            }
+            OpenHarmonySubWindow.RequestTextFocus(windowId, focused && editable,
+                PlatformView.CursorPosition, PlatformView.Text);
+        }
+        else if (focused && editable)
         {
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
             if (PlatformView.CursorPosition < 0)
@@ -243,17 +303,16 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
             // The shell's input caret is what the IME composes at; keep it on the managed caret
             // (the mapper refreshes it on every CursorPosition change).
             OpenHarmonyBridge.SetKeyboardCaret(PlatformView.CursorPosition);
-        }
-        OpenHarmonyBridge.RequestTextInput(focused && editable);
-        // Name the ArkUI target as well (the shell's registerFocusSink handler): with the input
-        // method NDK path RequestTextInput returns before the shell's text-input sink runs, so
-        // this is what hands ArkUI focus to the input (focus) or back to the surface (unfocus).
-        if (focused && editable)
-        {
+            OpenHarmonyBridge.RequestTextInput(true);
+            // Name the ArkUI target as well (the shell's registerFocusSink handler): with the
+            // input method NDK path RequestTextInput returns before the shell's text-input sink
+            // runs, so this is what hands ArkUI focus to the input.
             OpenHarmonyFocusBridge.RequestTextInputFocus();
         }
-        else
+        else if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
         {
+            OpenHarmonyBridge.RequestTextInput(false);
+            // Name the ArkUI target as well: this is what hands ArkUI focus back to the surface.
             OpenHarmonyFocusBridge.RequestSurfaceFocus();
         }
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element &&
@@ -312,7 +371,10 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
     {
         handler.PlatformView.CursorPosition = ((ITextInput)entry).CursorPosition;
         handler.PlatformView.SelectionLength = ((ITextInput)entry).SelectionLength;
-        if (handler.PlatformView.IsFocused)
+        // M4: only the primary window's hidden input tracks the managed caret; a secondary
+        // window's caret stays in its child page (seeded on focus through RequestTextFocus).
+        if (handler.PlatformView.IsFocused &&
+            OpenHarmonyMauiAppHost.ResolveWindowId(entry as IView) == OpenHarmonyWindowSurface.PrimaryWindowId)
         {
             OpenHarmonyBridge.SetKeyboardCaret(handler.PlatformView.CursorPosition);
         }

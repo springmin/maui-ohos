@@ -38,15 +38,57 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        OpenHarmonyBridge.TextInput += OnTextInput;
-        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
+        OpenHarmonyBridge.TextInput += OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnGlobalTextSubmitted;
+        if (VirtualView is IView ownerView)
+        {
+            _windowTextPort = new OpenHarmonyWindowTextPort(
+                ownerView, OnTextInput, OnSearchComposition, OnTextSubmitted);
+            OpenHarmonyWindowInputRouter.RegisterText(_windowTextPort);
+        }
     }
+
+    // MULTIWINDOW-L M4: the per-window port of this search bar (see OpenHarmonyEntryHandler).
+    private OpenHarmonyWindowTextPort? _windowTextPort;
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
-        OpenHarmonyBridge.TextInput -= OnTextInput;
-        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
+        OpenHarmonyBridge.TextInput -= OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnGlobalTextSubmitted;
+        if (_windowTextPort is not null)
+        {
+            OpenHarmonyWindowInputRouter.UnregisterText(_windowTextPort);
+            _windowTextPort = null;
+        }
         base.DisconnectHandler(platformView);
+    }
+
+    // SEC-SCAN-5c: the global bridge belongs to the primary window; the tagged port above is a
+    // secondary window's only text source (see OpenHarmonyEntryHandler).
+    private bool IsPrimaryWindow => OpenHarmonyWindowInputRouter.IsPrimaryWindow(VirtualView as IView);
+
+    private void OnGlobalTextSubmitted()
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextSubmitted();
+        }
+    }
+
+    private void OnGlobalTextInput(string text)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextInput(text);
+        }
+    }
+
+    // The search bar has no composition state of its own (the shared keyboard bridge handles
+    // it for the primary window); the port keeps the contract without drawing a preedit.
+    private void OnSearchComposition(string value, int offset)
+    {
+        _ = value;
+        _ = offset;
     }
 
     public override void Invoke(string command, object? args)
@@ -78,15 +120,25 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
         PlatformView.IsFocused = focused;
         // Read-only search bars focus but never open the soft keyboard (same rule as Entry).
         bool editable = !PlatformView.IsReadOnly;
-        OpenHarmonyBridge.RequestTextInput(focused && editable);
-        // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
-        if (focused && editable)
+        string windowId = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
         {
-            OpenHarmonyFocusBridge.RequestTextInputFocus();
+            // MULTIWINDOW-L M4: route the secondary window's focus/keyboard to its child page.
+            OpenHarmonySubWindow.RequestTextFocus(windowId, focused && editable,
+                PlatformView.CursorPosition, PlatformView.Text);
         }
         else
         {
-            OpenHarmonyFocusBridge.RequestSurfaceFocus();
+            OpenHarmonyBridge.RequestTextInput(focused && editable);
+            // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
+            if (focused && editable)
+            {
+                OpenHarmonyFocusBridge.RequestTextInputFocus();
+            }
+            else
+            {
+                OpenHarmonyFocusBridge.RequestSurfaceFocus();
+            }
         }
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element && element.IsFocused != focused)
         {

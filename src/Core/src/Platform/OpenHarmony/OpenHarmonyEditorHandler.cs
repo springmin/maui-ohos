@@ -36,20 +36,62 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
         return view;
     }
 
+    // MULTIWINDOW-L M4: the per-window port of this editor (see OpenHarmonyEntryHandler).
+    private OpenHarmonyWindowTextPort? _windowTextPort;
+
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        OpenHarmonyBridge.TextInput += OnTextInput;
-        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition += OnTextComposition;
+        OpenHarmonyBridge.TextInput += OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition += OnGlobalTextComposition;
+        if (VirtualView is IView ownerView)
+        {
+            _windowTextPort = new OpenHarmonyWindowTextPort(
+                ownerView, OnTextInput, OnTextComposition, OnTextSubmitted);
+            OpenHarmonyWindowInputRouter.RegisterText(_windowTextPort);
+        }
     }
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
-        OpenHarmonyBridge.TextInput -= OnTextInput;
-        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition -= OnTextComposition;
+        OpenHarmonyBridge.TextInput -= OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition -= OnGlobalTextComposition;
+        if (_windowTextPort is not null)
+        {
+            OpenHarmonyWindowInputRouter.UnregisterText(_windowTextPort);
+            _windowTextPort = null;
+        }
         base.DisconnectHandler(platformView);
+    }
+
+    // SEC-SCAN-5c: the global bridge belongs to the primary window; the tagged port above is a
+    // secondary window's only text source (see OpenHarmonyEntryHandler).
+    private bool IsPrimaryWindow => OpenHarmonyWindowInputRouter.IsPrimaryWindow(VirtualView as IView);
+
+    private void OnGlobalTextSubmitted()
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextSubmitted();
+        }
+    }
+
+    private void OnGlobalTextInput(string text)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextInput(text);
+        }
+    }
+
+    private void OnGlobalTextComposition(string value, int offset)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextComposition(value, offset);
+        }
     }
 
     public override void Invoke(string command, object? args)
@@ -81,7 +123,18 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
         PlatformView.IsFocused = focused;
         // Read-only editors focus but never open the soft keyboard (same rule as Entry).
         bool editable = !PlatformView.IsReadOnly;
-        if (focused && editable)
+        string windowId = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            // MULTIWINDOW-L M4: route the secondary window's focus/keyboard to its child page.
+            if (focused && editable && PlatformView.CursorPosition < 0)
+            {
+                PlatformView.CursorPosition = PlatformView.Text?.Length ?? 0;
+            }
+            OpenHarmonySubWindow.RequestTextFocus(windowId, focused && editable,
+                PlatformView.CursorPosition, PlatformView.Text);
+        }
+        else if (focused && editable)
         {
             OpenHarmonyBridge.SetKeyboardText(PlatformView.Text);
             if (PlatformView.CursorPosition < 0)
@@ -90,15 +143,12 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
             }
             // Same caret/shell-input sync as the Entry handler (IME composition offset).
             OpenHarmonyBridge.SetKeyboardCaret(PlatformView.CursorPosition);
-        }
-        OpenHarmonyBridge.RequestTextInput(focused && editable);
-        // Same ArkUI focus naming as the Entry handler (see OpenHarmonyFocusBridge).
-        if (focused && editable)
-        {
+            OpenHarmonyBridge.RequestTextInput(true);
             OpenHarmonyFocusBridge.RequestTextInputFocus();
         }
         else
         {
+            OpenHarmonyBridge.RequestTextInput(false);
             OpenHarmonyFocusBridge.RequestSurfaceFocus();
         }
         if (VirtualView is Microsoft.Maui.Controls.VisualElement element && element.IsFocused != focused)

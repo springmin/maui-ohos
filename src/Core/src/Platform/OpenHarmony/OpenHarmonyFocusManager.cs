@@ -123,7 +123,13 @@ internal static class OpenHarmonyFocusManager
             return false;
         }
         LastRequestedTarget = targetKey;
-        bool handled = OpenHarmonyFocusBridge.RequestSurfaceFocus();
+        // MULTIWINDOW-L M4: a secondary window's element is drawn into the child XComponent, so
+        // the process-global surface request would focus the primary window instead; the child
+        // page gets a per-window "focus the surface" request on its own channel.
+        string windowId = OpenHarmonyMauiAppHost.ResolveWindowId(view);
+        bool handled = windowId == OpenHarmonyWindowSurface.PrimaryWindowId
+            ? OpenHarmonyFocusBridge.RequestSurfaceFocus()
+            : OpenHarmonySubWindow.RequestTextFocus(windowId, false, -1);
         LastRequestHandled = handled;
         if (!handled)
         {
@@ -162,8 +168,17 @@ internal static class OpenHarmonyFocusManager
         s_focused = null;
         ApplyFocusState(view, false);
         // The sink has no clear-focus op: naming the surface keeps ArkUI focus where the
-        // hardware key events are delivered. Its answer is not part of the managed state.
-        OpenHarmonyFocusBridge.RequestSurfaceFocus();
+        // hardware key events are delivered. Its answer is not part of the managed state. A
+        // secondary window's surface belongs to its child page (M4).
+        string windowId = OpenHarmonyMauiAppHost.ResolveWindowId(view);
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            OpenHarmonyFocusBridge.RequestSurfaceFocus();
+        }
+        else
+        {
+            OpenHarmonySubWindow.RequestTextFocus(windowId, false, -1);
+        }
     }
 
     /// <summary>Marks the virtual and platform view focused/unfocused (the platform view is the

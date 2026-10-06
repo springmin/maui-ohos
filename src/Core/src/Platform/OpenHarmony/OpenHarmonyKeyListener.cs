@@ -60,6 +60,32 @@ internal static partial class OpenHarmonyKeyListener
     /// <summary>Raw hardware key events (keyCode, eventType; KeyTypeDown/KeyTypeUp).</summary>
     internal static event Action<int, int>? KeyEvent;
 
+    /// <summary>MULTIWINDOW-L M4: raw hardware key events of a secondary window, tagged with the
+    /// window id (the child XComponent's onKeyEvent arrives on the shell's subwindow channel).</summary>
+    internal static event Action<string, int, int>? WindowKeyEvent;
+
+    /// <summary>Key events delivered through <see cref="DispatchWindow"/> since Install().</summary>
+    internal static int WindowEventsReceived { get; private set; }
+
+    /// <summary>Window id of the last <see cref="DispatchWindow"/> event (empty before the first).</summary>
+    internal static string LastWindowId { get; private set; } = string.Empty;
+
+    /// <summary>Window-tagged raw key events of the last <see cref="DispatchWindow"/> call.</summary>
+    internal static int LastWindowKeyCode { get; private set; } = -1;
+
+    /// <summary>
+    /// Dispatches a key event of a secondary window (the shell's tagged subwindow channel). The
+    /// primary path keeps <see cref="Dispatch"/> untouched; this entry fires only the window
+    /// event so a child key can never be mistaken for a main-surface key.
+    /// </summary>
+    internal static void DispatchWindow(string windowId, int keyCode, int eventType)
+    {
+        WindowEventsReceived++;
+        LastWindowId = windowId;
+        LastWindowKeyCode = keyCode;
+        WindowKeyEvent?.Invoke(windowId, keyCode, eventType);
+    }
+
     /// <summary>Key-down events (raw ArkUI key code).</summary>
     internal static event Action<int>? KeyDown;
 

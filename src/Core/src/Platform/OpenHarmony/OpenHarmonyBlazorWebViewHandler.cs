@@ -109,6 +109,19 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
 
     /// <summary>The claimed overlay slot (MULTI-OVL); -1 while suspended or beyond the cap.</summary>
     internal int OverlaySlot => _overlaySlot;
+
+    /// <summary>MULTIWINDOW-L2: the window this handler's overlay belongs to; the platform
+    /// manager's own loads/evals follow it.</summary>
+    internal string OverlayWindowId => _overlayWindowId;
+
+    /// <summary>
+    /// MULTIWINDOW-L2: the managed window this BlazorWebView belongs to. The primary id keeps
+    /// the historical single-host path; a secondary id routes the claim, registration and page
+    /// events through the subwindow's own ArkWeb pool, where the asset bridge does not run in
+    /// this wave (the child page refuses the registration and the control stays unmounted -
+    /// documented degradation, no primary-window corruption).
+    /// </summary>
+    private string _overlayWindowId = OpenHarmonyWindowSurface.PrimaryWindowId;
     private RootComponentsCollection? _rootComponents;
     private string? _registeredAssets;
     // B1/B3 identity of this handler's page: generated once per handler, sent to the shell with
@@ -116,6 +129,11 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     // window.__ohBlazorId and echoed in every message envelope.
     private readonly string _pageId = Guid.NewGuid().ToString("N");
     private static readonly Uri s_appOrigin = new(AppOrigin, UriKind.Absolute);
+
+    // MULTIWINDOW-L2: every connected BlazorWebView, so a window that ends while its handlers
+    // are still connected can release their window-scoped overlay claims
+    // (ReleaseWindowOverlays).
+    private static readonly List<OpenHarmonyBlazorWebViewHandler> s_blazorHandlers = new();
     // Set when the shell "blazor" registration (RegisterBlazorAssets) actually starts the
     // host-page load; handed to the manager created afterwards so its initial Navigate(StartPath)
     // does not send a second, equivalent load.
@@ -170,7 +188,14 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        _overlaySlot = OpenHarmonyOverlays.Acquire(this);
+        // MULTIWINDOW-L2: the window decides the host; the child pool is a separate number
+        // space, so a child BlazorWebView never occupies a primary overlay slot.
+        _overlayWindowId = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        _overlaySlot = OpenHarmonyChildWeb.AcquireForWindow(_overlayWindowId, this);
+        lock (s_blazorHandlers)
+        {
+            s_blazorHandlers.Add(this);
+        }
         // Inbound half of the shared JS channel: the shell's dotnetHost proxy raises JsMessage
         // from arbitrary threads; binding the sink is idempotent (same call the WebView and
         // HybridWebView handlers make).
@@ -187,6 +212,10 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
         OpenHarmonyWebViewHandler.JsMessage -= OnJsMessage;
+        lock (s_blazorHandlers)
+        {
+            s_blazorHandlers.Remove(this);
+        }
         if (_rootComponents is not null)
         {
             _rootComponents.CollectionChanged -= OnRootComponentsCollectionChanged;
@@ -204,7 +233,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         {
             _ = DisposeWebViewManagerAsync(manager);
         }
-        OpenHarmonyOverlays.Release(_overlaySlot, this);
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, _overlaySlot, this);
         _overlaySlot = -1;
         _overlayEngaged = false;
         _overlayDetached = false;
@@ -219,12 +248,18 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
     /// </summary>
     private bool EnsureOverlaySlot()
     {
-        if (_overlaySlot >= 0)
+        if (_overlayWindowClosed)
         {
-            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            // MULTIWINDOW-L2: the managed window ended; a still-connected handler must not
+            // re-claim an overlay for a window that no longer exists.
             return false;
         }
-        int slot = OpenHarmonyOverlays.Acquire(this);
+        if (_overlaySlot >= 0)
+        {
+            OpenHarmonyChildWeb.TouchForWindow(_overlayWindowId, _overlaySlot, this);
+            return false;
+        }
+        int slot = OpenHarmonyChildWeb.AcquireForWindow(_overlayWindowId, this);
         if (slot < 0)
         {
             return false;
@@ -240,6 +275,32 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         }
         return false;
     }
+
+    /// <summary>
+    /// MULTIWINDOW-L2: the window ended while this handler is still connected; release the
+    /// child-pool claim so no ArkWeb survives its window (the asset bridge is
+    /// primary-window-only in this wave, so a child claim is unmounted anyway). Called by
+    /// OpenHarmonyWebViewHandler.ReleaseWindowOverlays.
+    /// </summary>
+    internal static void ReleaseWindowOverlays(string windowId)
+    {
+        lock (s_blazorHandlers)
+        {
+            foreach (OpenHarmonyBlazorWebViewHandler handler in s_blazorHandlers.ToArray())
+            {
+                if (string.Equals(handler._overlayWindowId, windowId, StringComparison.Ordinal) &&
+                    handler._overlaySlot >= 0)
+                {
+                    OpenHarmonyChildWeb.ReleaseForWindow(windowId, handler._overlaySlot, handler);
+                    handler._overlaySlot = -1;
+                    handler._overlayEngaged = false;
+                    handler._overlayWindowClosed = true;
+                }
+            }
+        }
+    }
+
+    private bool _overlayWindowClosed;
 
     /// <summary>
     /// Replays this handler's registration on the slot it just re-acquired: the shell serves the
@@ -311,9 +372,10 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         _overlayEngaged = false;
         // Hide before the release: a hot slot keeps its ArkWeb component, and the tagged hide is
         // sent while the slot still exists (after a dynamic destroy it would be deferred and
-        // replayed onto the next incarnation of the slot).
-        OpenHarmonyBridge.WebCommand("hide", OpenHarmonyOverlays.Tag(slot));
-        OpenHarmonyOverlays.Release(slot, this);
+        // replayed onto the next incarnation of the slot). MULTIWINDOW-L2: both commands follow
+        // the handler's window.
+        OpenHarmonyChildWeb.CommandForWindow(_overlayWindowId, "hide", OpenHarmonyOverlays.Tag(slot));
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, slot, this);
         OpenHarmonyBridge.WriteStatus($"[maui] blazor overlay detached: slot {slot}");
     }
 
@@ -326,7 +388,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         if (_overlaySlot >= 0)
         {
             _overlayDetached = false;
-            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            OpenHarmonyChildWeb.TouchForWindow(_overlayWindowId, _overlaySlot, this);
             return;
         }
         if (!_overlayDetached && !_overlayPreempted)
@@ -374,7 +436,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         if (_overlaySlot >= 0)
         {
             _overlayEngaged = true;
-            OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
+            OpenHarmonyWebViewHandler.SendPlatformFrame(_overlayWindowId, frame, _overlaySlot);
         }
     }
 
@@ -545,7 +607,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
         }
         _registeredAssets = key;
         _overlayEngaged = true;
-        OpenHarmonyBridge.WebCommand("blazor", JsonSerializer.Serialize(new BlazorAssetsConfig
+        OpenHarmonyChildWeb.CommandForWindow(_overlayWindowId, "blazor", JsonSerializer.Serialize(new BlazorAssetsConfig
         {
             Origin = AppOrigin,
             Base = context.AppDir.TrimEnd('/'),
@@ -585,7 +647,7 @@ public sealed class OpenHarmonyBlazorWebViewHandler : OpenHarmonyViewHandler<IBl
 
     /// <summary>Evaluates a script on the shell's ArkWeb page (the existing web eval channel).</summary>
     public Task<string?> EvaluateJavaScriptAsync(string script)
-        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, EnsureOverlaySlotForUse());
+        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, EnsureOverlaySlotForUse(), _overlayWindowId);
 
     /// <summary>
     /// Inbound JS -> .NET: the payload must carry the shell's document-origin envelope, report
@@ -841,9 +903,11 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
         }
         // MULTI-OVERLAY-FULL: a navigation is an activation; a suspended handler restores here
         // (its registration reload already started) and the current slot tags the load.
+        // MULTIWINDOW-L2: the load follows the handler's window (the child host rejects the
+        // registration in this wave, so a child navigation stays unmounted).
         int slot = _handler.EnsureOverlaySlotForUse();
         OpenHarmonyBridge.WriteStatus($"[maui] blazor navigate: {absoluteUri}");
-        OpenHarmonyBridge.WebCommand(ShellLoadCommand, OpenHarmonyOverlays.Tag(slot, absoluteUri.ToString()));
+        OpenHarmonyChildWeb.CommandForWindow(_handler.OverlayWindowId, ShellLoadCommand, OpenHarmonyOverlays.Tag(slot, absoluteUri.ToString()));
     }
 
     /// <summary>
@@ -890,7 +954,7 @@ internal sealed class OpenHarmonyWebViewManager : WebViewManager
             "{window.external.receiveMessage(m);}" +
             "return 'ok';})(" +
             JsonSerializer.Serialize(_pageDocumentId, OpenHarmonySliceJsonContext.Default.String) + "," + JsonSerializer.Serialize(message, OpenHarmonySliceJsonContext.Default.String) + ")",
-            slot).ConfigureAwait(false);
+            slot, _handler.OverlayWindowId).ConfigureAwait(false);
         OpenHarmonyBridge.WriteStatus(
             $"[maui] blazor eval out ({message.Substring(0, Math.Min(120, message.Length))}) -> {result ?? "<null>"}");
         OpenHarmonyBlazorWebViewHandler.Diag($"eval out head={message.Substring(0, Math.Min(400, message.Length))} result={result ?? "<null>"}");

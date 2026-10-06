@@ -127,20 +127,25 @@ internal sealed class OpenHarmonyWindowHost
         _deactivated = false;
         _stopped = false;
         OpenHarmonyHandlerConnector.Context = _app.Context;
+        // MULTIWINDOW-L2: stamp the host's window table before the element tree connects, so a
+        // handler that resolves its window during ConnectTree (the web handlers claim their
+        // overlay at connect) sees this secondary id instead of the primary fallback. The
+        // window handler's own stamp below needs the handler the connect creates, so it stays
+        // after; ResolveWindowId prefers the table.
+        OpenHarmonyMauiAppHost.SetWindowId(_window, WindowId);
         lock (_sync)
         {
             OpenHarmonyHandlerConnector.ConnectTree(_window);
             OpenHarmonyHandlerConnector.ConnectTree(_window.Content);
             _ready = true;
         }
-        // MULTIWINDOW-L M4: stamp the window id on the window's own platform handler (and the
-        // host's window table), so elements of this window can resolve which window they belong
-        // to (per-window focus / input routing; see OpenHarmonyMauiAppHost.ResolveWindowId).
+        // MULTIWINDOW-L M4: stamp the window id on the window's own platform handler too, so
+        // elements of this window can resolve which window they belong to (per-window focus /
+        // input routing; see OpenHarmonyMauiAppHost.ResolveWindowId).
         if (_window.Handler is OpenHarmonyWindowHandler windowHandler)
         {
             windowHandler.WindowId = WindowId;
         }
-        OpenHarmonyMauiAppHost.SetWindowId(_window, WindowId);
         if (!_fontScaleSubscribed)
         {
             OpenHarmonySystemFontScale.Changed += OnSystemFontScaleChanged;
@@ -166,6 +171,11 @@ internal sealed class OpenHarmonyWindowHost
             OpenHarmonySystemFontScale.Changed -= OnSystemFontScaleChanged;
             _fontScaleSubscribed = false;
         }
+        // MULTIWINDOW-L2: the window ended. Its element handlers are still connected at this
+        // point (the app host removes the window, but MAUI does not disconnect the content
+        // tree), so the window-scoped web claims are released here: no child ArkWeb survives
+        // the window that hosted it.
+        OpenHarmonyWebViewHandler.ReleaseWindowOverlays(WindowId);
         lock (_sync)
         {
             _window = null;

@@ -80,6 +80,21 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// </summary>
     private int _overlaySlot = -1;
 
+    /// <summary>
+    /// MULTIWINDOW-L2: the managed window this control belongs to. The primary id keeps the
+    /// historical single-host path; a secondary id ("sub-N") routes every overlay command,
+    /// claim and page event through the subwindow's own ArkWeb pool (OpenHarmonyChildWeb).
+    /// Resolved at connect time from the host's window table, which is stamped before the
+    /// window's tree connects.
+    /// </summary>
+    private string _overlayWindowId = OpenHarmonyWindowSurface.PrimaryWindowId;
+
+    /// <summary>
+    /// MULTIWINDOW-L2: set when the managed window ended (the shell closed the subwindow): a
+    /// still-connected handler must not re-claim an overlay for a window that no longer exists.
+    /// </summary>
+    private bool _overlayWindowClosed;
+
     /// <summary>True while this handler lost its slot to an LRU preemption (replay on restore).</summary>
     private bool _overlayPreempted;
 
@@ -95,6 +110,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     /// <summary>The claimed overlay slot (MULTI-OVL); -1 while suspended or beyond the cap.</summary>
     internal int OverlaySlot => _overlaySlot;
+
+    /// <summary>MULTIWINDOW-L2: the window this handler's overlay belongs to (the primary id
+    /// for the historical single-host path; a "sub-N" id for the subwindow's child pool).</summary>
+    internal string OverlayWindowId => _overlayWindowId;
     private static readonly object s_navSync = new();
     private static readonly Dictionary<string, long> s_approvedNavigations = new();
     private static unsafe IntPtr s_evalResultCallback = (IntPtr)(delegate* unmanaged[Cdecl]<int, IntPtr, int, void>)&OnEvalResultNative;
@@ -142,7 +161,11 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        _overlaySlot = OpenHarmonyOverlays.Acquire(this);
+        // MULTIWINDOW-L2: the window id decides which ArkWeb host serves this control. The
+        // host table is stamped before the window's element tree connects, so a control of the
+        // subwindow claims from the child pool and never occupies a primary overlay slot.
+        _overlayWindowId = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        _overlaySlot = OpenHarmonyChildWeb.AcquireForWindow(_overlayWindowId, this);
         lock (s_handlers)
         {
             s_handlers.Add(this);
@@ -157,7 +180,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             s_handlers.Remove(this);
         }
-        OpenHarmonyOverlays.Release(_overlaySlot, this);
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, _overlaySlot, this);
         _overlaySlot = -1;
         _overlayEngaged = false;
         _overlayDetached = false;
@@ -171,12 +194,18 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// </summary>
     private bool EnsureOverlaySlot()
     {
-        if (_overlaySlot >= 0)
+        if (_overlayWindowClosed)
         {
-            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            // MULTIWINDOW-L2: the managed window ended; a still-connected handler must not
+            // re-claim an overlay for a window that no longer exists.
             return false;
         }
-        int slot = OpenHarmonyOverlays.Acquire(this);
+        if (_overlaySlot >= 0)
+        {
+            OpenHarmonyChildWeb.TouchForWindow(_overlayWindowId, _overlaySlot, this);
+            return false;
+        }
+        int slot = OpenHarmonyChildWeb.AcquireForWindow(_overlayWindowId, this);
         if (slot < 0)
         {
             return false;
@@ -191,6 +220,62 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// MULTIWINDOW-L2: a managed window ended (the shell closed the subwindow or its surface
+    /// was destroyed) while its element handlers are still connected: release every web claim
+    /// that belongs to the window, so no child ArkWeb survives its window. The handlers stay
+    /// connected (MAUI semantics); they simply hold no slot afterwards. The primary window is
+    /// never touched. Called by <see cref="OpenHarmonyWindowHost.Reset"/>.
+    /// </summary>
+    internal static void ReleaseWindowOverlays(string windowId)
+    {
+        if (string.IsNullOrEmpty(windowId) || windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            return;
+        }
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
+            {
+                if (string.Equals(handler._overlayWindowId, windowId, StringComparison.Ordinal) &&
+                    handler._overlaySlot >= 0)
+                {
+                    OpenHarmonyChildWeb.ReleaseForWindow(windowId, handler._overlaySlot, handler);
+                    handler._overlaySlot = -1;
+                    handler._overlayEngaged = false;
+                    handler._overlayWindowClosed = true;
+                }
+            }
+        }
+        OpenHarmonyHybridWebViewHandler.ReleaseWindowOverlays(windowId);
+        OpenHarmonyBlazorWebViewHandler.ReleaseWindowOverlays(windowId);
+    }
+
+    /// <summary>
+    /// MULTIWINDOW-L2: re-resolves the handler's window and migrates a claim that was made
+    /// before the window id was known (the deferred OpenWindow path stamps the host table just
+    /// before the tree connects, and this is the belt: a first message/arrange after a late
+    /// stamp moves the claim to the right pool before anything is really shown/loaded).
+    /// </summary>
+    private void RefreshOverlayWindow()
+    {
+        if (_overlayWindowClosed)
+        {
+            return;
+        }
+        string resolved = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        if (string.Equals(resolved, _overlayWindowId, StringComparison.Ordinal))
+        {
+            return;
+        }
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, _overlaySlot, this);
+        _overlaySlot = -1;
+        _overlayPreempted = false;
+        _overlayDetached = false;
+        _overlayWindowId = resolved;
+        OpenHarmonyBridge.WriteStatus($"[maui] web overlay window: {resolved}");
     }
 
     /// <summary>
@@ -237,9 +322,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         _overlayEngaged = false;
         // Hide before the release: a hot slot keeps its ArkWeb component, and the tagged hide is
         // sent while the slot still exists (after a dynamic destroy it would be deferred and
-        // replayed onto the next incarnation of the slot).
-        OpenHarmonyBridge.WebCommand("hide", OpenHarmonyOverlays.Tag(slot));
-        OpenHarmonyOverlays.Release(slot, this);
+        // replayed onto the next incarnation of the slot). MULTIWINDOW-L2: both commands follow
+        // the handler's window (the child pool destroys every released slot).
+        OpenHarmonyChildWeb.CommandForWindow(_overlayWindowId, "hide", OpenHarmonyOverlays.Tag(slot));
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, slot, this);
         OpenHarmonyBridge.WriteStatus($"[maui] web overlay detached: slot {slot}");
     }
 
@@ -252,7 +338,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         if (_overlaySlot >= 0)
         {
             _overlayDetached = false;
-            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            OpenHarmonyChildWeb.TouchForWindow(_overlayWindowId, _overlaySlot, this);
             return;
         }
         if (!_overlayDetached && !_overlayPreempted)
@@ -278,6 +364,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
+        // MULTIWINDOW-L2 safety net: a window stamp that arrived after the connect-time claim
+        // is corrected here, before any frame is sent. Nothing has been shown for a stale
+        // claim (the first frame is what mounts the overlay), so the re-claim is free.
+        RefreshOverlayWindow();
         // The native Web component is a shell overlay: place it on the control's frame (the
         // command also shows it). The values are MAUI DIP, which the shell applies as ArkUI vp.
         // A handler suspended by an LRU preemption must NOT restore from an arrange (a layout
@@ -301,7 +391,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         if (_overlaySlot >= 0)
         {
             _overlayEngaged = true;
-            SendPlatformFrame(frame, _overlaySlot);
+            SendPlatformFrame(_overlayWindowId, frame, _overlaySlot);
         }
     }
 
@@ -313,7 +403,14 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// frame lands on the first overlay.
     /// </summary>
     internal static void SendPlatformFrame(Rect frame, int slot)
-        => OpenHarmonyBridge.WebCommand("frame", OpenHarmonyOverlays.Tag(slot, FormattableString.Invariant(
+        => SendPlatformFrame(OpenHarmonyWindowSurface.PrimaryWindowId, frame, slot);
+
+    /// <summary>
+    /// MULTIWINDOW-L2 window-aware form: the primary/unknown window keeps the historical
+    /// command byte-for-byte; a secondary window's frame goes to the subwindow's own host.
+    /// </summary>
+    internal static void SendPlatformFrame(string windowId, Rect frame, int slot)
+        => OpenHarmonyChildWeb.CommandForWindow(windowId, "frame", OpenHarmonyOverlays.Tag(slot, FormattableString.Invariant(
             $"{frame.X:0.###}\n{frame.Y:0.###}\n{frame.Width:0.###}\n{frame.Height:0.###}")));
 
     // MAUI raises the JavaScript commands through IElementHandler.Invoke (Controls.WebView
@@ -323,20 +420,20 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         switch (command)
         {
             case nameof(IWebView.EvaluateJavaScriptAsync) when args is EvaluateJavaScriptAsyncRequest request:
-                _ = CompleteEvaluateAsync(request, UseOverlaySlot());
+                _ = CompleteEvaluateAsync(request, UseOverlaySlot(), _overlayWindowId);
                 return;
             case nameof(IWebView.Eval) when args is string script:
                 // Fire-and-forget evaluation (IWebView.Eval has no result).
-                _ = EvaluateJavaScriptAsyncCore(script, UseOverlaySlot());
+                _ = EvaluateJavaScriptAsyncCore(script, UseOverlaySlot(), _overlayWindowId);
                 return;
             case nameof(IWebView.GoBack):
-                SendHistoryCommand("back", WebNavigationEvent.Back, UseOverlaySlot());
+                SendHistoryCommand(_overlayWindowId, "back", WebNavigationEvent.Back, UseOverlaySlot());
                 return;
             case nameof(IWebView.GoForward):
-                SendHistoryCommand("forward", WebNavigationEvent.Forward, UseOverlaySlot());
+                SendHistoryCommand(_overlayWindowId, "forward", WebNavigationEvent.Forward, UseOverlaySlot());
                 return;
             case nameof(IWebView.Reload):
-                SendHistoryCommand("refresh", WebNavigationEvent.Refresh, UseOverlaySlot());
+                SendHistoryCommand(_overlayWindowId, "refresh", WebNavigationEvent.Refresh, UseOverlaySlot());
                 return;
             default:
                 base.Invoke(command, args);
@@ -350,6 +447,8 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// </summary>
     private int UseOverlaySlot()
     {
+        // MULTIWINDOW-L2: an explicit use is also a settle point for a late window stamp.
+        RefreshOverlayWindow();
         // AUTODISCONNECT: an explicit use (eval/history) of a control that is out of the tree
         // stays suspended (-1 completes the request without an overlay); the attach signal
         // restores it when the control is added back. A preempted but attached handler still
@@ -374,14 +473,14 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// WebNavigationEvent for the next page event. The shell reports the resulting history
     /// availability afterwards, so the command itself needs no reply.
     /// </summary>
-    private static void SendHistoryCommand(string op, WebNavigationEvent navigationEvent, int slot)
+    private static void SendHistoryCommand(string windowId, string op, WebNavigationEvent navigationEvent, int slot)
     {
         s_pendingNavigation = navigationEvent;
-        OpenHarmonyBridge.WebCommand(op, OpenHarmonyOverlays.Tag(slot));
+        OpenHarmonyChildWeb.CommandForWindow(windowId, op, OpenHarmonyOverlays.Tag(slot));
     }
 
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
-    public Task<string?> EvaluateJavaScriptAsync(string script) => EvaluateJavaScriptAsyncCore(script, UseOverlaySlot());
+    public Task<string?> EvaluateJavaScriptAsync(string script) => EvaluateJavaScriptAsyncCore(script, UseOverlaySlot(), _overlayWindowId);
 
     /// <summary>
     /// Sends the script to the ArkTS shell (registerWebEvalSink) and awaits the runJavaScript
@@ -390,18 +489,36 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// need some live page, and the cookie store is shared by every overlay.
     /// </summary>
     internal static Task<string?> EvaluateJavaScriptAsyncCore(string script)
-        => EvaluateJavaScriptAsyncCore(script, 0);
+        => EvaluateJavaScriptAsyncCore(script, 0, null);
 
     /// <summary>
     /// Slot-tagged form (MULTI-OVL): the shell runs the script on the WebviewController of the
     /// matching overlay ("s&lt;slot&gt;\n&lt;script&gt;"), so a Blazor IPC eval lands in the
     /// BlazorWebView's document and never in the HybridWebView's.
     /// </summary>
-    internal static async Task<string?> EvaluateJavaScriptAsyncCore(string script, int slot)
+    internal static Task<string?> EvaluateJavaScriptAsyncCore(string script, int slot)
+        => EvaluateJavaScriptAsyncCore(script, slot, null);
+
+    /// <summary>
+    /// MULTIWINDOW-L2 window-aware form: the primary/unknown window keeps the historical wire
+    /// ("s&lt;slot&gt;\n&lt;script&gt;"); a secondary window's script goes to the subwindow
+    /// page's own eval sink through OpenHarmonyChildWeb (a slot-less child control has no page
+    /// and answers null immediately).
+    /// </summary>
+    internal static async Task<string?> EvaluateJavaScriptAsyncCore(string script, int slot, string? windowId)
     {
         if (string.IsNullOrEmpty(script))
         {
             return null;
+        }
+        if (OpenHarmonyChildWeb.IsApplicable(windowId))
+        {
+            if (slot < 0)
+            {
+                return null;
+            }
+            return await SendHostRequestAsync(
+                requestId => OpenHarmonyChildWeb.Eval(windowId!, slot, script, requestId)).ConfigureAwait(false);
         }
         string tagged = OpenHarmonyOverlays.TagScript(slot, script);
         return await SendHostRequestAsync(requestId => WebEvalNative(tagged, requestId) == 0).ConfigureAwait(false);
@@ -460,9 +577,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         return await source.Task.ConfigureAwait(false);
     }
 
-    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request, int slot = 0)
+    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request, int slot = 0, string? windowId = null)
     {
-        string? result = await EvaluateJavaScriptAsyncCore(request.Script, slot).ConfigureAwait(false);
+        string? result = await EvaluateJavaScriptAsyncCore(request.Script, slot, windowId).ConfigureAwait(false);
         // An empty string stands in for "the platform had no result"; Controls.WebView maps
         // "null" to null and trims the quotes JSON.stringify adds on non-Android platforms.
         request.TrySetResult(result ?? string.Empty);
@@ -916,21 +1033,22 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// Cancel (IWebView.Navigating returns the cancel flag).
     /// </summary>
     private static bool RaiseNavigating(string url)
-        => RaiseNavigating(url, WebNavigationEvent.NewPage, -1);
+        => RaiseNavigating(url, WebNavigationEvent.NewPage, -1, null);
 
     /// <summary>
     /// Raises Navigating with the load's event kind (Back/Forward/Refresh for history loads) on
     /// the views that own <paramref name="slot"/> (MULTI-OVL). A negative slot stays a fan-out
-    /// to every connected view, the legacy single-overlay behavior.
+    /// to every connected view, the legacy single-overlay behavior. MULTIWINDOW-L2:
+    /// <paramref name="windowId"/> scopes the fan-out to one host (null = the primary window).
     /// </summary>
-    private static bool RaiseNavigating(string url, WebNavigationEvent navigationEvent, int slot = -1)
+    private static bool RaiseNavigating(string url, WebNavigationEvent navigationEvent, int slot = -1, string? windowId = null)
     {
         bool allowed = true;
         lock (s_handlers)
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
-                if (slot >= 0 && handler._overlaySlot != slot)
+                if (!HandlerMatches(handler, windowId, slot))
                 {
                     continue;
                 }
@@ -944,11 +1062,29 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     }
 
     /// <summary>
+    /// True when the handler owns the event: the primary host for an untagged/primary state,
+    /// the tagged window otherwise; a non-negative slot additionally scopes the event to the
+    /// handler that claimed it. The primary filter keeps the two pools' slot numbers (and the
+    /// child window's controls) from receiving each other's page events.
+    /// </summary>
+    private static bool HandlerMatches(OpenHarmonyWebViewHandler handler, string? windowId, int slot)
+    {
+        if (!string.IsNullOrEmpty(windowId))
+        {
+            return string.Equals(handler._overlayWindowId, windowId, StringComparison.Ordinal) &&
+                   (slot < 0 || handler._overlaySlot == slot);
+        }
+        return handler._overlayWindowId == OpenHarmonyWindowSurface.PrimaryWindowId &&
+               (slot < 0 || handler._overlaySlot == slot);
+    }
+
+    /// <summary>
     /// Mirrors a completed/failed shell load into IWebView.Navigated with the event kind the
     /// load was started with (Back/Forward/Refresh for history loads, NewPage otherwise) and
-    /// consumes the pending kind. Slot-tagged events only reach the views that own the slot.
+    /// consumes the pending kind. Slot-tagged events only reach the views that own the slot
+    /// (MULTI-OVL); MULTIWINDOW-L2 scopes by window on top of that.
     /// </summary>
-    private static void RaiseNavigated(string url, WebNavigationResult result, int slot = -1)
+    private static void RaiseNavigated(string url, WebNavigationResult result, int slot = -1, string? windowId = null)
     {
         WebNavigationEvent navigationEvent = s_pendingNavigation;
         s_pendingNavigation = WebNavigationEvent.NewPage;
@@ -956,7 +1092,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
-                if (slot >= 0 && handler._overlaySlot != slot)
+                if (!HandlerMatches(handler, windowId, slot))
                 {
                     continue;
                 }
@@ -967,10 +1103,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
 
     /// <summary>
     /// Applies the shell's history state ("history|&lt;back&gt;|&lt;forward&gt;", 1/0 flags) to
-    /// every connected WebView's IWebView.CanGoBack/CanGoForward; a slot-tagged state only
-    /// reaches the views that own the slot (MULTI-OVL).
+    /// the views that own <paramref name="slot"/>; MULTIWINDOW-L2 scopes by window on top of
+    /// that. A negative slot stays the legacy fan-out.
     /// </summary>
-    private static void ApplyHistoryState(string state, int slot = -1)
+    private static void ApplyHistoryState(string state, int slot = -1, string? windowId = null)
     {
         string[] parts = state.Split('|');
         if (parts.Length != 3 || !TryParseFlag(parts[1], out bool canGoBack) || !TryParseFlag(parts[2], out bool canGoForward))
@@ -982,7 +1118,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             foreach (OpenHarmonyWebViewHandler handler in s_handlers.ToArray())
             {
-                if (slot >= 0 && handler._overlaySlot != slot)
+                if (!HandlerMatches(handler, windowId, slot))
                 {
                     continue;
                 }
@@ -1212,6 +1348,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             return;
         }
+        // MULTIWINDOW-L2: the load that follows a connect must already target the control's
+        // window; a late stamp is applied here before the claim.
+        handler.RefreshOverlayWindow();
         // A source load is a fresh navigation, not a history move.
         s_pendingNavigation = WebNavigationEvent.NewPage;
         // MULTI-OVERLAY-FULL: claiming here is enough; the source load itself is the replay a
@@ -1232,30 +1371,85 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                         $"[maui] web load rejected: {SanitizeUrlForLog(url.Url)}");
                     return;
                 }
-                OpenHarmonyBridge.WebCommand("load", OpenHarmonyOverlays.Tag(slot, url.Url));
+                SendOverlayCommand(handler, "load", OpenHarmonyOverlays.Tag(slot, url.Url));
                 break;
             case HtmlWebViewSource html:
-                OpenHarmonyBridge.WebCommand("data", OpenHarmonyOverlays.Tag(slot, html.Html));
+                SendOverlayCommand(handler, "data", OpenHarmonyOverlays.Tag(slot, html.Html));
                 break;
             default:
-                OpenHarmonyBridge.WebCommand("show", OpenHarmonyOverlays.Tag(slot));
+                SendOverlayCommand(handler, "show", OpenHarmonyOverlays.Tag(slot));
                 break;
         }
+    }
+
+    /// <summary>
+    /// MULTIWINDOW-L2: one per-overlay command on the handler's window. A child-window control
+    /// without a claim (the child pool is full) has no page and drops the command instead of
+    /// letting an untagged argument land on the child pool's slot 0; the primary/unknown window
+    /// keeps the historical wire byte-for-byte.
+    /// </summary>
+    private static void SendOverlayCommand(OpenHarmonyWebViewHandler handler, string op, string? arg)
+    {
+        if (OpenHarmonyChildWeb.IsApplicable(handler._overlayWindowId) && handler._overlaySlot < 0)
+        {
+            return;
+        }
+        OpenHarmonyChildWeb.CommandForWindow(handler._overlayWindowId, op, arg);
     }
 
     /// <summary>Mirrors a shell page event into the MAUI WebView events.</summary>
     public static void OnPageEvent(string state, string url)
     {
+        // MULTIWINDOW-L2: a subwindow-tagged state ("w:<window>|s<slot>|<state>") belongs to the
+        // child host's own pool; it is filtered by window and never touches the primary pool's
+        // capacity/LRU state. "w:<window>|capacity|<n>" marks that host ready.
+        string? windowId = null;
+        string effectiveState = state;
+        int slot = -1;
+        if (OpenHarmonyChildWeb.TryParseState(state, out string childWindow, out string childRest))
+        {
+            windowId = childWindow;
+            effectiveState = childRest;
+            if (effectiveState.StartsWith("capacity|", StringComparison.Ordinal))
+            {
+                // The subwindow page declared its ArkWeb pool; the managed child pool flushes
+                // the commands queued before the page loaded (a lost advertisement only delays
+                // the flush; the queue is bounded).
+                if (int.TryParse(effectiveState.Substring("capacity|".Length), out int childCapacity))
+                {
+                    OpenHarmonyChildWeb.SetCapacity(childWindow, childCapacity);
+                    OpenHarmonyBridge.WriteStatus($"[maui] child web capacity: {childWindow} {childCapacity}");
+                }
+                return;
+            }
+            if (effectiveState == "capacity")
+            {
+                // A shell variant that carries the count in the event URL (the primary page's
+                // shape) instead of the state; accepted so a mixed pairing can never drop the
+                // advertisement silently (the first device round's failure mode).
+                if (int.TryParse(url, out int urlCapacity))
+                {
+                    OpenHarmonyChildWeb.SetCapacity(childWindow, urlCapacity);
+                    OpenHarmonyBridge.WriteStatus($"[maui] child web capacity: {childWindow} {urlCapacity}");
+                }
+                return;
+            }
+            if (!OpenHarmonyOverlays.TryParseEventState(effectiveState, out int childSlot, out string childState))
+            {
+                // A child-tagged state without a slot tag is not part of this wire; ignore it.
+                return;
+            }
+            slot = childSlot;
+            effectiveState = childState;
+        }
         // MULTI-OVL: the shell prefixes each per-overlay event with its slot ("s0|finished").
         // An untagged state (a shell that predates the second overlay) stays a fan-out.
-        int slot = -1;
-        string effectiveState = state;
-        if (OpenHarmonyOverlays.TryParseEventState(state, out int eventSlot, out string rest))
+        else if (OpenHarmonyOverlays.TryParseEventState(state, out int eventSlot, out string rest))
         {
             slot = eventSlot;
             effectiveState = rest;
         }
-        if (effectiveState == "capacity")
+        if (effectiveState == "capacity" && windowId is null)
         {
             // SLOTS-DYNAMIC: the shell advertises how many ArkWeb overlays it can declare
             // (untagged "capacity" state, the count in the URL slot). The pool clamps itself to
@@ -1274,8 +1468,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         {
             // MULTI-OVERLAY-FULL: the shell forwards a user touch on an overlay as
             // "s<slot>|activate" so the LRU pool refreshes the slot's owner (the shell cannot
-            // touch the pool itself). Only the handler that owns the slot is refreshed.
-            if (slot >= 0)
+            // touch the pool itself). Only the handler that owns the slot is refreshed. The
+            // child pool has no LRU preemption in this wave, so a child activation is ignored.
+            if (windowId is null && slot >= 0)
             {
                 lock (s_handlers)
                 {
@@ -1295,18 +1490,18 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             // A load the shell already asked about (B6) raised Navigating before it started;
             // do not raise it a second time. App-origin loads never take that path. The event
             // kind is the one the triggering command set (Back/Forward/Refresh or NewPage).
-            if (ConsumeApprovedNavigation(url))
+            if (windowId is null && ConsumeApprovedNavigation(url))
             {
                 return;
             }
-            RaiseNavigating(url, s_pendingNavigation, slot);
+            RaiseNavigating(url, s_pendingNavigation, slot, windowId);
             return;
         }
         if (effectiveState.StartsWith(HistoryStatePrefix, StringComparison.Ordinal))
         {
             // ArkWeb history availability after a page end/back/forward/refresh; mirrors into
             // IWebView.CanGoBack/CanGoForward and consumes the pending history kind.
-            ApplyHistoryState(effectiveState, slot);
+            ApplyHistoryState(effectiveState, slot, windowId);
             return;
         }
         if (effectiveState == "error")
@@ -1316,14 +1511,15 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             // this outside the page's control, so a script cannot turn a failure into a
             // success. MULTI-OVERLAY-FULL: the slot-tagged hide clears this overlay only;
             // an untagged command (legacy shell) keeps the global hide.
-            OpenHarmonyBridge.WebCommand("hide", OpenHarmonyOverlays.Tag(slot));
-            RaiseNavigated(url, WebNavigationResult.Failure, slot);
+            OpenHarmonyChildWeb.CommandForWindow(windowId, "hide", OpenHarmonyOverlays.Tag(slot));
+            RaiseNavigated(url, WebNavigationResult.Failure, slot, windowId);
         }
         else if (effectiveState == "finished")
         {
-            RaiseNavigated(url, WebNavigationResult.Success, slot);
+            RaiseNavigated(url, WebNavigationResult.Success, slot, windowId);
             // The page is done: mirror the ArkWeb cookie store back into IWebView.Cookies
-            // (best-effort; the container stays authoritative for what the app set).
+            // (best-effort; the container stays authoritative for what the app set). The cookie
+            // jar is process-wide, so the read may run on either host's page.
             ScheduleCookieRead(url);
         }
         // Any completion/failure event is the timely-cleanup point for approval entries whose

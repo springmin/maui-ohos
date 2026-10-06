@@ -1,6 +1,14 @@
 // MAUI application host for OpenHarmony: creates the app window through IApplication, keeps
 // the visual tree's handlers connected to our platform handlers, and drives rendering from
 // the platform contract (surface, touch, frame ticks, lifecycle).
+//
+// M2 (MULTIWINDOW-L): the host is windowed. The primary window keeps the historical
+// single-surface path below (zero change); a window adopted through OpenWindow when the shell
+// has reported a second surface gets its own OpenHarmonyWindowHost (per-window
+// surface/renderer/size/input), bound by window id. The bridge's own events are untagged, so
+// in M2 the untagged stream drives the primary window only; the window-id routing entry points
+// (RouteSurface/RouteTouch/RouteFrame) are the adapter the host's per-window dispatch (M2-ow)
+// and the shell's sub-window events (M3) call.
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Hosting;
 using Microsoft.OpenHarmony.Hosting;
@@ -32,6 +40,12 @@ public sealed class OpenHarmonyMauiAppHost
     private bool _ready;
     // T21: font-scale reports that re-arranged the tree (the interaction-suite seam).
     internal int SystemFontScaleRelayouts { get; private set; }
+    // M2: one per-window state owner (surface + renderer + size + input) for every window beyond
+    // the primary one, plus the surface reports that arrived for a window id no window has
+    // adopted yet ("无窗时保持记录态"; bound at adoption). Guarded by _sync.
+    private readonly Dictionary<string, OpenHarmonyWindowHost> _secondaryWindows = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OpenHarmonySurfaceInfo> _pendingSurfaces = new(StringComparer.Ordinal);
+    private readonly List<string> _pendingSurfaceOrder = new();
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
@@ -63,27 +77,11 @@ public sealed class OpenHarmonyMauiAppHost
             new OpenHarmonyDispatcherProvider(services.GetRequiredService<Microsoft.Maui.Dispatching.IDispatcher>()));
         _renderer = services.GetRequiredService<OpenHarmonyWindowRenderer>();
         _surface = services.GetRequiredService<OpenHarmonyWindowSurface>();
+        // The primary renderer draws through the primary surface (the static test seams still
+        // win); a secondary window's renderer is bound to its own surface at construction.
+        _renderer.WindowSurface = _surface;
 
-        OpenHarmonyBridge.SurfaceChanged += info =>
-        {
-            if (CanArrangeSurface(info))
-            {
-                lock (_sync)
-                {
-                    Arrange(info.Width, info.Height);
-                    _dirty = true;
-                    Render();
-                }
-                if (info.State == OpenHarmonySurfaceState.Changed)
-                {
-                    // A0 multi-window form adaptation: a live resize/split/free-window size
-                    // change re-arranges the tree for the new surface (see CanArrangeSurface).
-                    // The status line lets the shell's dotnet-status poll carry the resize to
-                    // hilog on a device.
-                    OpenHarmonyBridge.WriteStatus($"[maui] window size {info.Width}x{info.Height}");
-                }
-            }
-        };
+        OpenHarmonyBridge.SurfaceChanged += OnSurfaceArranged;
 
         OpenHarmonyBridge.Touch += args =>
         {
@@ -114,27 +112,7 @@ public sealed class OpenHarmonyMauiAppHost
         // whole tree and repaints; the scale alone cannot relayout.
         OpenHarmonySystemFontScale.Changed += OnSystemFontScaleChanged;
 
-        OpenHarmonyBridge.Frame += _ =>
-        {
-            lock (_sync)
-            {
-                if (!_ready)
-                {
-                    return;
-                }
-                // Activity indicators keep animating: advance the shared angle and redraw.
-                if (_renderer.HasAnimations(_window?.Content as IView))
-                {
-                    OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
-                    _dirty = true;
-                }
-                if (_dirty)
-                {
-                    _dirty = false;
-                    Render();
-                }
-            }
-        };
+        OpenHarmonyBridge.Frame += _ => OnFrameTick();
 
         OpenHarmonyBridge.LifecycleChanged += e =>
         {
@@ -182,6 +160,10 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     public IWindow? Window => _window;
+
+    /// <summary>The MauiContext the host connects handlers with (one per process in M2;
+    /// window-scoped contexts are part of M4).</summary>
+    internal MauiContext Context => _context;
 
     /// <summary>The view to render: the top modal page when one is pushed, else the window content.</summary>
     private IView? RootView
@@ -338,22 +320,236 @@ public sealed class OpenHarmonyMauiAppHost
     /// <summary>
     /// Drops the host's reference to a window the application handler closed. Destroying already
     /// removed it from Application.Windows and disconnected its handler; the shell's window stays
-    /// open, so the next OpenWindow can adopt a window on the same surface.
+    /// open, so the next OpenWindow can adopt a window on the same surface. A secondary window's
+    /// session is removed; the primary window's slot stays (its surface keeps the last size).
     /// </summary>
     internal void NotifyWindowClosed(IWindow window)
     {
         lock (_sync)
         {
-            if (!ReferenceEquals(_window, window))
+            if (ReferenceEquals(_window, window))
             {
+                _window = null;
+                _created = false;
+                _activated = false;
+                _dirty = true;
+                OpenHarmonyBridge.WriteStatus("[maui] window closed; the host has no live window");
                 return;
             }
-            _window = null;
-            _created = false;
-            _activated = false;
-            _dirty = true;
+            string? closedId = null;
+            foreach (KeyValuePair<string, OpenHarmonyWindowHost> entry in _secondaryWindows)
+            {
+                if (ReferenceEquals(entry.Value.Window, window))
+                {
+                    closedId = entry.Key;
+                    break;
+                }
+            }
+            if (closedId is not null)
+            {
+                OpenHarmonyWindowHost closed = _secondaryWindows[closedId];
+                _secondaryWindows.Remove(closedId);
+                closed.Reset();
+                OpenHarmonyBridge.WriteStatus($"[maui] window '{closedId}' closed");
+            }
+            // A window the host never adopted is a no-op (the legacy single-window contract).
         }
-        OpenHarmonyBridge.WriteStatus("[maui] window closed; the host has no live window");
+    }
+
+    /// <summary>
+    /// True while an <see cref="IApplication.OpenWindow"/> request can be served: either no
+    /// window is live yet (the requested window becomes the primary one on the shell's main
+    /// surface) or the shell already reported a second surface (<see cref="RouteSurface"/>) that
+    /// a secondary window can bind to.
+    /// </summary>
+    internal bool CanOpenWindow
+    {
+        get { lock (_sync) { return _window is null || _pendingSurfaces.Count > 0; } }
+    }
+
+    /// <summary>
+    /// Adopts a window for an OpenWindow request: with no live window the requested window takes
+    /// the primary slot (the historical path); with a live one it binds to the next recorded
+    /// secondary surface and gets its own per-window state owner. Returns the window id, or null
+    /// when no surface is available (the caller keeps the current window, the documented
+    /// single-surface degrade).
+    /// </summary>
+    internal string? TryOpenWindow(IWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        lock (_sync)
+        {
+            if (_window is null)
+            {
+                if (!TryAdoptWindow(window))
+                {
+                    return null;
+                }
+                return OpenHarmonyWindowSurface.PrimaryWindowId;
+            }
+            if (ReferenceEquals(_window, window))
+            {
+                return OpenHarmonyWindowSurface.PrimaryWindowId;
+            }
+            string? windowId = null;
+            for (int i = 0; i < _pendingSurfaceOrder.Count; i++)
+            {
+                string candidate = _pendingSurfaceOrder[i];
+                if (_pendingSurfaces.ContainsKey(candidate) && !_secondaryWindows.ContainsKey(candidate))
+                {
+                    windowId = candidate;
+                    break;
+                }
+            }
+            if (windowId is null)
+            {
+                return null;
+            }
+            var surface = new OpenHarmonyWindowSurface(windowId, attachToBridge: false);
+            var host = new OpenHarmonyWindowHost(this, windowId, surface, new OpenHarmonyWindowRenderer(surface));
+            _secondaryWindows.Add(windowId, host);
+            if (_pendingSurfaces.Remove(windowId, out OpenHarmonySurfaceInfo? pending) && pending is not null)
+            {
+                // The surface came up before its window: bind it now, then adopt (which arranges
+                // for the size the surface reported).
+                _pendingSurfaceOrder.Remove(windowId);
+                surface.OnSurface(pending);
+            }
+            host.Adopt(window);
+            return windowId;
+        }
+    }
+
+    /// <summary>Every live secondary window's state owner (registration order).</summary>
+    internal IReadOnlyList<OpenHarmonyWindowHost> SecondaryWindows
+    {
+        get { lock (_sync) { return _secondaryWindows.Values.ToList(); } }
+    }
+
+    /// <summary>The live secondary window with this id, or null.</summary>
+    internal OpenHarmonyWindowHost? FindSecondaryWindow(string windowId)
+    {
+        lock (_sync)
+        {
+            return _secondaryWindows.TryGetValue(windowId, out OpenHarmonyWindowHost? host) ? host : null;
+        }
+    }
+
+    /// <summary>Number of surface reports recorded for a window that does not exist yet.</summary>
+    internal int PendingSurfaceCount
+    {
+        get { lock (_sync) { return _pendingSurfaces.Count; } }
+    }
+
+    /// <summary>
+    /// Routes one surface report of the host's window registry to the window it belongs to.
+    /// The primary window's reports also arrive through the bridge's untagged event; this entry
+    /// is how a secondary window's report reaches its session, and how off-device tests drive
+    /// both. A report for a window that does not exist yet is recorded and bound by
+    /// <see cref="TryOpenWindow"/> (the shell may bring the XComponent up first). Returns true
+    /// when a live window consumed the report.
+    /// </summary>
+    internal bool RouteSurface(string windowId, OpenHarmonySurfaceInfo info)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(windowId);
+        ArgumentNullException.ThrowIfNull(info);
+        lock (_sync)
+        {
+            if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+            {
+                _surface.OnSurface(info);
+                OnSurfaceArranged(info);
+                return true;
+            }
+            if (_secondaryWindows.TryGetValue(windowId, out OpenHarmonyWindowHost? host))
+            {
+                host.Surface.OnSurface(info);
+                return true;
+            }
+            if (info.State == OpenHarmonySurfaceState.Destroyed)
+            {
+                // A destroyed surface for a window that does not exist is not a binding target:
+                // drop any earlier record instead of leaving a dead surface for the next
+                // OpenWindow to adopt.
+                _pendingSurfaces.Remove(windowId);
+                _pendingSurfaceOrder.Remove(windowId);
+                return false;
+            }
+            _pendingSurfaces[windowId] = info;
+            if (!_pendingSurfaceOrder.Contains(windowId))
+            {
+                _pendingSurfaceOrder.Add(windowId);
+            }
+            return false;
+        }
+    }
+
+    /// <summary>Routes one touch/mouse stream event to its window (M3 feeds secondary input
+    /// here; off-device tests drive both windows' input through it). Returns true when the
+    /// window consumed the event.</summary>
+    internal bool RouteTouch(string windowId, OpenHarmonyTouchEventArgs args)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(windowId);
+        ArgumentNullException.ThrowIfNull(args);
+        lock (_sync)
+        {
+            if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+            {
+                bool handled = args.Action switch
+                {
+                    OpenHarmonyTouchAction.Down => HandleTouch(true, false, args.X, args.Y, args.PointerId),
+                    OpenHarmonyTouchAction.Up => HandleTouch(false, true, args.X, args.Y, args.PointerId),
+                    OpenHarmonyTouchAction.Move => HandleMoveCore(args.X, args.Y, args.PointerId),
+                    OpenHarmonyTouchAction.Cancel => HandleCancel(args.X, args.Y),
+                    _ => false,
+                };
+                if (handled)
+                {
+                    _dirty = true;
+                }
+                return handled;
+            }
+            return _secondaryWindows.TryGetValue(windowId, out OpenHarmonyWindowHost? host)
+                && DispatchSecondaryTouch(host, args);
+        }
+    }
+
+    /// <summary>Routes one frame tick to its window's renderer (off-device tests drive a
+    /// secondary window's frame loop; the device's secondary frame routing is M3).</summary>
+    internal bool RouteFrame(string windowId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(windowId);
+        lock (_sync)
+        {
+            if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+            {
+                OnFrameTick();
+                return true;
+            }
+            if (!_secondaryWindows.TryGetValue(windowId, out OpenHarmonyWindowHost? host))
+            {
+                return false;
+            }
+            host.OnFrame();
+            return true;
+        }
+    }
+
+    private static bool DispatchSecondaryTouch(OpenHarmonyWindowHost host, OpenHarmonyTouchEventArgs args)
+    {
+        bool handled = args.Action switch
+        {
+            OpenHarmonyTouchAction.Down => host.HandleTouch(true, false, args.X, args.Y, args.PointerId),
+            OpenHarmonyTouchAction.Up => host.HandleTouch(false, true, args.X, args.Y, args.PointerId),
+            OpenHarmonyTouchAction.Move => host.HandleMove(args.X, args.Y, args.PointerId),
+            OpenHarmonyTouchAction.Cancel => host.HandleCancel(args.X, args.Y),
+            _ => false,
+        };
+        if (handled)
+        {
+            host.MarkDirty();
+        }
+        return handled;
     }
 
     /// <summary>
@@ -363,6 +559,56 @@ public sealed class OpenHarmonyMauiAppHost
     /// </summary>
     internal static bool CanArrangeSurface(OpenHarmonySurfaceInfo info)
         => info.State != OpenHarmonySurfaceState.Destroyed && info.Width > 0 && info.Height > 0;
+
+    /// <summary>
+    /// The primary window's surface reaction, shared by the bridge's untagged event and the
+    /// window-id routing's "main" report: arrange/render for a usable size and report a live
+    /// resize through the status line (the shell's dotnet-status poll carries it to hilog on a
+    /// device).
+    /// </summary>
+    private void OnSurfaceArranged(OpenHarmonySurfaceInfo info)
+    {
+        if (CanArrangeSurface(info))
+        {
+            lock (_sync)
+            {
+                Arrange(info.Width, info.Height);
+                _dirty = true;
+                Render();
+            }
+            if (info.State == OpenHarmonySurfaceState.Changed)
+            {
+                // A0 multi-window form adaptation: a live resize/split/free-window size change
+                // re-arranges the tree for the new surface (see CanArrangeSurface).
+                // The status line lets the shell's dotnet-status poll carry the resize to
+                // hilog on a device.
+                OpenHarmonyBridge.WriteStatus($"[maui] window size {info.Width}x{info.Height}");
+            }
+        }
+    }
+
+    /// <summary>The primary window's frame tick: animation advance + dirty repaint.</summary>
+    private void OnFrameTick()
+    {
+        lock (_sync)
+        {
+            if (!_ready)
+            {
+                return;
+            }
+            // Activity indicators keep animating: advance the shared angle and redraw.
+            if (_renderer.HasAnimations(_window?.Content as IView))
+            {
+                OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
+                _dirty = true;
+            }
+            if (_dirty)
+            {
+                _dirty = false;
+                Render();
+            }
+        }
+    }
 
     /// <summary>Measures/arranges the current window content for the given surface size.</summary>
     public void Arrange(int width, int height)
@@ -375,22 +621,29 @@ public sealed class OpenHarmonyMauiAppHost
             {
                 return;
             }
-            // MAUI measures/arranges through handlers; Page/ContentView have no platform handler
-            // in this slice, so arrange the first descendant that has one.
-            OpenHarmonyHandlerConnector.ConnectTree(content);
-            var bounds = new Rect(0, 0, width, height);
-            // The shell reports the surface size; mirror it onto the virtual window so Window.Width/
-            // Height (and SizeChanged) are real values, like the other platforms' window handlers.
-            _window.FrameChanged(bounds);
-            // The window's avoid area is applied per page/content view through SafeAreaEdges (see
-            // OpenHarmonySafeAreaArrange); the surface itself is arranged edge to edge.
-            Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
-            OpenHarmonySafeAreaArrange.Arrange(content, bounds, bounds, insets);
-            IView? root = FindArrangableRoot(content);
-            if (root is not null && !ReferenceEquals(root, content))
-            {
-                OpenHarmonySafeAreaArrange.Arrange(root, bounds, bounds, insets);
-            }
+            ArrangeContent(_window, content, new Rect(0, 0, width, height));
+        }
+    }
+
+    /// <summary>
+    /// The shared arrange tail for one window: connect the content's handlers, mirror the
+    /// surface size onto the virtual window (Window.Width/Height and SizeChanged become real
+    /// values, like the other platforms' window handlers) and run the safe-area walk. The
+    /// window's avoid area is applied per page/content view through SafeAreaEdges (see
+    /// OpenHarmonySafeAreaArrange); the surface itself is arranged edge to edge.
+    /// </summary>
+    internal static void ArrangeContent(IWindow window, IView content, Rect bounds)
+    {
+        // MAUI measures/arranges through handlers; Page/ContentView have no platform handler
+        // in this slice, so arrange the first descendant that has one.
+        OpenHarmonyHandlerConnector.ConnectTree(content);
+        window.FrameChanged(bounds);
+        Thickness insets = OpenHarmonySafeArea.GetWindowInsets();
+        OpenHarmonySafeAreaArrange.Arrange(content, bounds, bounds, insets);
+        IView? root = FindArrangableRoot(content);
+        if (root is not null && !ReferenceEquals(root, content))
+        {
+            OpenHarmonySafeAreaArrange.Arrange(root, bounds, bounds, insets);
         }
     }
 

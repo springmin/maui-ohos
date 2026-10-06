@@ -1,35 +1,27 @@
 // Application handler for OpenHarmony: gives IApplication a platform handler so MAUI's
 // application-level APIs (Quit, OpenWindow, CloseWindow, ActivateWindow) run through the slice.
 // OpenHarmonyMauiAppHost.Run attaches it before creating the first window, so Application.Handler
-// is non-null and Application.Windows reflects the window the host actually shows.
+// is non-null and Application.Windows reflects the windows the host actually shows.
 //
-// Single window: the ArkTS shell owns the process and exactly one XComponent surface, and the
-// platform bridge has no window-creation export, so this host keeps one MAUI window live at a
-// time. The commands are mapped honestly instead of failing silently:
+// Window model (M2, MULTIWINDOW-L): the app host is windowed. The shell owns the process; its
+// primary XComponent backs the primary MAUI window ("main"). A second MAUI window can be
+// adopted when the shell has reported a secondary surface (the host's window-id routing), and
+// then owns its own surface/renderer pair. The commands map honestly in every case:
 //   * Quit ("Terminate"): the ability lifecycle belongs to the shell, which has no terminate
 //     export; the request is reported once and the app keeps running.
-//   * OpenWindow with a live window: the request cannot be satisfied on the single surface, so
-//     it is declined once (LastOpenWindowResult=CurrentWindowKept) and the current window stays.
-//     The requested MAUI window stays pending in the application and is not added to Windows.
-//   * OpenWindow with no live window (after CloseWindow): the requested window is realized with
-//     IApplication.CreateWindow(request.State) and adopted by the host on the same surface
-//     (LastOpenWindowResult=OpenedWindow), so an app can open a window again.
+//   * OpenWindow: the requested window is realized with IApplication.CreateWindow(request.State).
+//     With no live window it is adopted as the primary window; with a live window it is adopted
+//     on a secondary surface when the host has one, otherwise it is declined once
+//     (LastOpenWindowResult=CurrentWindowKept) and the current window stays. A declined window
+//     stays pending in the application and is not added to Windows.
 //   * CloseWindow: raises IWindow.Destroying (removes the window from Application.Windows,
 //     raises Destroying and disconnects its handler) and tells the host to drop it. The shell's
 //     window stays open - there is no ohos_host_close_window export.
 //   * ActivateWindow: the live window is already in front (no-op); a request for a window that
 //     is not live is declined once; a live window that was never activated is activated.
 //
-// A real multi-window implementation would need:
-//   1. a platform window bridge: an ohos_host_open_window(request_id) export the shell maps to
-//      window.createWindow/openAbility + a second XComponent surface (and a matching
-//      ohos_host_close_window(request_id)), or an ArkUI window-manager sink;
-//   2. per-window host state: OpenHarmonyMauiAppHost holds one _window, one
-//      OpenHarmonyWindowSurface and one OpenHarmonyWindowRenderer today, so surfaces, renderers
-//      and input routing would have to be keyed by window id, with OpenWindowRequest.State
-//      carrying the id the shell reports back;
-//   3. per-window lifecycle: Created/Activated/Resumed/Stopped/Destroying would have to carry the
-//      platform window id so each MAUI window tracks its own platform window.
+// Still per-process and partitioned in M4: the accessibility shadow tree and its action
+// handler, the overlay host, IME, safe-area insets and the font scale.
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
 
@@ -53,8 +45,8 @@ public enum OpenHarmonyOpenWindowResult
 
 /// <summary>
 /// The OpenHarmony platform application object: the managed handle the application handler maps
-/// onto. The ArkTS shell owns the process and its single main window, so the object only carries
-/// the app host; a real multi-window implementation would grow one platform window per entry.
+/// onto. The ArkTS shell owns the process and its windows; this object carries the app host that
+/// owns every adopted MAUI window (one per-window state owner per window, M2).
 /// </summary>
 public sealed class OpenHarmonyPlatformApplication
 {
@@ -124,8 +116,9 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
     }
 
     /// <summary>
-    /// Opens a window on the single surface: declined once while a window is live, otherwise the
-    /// requested window is realized through the application and adopted by the host.
+    /// Opens a window: with no live window the realized window becomes the primary one; with a
+    /// live one the realized window is adopted on a secondary surface when the host has one
+    /// (M2), otherwise declined once and the current window stays.
     /// </summary>
     public static void MapOpenWindow(OpenHarmonyApplicationHandler handler, IApplication application, object? args)
     {
@@ -146,10 +139,12 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
             return;
         }
 
-        if (host.Window is not null)
+        // A second window needs a second surface. The host can serve the request when no window
+        // is live yet (the requested window takes the primary surface) or when the shell has
+        // already reported a secondary surface (the host's window-id routing); otherwise the
+        // historical honest degrade keeps the current window and says so once.
+        if (!host.CanOpenWindow)
         {
-            // The ArkTS shell has one XComponent surface, so a second window cannot be shown.
-            // Keep the current one and say so: the request is never silently dropped.
             handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.CurrentWindowKept;
             WriteOnce(ref s_openWindowKeptLogged,
                 "[maui] OpenWindow not supported on the single-window OpenHarmony host; the current window stays");
@@ -164,7 +159,8 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
             return;
         }
 
-        if (!host.TryAdoptWindow(window))
+        string? windowId = host.TryOpenWindow(window);
+        if (windowId is null)
         {
             handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.NotSupported;
             WriteOnce(ref s_openWindowUnsupportedLogged,
@@ -176,7 +172,9 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
         }
 
         handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.OpenedWindow;
-        WriteStatus("[maui] OpenWindow adopted the requested window on the single-window host");
+        WriteStatus(ReferenceEquals(host.Window, window)
+            ? "[maui] OpenWindow adopted the requested window on the single-window host"
+            : $"[maui] OpenWindow opened window '{windowId}' on the secondary surface");
     }
 
     /// <summary>

@@ -524,6 +524,14 @@ public sealed class OpenHarmonyMauiAppHost
         ArgumentNullException.ThrowIfNull(window);
         lock (_sync)
         {
+            // The shell carries one managed child (its create answers 801 for a second managed
+            // surface id), so a deferred request while one surface is already awaiting or bound
+            // can never be served; returning null lets the caller close the realized window
+            // honestly instead of parking it for a surface that will not come (SEC-SCAN-5b).
+            if (_awaitingWindows.Count > 0 || _secondaryWindows.Count > 0)
+            {
+                return null;
+            }
             string? windowId = null;
             for (int n = 1; n <= 1024; n++)
             {
@@ -640,6 +648,9 @@ public sealed class OpenHarmonyMauiAppHost
                 if (info.State == OpenHarmonySurfaceState.Destroyed)
                 {
                     OpenHarmonyBridge.WriteStatus($"[maui] window '{windowId}' surface destroyed before adoption");
+                    // The parked window never saw a live surface: close it instead of leaving it
+                    // in Application.Windows forever (the tail raises Destroying outside _sync).
+                    destroyedWindow = awaiting;
                     result = false;
                 }
                 else

@@ -141,9 +141,11 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
 
         // A second window needs a second surface. The host can serve the request when no window
         // is live yet (the requested window takes the primary surface) or when the shell has
-        // already reported a secondary surface (the host's window-id routing); otherwise the
-        // historical honest degrade keeps the current window and says so once.
-        if (!host.CanOpenWindow)
+        // already reported a secondary surface (the host's window-id routing); with a live
+        // primary and no surface yet (M3) the host asks the shell to bring a subwindow
+        // XComponent up and parks the window until its surface arrives. Only when neither path
+        // exists is the historical honest degrade used (keep the current window, say so once).
+        if (!host.CanOpenWindow && !host.CanRequestWindow)
         {
             handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.CurrentWindowKept;
             WriteOnce(ref s_openWindowKeptLogged,
@@ -160,6 +162,12 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
         }
 
         string? windowId = host.TryOpenWindow(window);
+        if (windowId is null && host.CanRequestWindow)
+        {
+            // M3: no surface is available yet, but the shell can create the subwindow on request;
+            // the window is parked and bound by RouteSurface when the XComponent reports in.
+            windowId = host.TryOpenWindowDeferred(window);
+        }
         if (windowId is null)
         {
             handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.NotSupported;
@@ -174,7 +182,9 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
         handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.OpenedWindow;
         WriteStatus(ReferenceEquals(host.Window, window)
             ? "[maui] OpenWindow adopted the requested window on the single-window host"
-            : $"[maui] OpenWindow opened window '{windowId}' on the secondary surface");
+            : host.FindSecondaryWindow(windowId) is not null
+                ? $"[maui] OpenWindow opened window '{windowId}' on the secondary surface"
+                : $"[maui] OpenWindow requested subwindow surface '{windowId}' from the shell");
     }
 
     /// <summary>

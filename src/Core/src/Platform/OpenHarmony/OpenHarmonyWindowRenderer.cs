@@ -302,7 +302,16 @@ public sealed class OpenHarmonyWindowRenderer
             DrawDiagnosticsOverlay(content);
         }
         RenderPhaseTick?.Invoke(5);
-        if (SurfacePresent is not null)
+        if (WindowSurface is { } secondarySurface &&
+            secondarySurface.WindowId != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            // MULTIWINDOW-L M3: a secondary window always presents through its own surface. The
+            // process-wide SurfacePresent hook (window overlay/tooltip, a primary-window feature
+            // until the M4 partition) must not capture another window's frame; the primary keeps
+            // the historical precedence below.
+            secondarySurface.Present();
+        }
+        else if (SurfacePresent is not null)
         {
             SurfacePresent();
         }

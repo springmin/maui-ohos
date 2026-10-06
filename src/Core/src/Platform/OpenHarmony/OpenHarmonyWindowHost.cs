@@ -247,6 +247,7 @@ internal sealed class OpenHarmonyWindowHost
             {
                 return;
             }
+            FrameTicks++;
             // Activity indicators keep animating: advance the shared angle and redraw.
             if (Renderer.HasAnimations(_window?.Content as IView))
             {
@@ -260,6 +261,9 @@ internal sealed class OpenHarmonyWindowHost
             }
         }
     }
+
+    /// <summary>Frame ticks this window's renderer consumed (M3 routing evidence).</summary>
+    internal int FrameTicks { get; private set; }
 
     /// <summary>Diagnostic description of this window's tree (the headless harness reads it).</summary>
     public string Describe()

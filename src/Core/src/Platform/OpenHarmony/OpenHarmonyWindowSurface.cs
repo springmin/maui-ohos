@@ -96,9 +96,28 @@ public sealed class OpenHarmonyWindowSurface
         return new MauiCanvas();
     }
 
-    /// <summary>Begins a frame on this window's surface (the renderer's draw target).</summary>
+    /// <summary>Begins a frame on this window's surface (the renderer's draw target). The
+    /// primary window keeps the shared legacy canvas; a secondary window targets its own
+    /// per-window canvas (MULTIWINDOW-L M3), keyed by the registry id whose surface also
+    /// receives the present.</summary>
     public bool Begin(int width, int height)
-        => BeginHook is not null ? BeginHook(width, height) : HostCanvas.Begin(width, height);
+    {
+        if (BeginHook is not null)
+        {
+            return BeginHook(width, height);
+        }
+        if (WindowId != PrimaryWindowId)
+        {
+            bool begun = OpenHarmonyCanvas.BeginWindow(WindowId, width, height);
+            if (!begun && !_beginFailedLogged)
+            {
+                _beginFailedLogged = true;
+                OpenHarmonyBridge.WriteStatus($"[maui] window '{WindowId}' canvas begin failed");
+            }
+            return begun;
+        }
+        return HostCanvas.Begin(width, height);
+    }
 
     /// <summary>Presents the frame drawn through <see cref="Begin"/>.</summary>
     public void Present()
@@ -107,9 +126,20 @@ public sealed class OpenHarmonyWindowSurface
         {
             PresentHook();
         }
+        else if (WindowId != PrimaryWindowId)
+        {
+            if (!OpenHarmonyCanvas.PresentWindow(WindowId) && !_presentFailedLogged)
+            {
+                _presentFailedLogged = true;
+                OpenHarmonyBridge.WriteStatus($"[maui] window '{WindowId}' canvas present failed");
+            }
+        }
         else
         {
             HostCanvas.Present();
         }
     }
+
+    private bool _beginFailedLogged;
+    private bool _presentFailedLogged;
 }

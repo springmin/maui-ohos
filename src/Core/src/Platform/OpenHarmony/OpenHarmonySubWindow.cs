@@ -53,13 +53,15 @@ public enum OpenHarmonySubWindowEventKind
 public sealed class OpenHarmonySubWindowEventArgs : EventArgs
 {
     internal OpenHarmonySubWindowEventArgs(
-        OpenHarmonySubWindowEventKind kind, int windowId, Rect bounds, int code, string? message)
+        OpenHarmonySubWindowEventKind kind, int windowId, Rect bounds, int code, string? message,
+        string? surfaceId = null)
     {
         Kind = kind;
         WindowId = windowId;
         Bounds = bounds;
         Code = code;
         Message = message;
+        SurfaceId = surfaceId ?? string.Empty;
     }
 
     /// <summary>The event kind.</summary>
@@ -76,6 +78,10 @@ public sealed class OpenHarmonySubWindowEventArgs : EventArgs
 
     /// <summary>A failure message for <see cref="OpenHarmonySubWindowEventKind.Failed"/>.</summary>
     public string? Message { get; }
+
+    /// <summary>The managed surface id (the shell XComponent id) when the event carries one
+    /// (MULTIWINDOW-L M3); empty for the shell-drawn M path.</summary>
+    public string SurfaceId { get; }
 }
 
 /// <summary>One touch reported from the subwindow's shell-drawn content.</summary>
@@ -146,6 +152,8 @@ public static partial class OpenHarmonySubWindow
     private static bool s_contentReady;
     private static int s_windowId;
     private static Rect s_bounds = Rect.Zero;
+    // M3: the managed surface id (the shell XComponent id) once the shell reports one.
+    private static string s_surfaceId = string.Empty;
 
     /// <summary>
     /// Test/embedding seam: when set, commands go through this delegate instead of the native
@@ -231,6 +239,13 @@ public static partial class OpenHarmonySubWindow
         get { lock (s_sync) { return s_bounds; } }
     }
 
+    /// <summary>The managed surface id of the live subwindow (empty for the shell-drawn M path
+    /// or before the shell reports one).</summary>
+    public static string SurfaceId
+    {
+        get { lock (s_sync) { return s_surfaceId; } }
+    }
+
     /// <summary>Registers the native event listener; a guarded no-op off-device.</summary>
     public static void Register()
     {
@@ -256,6 +271,16 @@ public static partial class OpenHarmonySubWindow
     /// <summary>Creates (or reports, when already open) the application subwindow.</summary>
     public static bool Create(string name, int x, int y, int width, int height, string? title = null)
         => Send(CreateCommand, BuildCreatePayload(name, x, y, width, height, title));
+
+    /// <summary>
+    /// MULTIWINDOW-L M3: creates the subwindow with a managed XComponent surface. The shell
+    /// page embeds an XComponent with <paramref name="windowId"/> as its component id, bound
+    /// to libopenharmonyhost, so the surface registers under that id and the host's window-id
+    /// bridge feeds the managed second window. The shell falls back to its drawn content when
+    /// the surface cannot be registered.
+    /// </summary>
+    public static bool CreateManagedSurface(string windowId, string name, int x, int y, int width, int height, string? title = null)
+        => Send(CreateCommand, BuildCreatePayload(name, x, y, width, height, title, windowId));
 
     /// <summary>Moves the subwindow to (x, y) in window pixels.</summary>
     public static bool Move(int x, int y) => Send(MoveCommand, BuildRectPayload("x", x, "y", y));
@@ -300,7 +325,7 @@ public static partial class OpenHarmonySubWindow
     }
 
     // One small JSON writer (Utf8JsonWriter is reflection-free, so this stays NativeAOT-safe).
-    private static string BuildCreatePayload(string name, int x, int y, int width, int height, string? title)
+    private static string BuildCreatePayload(string name, int x, int y, int width, int height, string? title, string? surfaceId = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -314,6 +339,11 @@ public static partial class OpenHarmonySubWindow
             if (!string.IsNullOrEmpty(title))
             {
                 writer.WriteString("title", title);
+            }
+            if (!string.IsNullOrEmpty(surfaceId))
+            {
+                writer.WriteString("surfaceId", surfaceId);
+                writer.WriteBoolean("managed", true);
             }
             writer.WriteEndObject();
         }
@@ -345,6 +375,7 @@ public static partial class OpenHarmonySubWindow
         Rect bounds;
         int code = 0;
         string? message = null;
+        string surfaceId = string.Empty;
         OpenHarmonySubWindowTouchEventArgs? touch = null;
         bool raiseChanged = true;
         try
@@ -366,6 +397,11 @@ public static partial class OpenHarmonySubWindow
                         s_visible = true;
                         s_windowId = windowId;
                         s_bounds = bounds;
+                        surfaceId = ReadString(root, "surfaceId");
+                        if (surfaceId.Length > 0)
+                        {
+                            s_surfaceId = surfaceId;
+                        }
                         break;
                     case OpenHarmonySubWindowEventKind.Shown:
                         s_visible = true;
@@ -382,6 +418,7 @@ public static partial class OpenHarmonySubWindow
                         s_visible = false;
                         s_contentReady = false;
                         s_windowId = 0;
+                        s_surfaceId = string.Empty;
                         s_bounds = Rect.Zero;
                         bounds = Rect.Zero;
                         windowId = 0;
@@ -389,6 +426,11 @@ public static partial class OpenHarmonySubWindow
                     case OpenHarmonySubWindowEventKind.PageReady:
                         s_windowId = windowId;
                         s_contentReady = true;
+                        surfaceId = ReadString(root, "surfaceId");
+                        if (surfaceId.Length > 0)
+                        {
+                            s_surfaceId = surfaceId;
+                        }
                         bounds = s_bounds;
                         break;
                     case OpenHarmonySubWindowEventKind.Suspended:
@@ -430,6 +472,7 @@ public static partial class OpenHarmonySubWindow
             {
                 windowId = s_windowId;
                 bounds = s_bounds;
+                surfaceId = s_surfaceId;
             }
             kind = OpenHarmonySubWindowEventKind.Failed;
             code = -1;
@@ -442,13 +485,17 @@ public static partial class OpenHarmonySubWindow
         }
         if (raiseChanged)
         {
-            Changed?.Invoke(null, new OpenHarmonySubWindowEventArgs(kind, windowId, bounds, code, message));
+            Changed?.Invoke(null, new OpenHarmonySubWindowEventArgs(kind, windowId, bounds, code, message, surfaceId));
         }
     }
 
     private static int ReadInt(JsonElement root, string name, int fallback)
         => root.TryGetProperty(name, out JsonElement element) && element.ValueKind == JsonValueKind.Number
             && element.TryGetInt32(out int value) ? value : fallback;
+
+    private static string ReadString(JsonElement root, string name)
+        => root.TryGetProperty(name, out JsonElement element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString() ?? string.Empty : string.Empty;
 
     private static double ReadDouble(JsonElement root, string name, double fallback)
         => root.TryGetProperty(name, out JsonElement element) && element.ValueKind == JsonValueKind.Number

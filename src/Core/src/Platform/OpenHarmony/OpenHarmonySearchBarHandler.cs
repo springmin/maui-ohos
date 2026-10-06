@@ -38,8 +38,8 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        OpenHarmonyBridge.TextInput += OnTextInput;
-        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
+        OpenHarmonyBridge.TextInput += OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnGlobalTextSubmitted;
         if (VirtualView is IView ownerView)
         {
             _windowTextPort = new OpenHarmonyWindowTextPort(
@@ -53,14 +53,34 @@ public sealed class OpenHarmonySearchBarHandler : OpenHarmonyViewHandler<ISearch
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
-        OpenHarmonyBridge.TextInput -= OnTextInput;
-        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
+        OpenHarmonyBridge.TextInput -= OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnGlobalTextSubmitted;
         if (_windowTextPort is not null)
         {
             OpenHarmonyWindowInputRouter.UnregisterText(_windowTextPort);
             _windowTextPort = null;
         }
         base.DisconnectHandler(platformView);
+    }
+
+    // SEC-SCAN-5c: the global bridge belongs to the primary window; the tagged port above is a
+    // secondary window's only text source (see OpenHarmonyEntryHandler).
+    private bool IsPrimaryWindow => OpenHarmonyWindowInputRouter.IsPrimaryWindow(VirtualView as IView);
+
+    private void OnGlobalTextSubmitted()
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextSubmitted();
+        }
+    }
+
+    private void OnGlobalTextInput(string text)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextInput(text);
+        }
     }
 
     // The search bar has no composition state of its own (the shared keyboard bridge handles

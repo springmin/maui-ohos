@@ -133,16 +133,16 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
     }
 
     // MULTIWINDOW-L M4: the per-window port this entry registers while connected. The global
-    // subscriptions below stay (the primary window's single-input path is unchanged); the port
-    // carries the child window's own text from the shell's tagged subwindow channel.
+    // subscriptions below stay for the primary window's path (window-gated since SEC-SCAN-5c); the
+    // port carries the child window's own text from the shell's tagged subwindow channel.
     private OpenHarmonyWindowTextPort? _windowTextPort;
 
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        OpenHarmonyBridge.TextInput += OnTextInput;
-        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition += OnTextComposition;
+        OpenHarmonyBridge.TextInput += OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition += OnGlobalTextComposition;
         if (VirtualView is IView ownerView)
         {
             _windowTextPort = new OpenHarmonyWindowTextPort(
@@ -153,15 +153,45 @@ public sealed class OpenHarmonyEntryHandler : OpenHarmonyViewHandler<IEntry>
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
-        OpenHarmonyBridge.TextInput -= OnTextInput;
-        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition -= OnTextComposition;
+        OpenHarmonyBridge.TextInput -= OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition -= OnGlobalTextComposition;
         if (_windowTextPort is not null)
         {
             OpenHarmonyWindowInputRouter.UnregisterText(_windowTextPort);
             _windowTextPort = null;
         }
         base.DisconnectHandler(platformView);
+    }
+
+    // SEC-SCAN-5c: the global bridge is the primary window's path; a secondary window's focused
+    // view keeps its platform IsFocused across a window switch, so the raw subscription would let
+    // the primary window's keystrokes reach this window too. The tagged port above is the
+    // secondary window's only text source (the callbacks below stay shared with the port).
+    private bool IsPrimaryWindow => OpenHarmonyWindowInputRouter.IsPrimaryWindow(VirtualView as IView);
+
+    private void OnGlobalTextSubmitted()
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextSubmitted();
+        }
+    }
+
+    private void OnGlobalTextInput(string text)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextInput(text);
+        }
+    }
+
+    private void OnGlobalTextComposition(string value, int offset)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextComposition(value, offset);
+        }
     }
 
     private void OnTextSubmitted()

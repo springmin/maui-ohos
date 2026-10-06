@@ -42,9 +42,9 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        OpenHarmonyBridge.TextInput += OnTextInput;
-        OpenHarmonyBridge.TextSubmitted += OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition += OnTextComposition;
+        OpenHarmonyBridge.TextInput += OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted += OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition += OnGlobalTextComposition;
         if (VirtualView is IView ownerView)
         {
             _windowTextPort = new OpenHarmonyWindowTextPort(
@@ -55,15 +55,43 @@ public sealed class OpenHarmonyEditorHandler : OpenHarmonyViewHandler<IEditor>
 
     protected override void DisconnectHandler(OpenHarmonyView platformView)
     {
-        OpenHarmonyBridge.TextInput -= OnTextInput;
-        OpenHarmonyBridge.TextSubmitted -= OnTextSubmitted;
-        OpenHarmonyBridge.TextComposition -= OnTextComposition;
+        OpenHarmonyBridge.TextInput -= OnGlobalTextInput;
+        OpenHarmonyBridge.TextSubmitted -= OnGlobalTextSubmitted;
+        OpenHarmonyBridge.TextComposition -= OnGlobalTextComposition;
         if (_windowTextPort is not null)
         {
             OpenHarmonyWindowInputRouter.UnregisterText(_windowTextPort);
             _windowTextPort = null;
         }
         base.DisconnectHandler(platformView);
+    }
+
+    // SEC-SCAN-5c: the global bridge belongs to the primary window; the tagged port above is a
+    // secondary window's only text source (see OpenHarmonyEntryHandler).
+    private bool IsPrimaryWindow => OpenHarmonyWindowInputRouter.IsPrimaryWindow(VirtualView as IView);
+
+    private void OnGlobalTextSubmitted()
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextSubmitted();
+        }
+    }
+
+    private void OnGlobalTextInput(string text)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextInput(text);
+        }
+    }
+
+    private void OnGlobalTextComposition(string value, int offset)
+    {
+        if (IsPrimaryWindow)
+        {
+            OnTextComposition(value, offset);
+        }
     }
 
     public override void Invoke(string command, object? args)

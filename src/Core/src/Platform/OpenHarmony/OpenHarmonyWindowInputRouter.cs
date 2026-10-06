@@ -117,6 +117,15 @@ internal static class OpenHarmonyWindowInputRouter
         }
     }
 
+    /// <summary>
+    /// True when the view belongs to the primary window. The process-global text/focus bridges
+    /// are the primary window's path; a secondary window's input travels only on the tagged
+    /// channel (SEC-SCAN-5c: a secondary input that stays platform-focused across a window
+    /// switch must not consume the primary window's global text).
+    /// </summary>
+    internal static bool IsPrimaryWindow(IView? view)
+        => OpenHarmonyMauiAppHost.ResolveWindowId(view) == OpenHarmonyWindowSurface.PrimaryWindowId;
+
     /// <summary>Number of text ports whose view currently resolves to a window (off-device
     /// assertions; the resolution runs at call time, not at registration).</summary>
     internal static int PortCount(string windowId)

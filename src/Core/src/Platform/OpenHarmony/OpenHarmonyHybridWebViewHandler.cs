@@ -109,6 +109,15 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     /// </summary>
     private int _overlaySlot = -1;
 
+    /// <summary>
+    /// MULTIWINDOW-L2: the managed window this hybrid belongs to. The primary id keeps the
+    /// historical single-host path; a secondary id routes the claim, registration and page
+    /// events through the subwindow's own ArkWeb pool, where the asset bridge does not run in
+    /// this wave (the child page refuses the registration and the control stays unmounted -
+    /// documented degradation, no primary-window corruption).
+    /// </summary>
+    private string _overlayWindowId = OpenHarmonyWindowSurface.PrimaryWindowId;
+
     /// <summary>True while this handler lost its slot to an LRU preemption (registration replay).</summary>
     private bool _overlayPreempted;
 
@@ -245,7 +254,10 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     protected override void ConnectHandler(OpenHarmonyView platformView)
     {
         base.ConnectHandler(platformView);
-        _overlaySlot = OpenHarmonyOverlays.Acquire(this);
+        // MULTIWINDOW-L2: the window decides the host; the child pool is a separate number
+        // space, so a child hybrid never occupies a primary overlay slot.
+        _overlayWindowId = OpenHarmonyMauiAppHost.ResolveWindowId(VirtualView as IView);
+        _overlaySlot = OpenHarmonyChildWeb.AcquireForWindow(_overlayWindowId, this);
         lock (s_handlers)
         {
             s_handlers.Add(this);
@@ -275,7 +287,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         {
             s_activeInvokeHandler = null;
         }
-        OpenHarmonyOverlays.Release(_overlaySlot, this);
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, _overlaySlot, this);
         _overlaySlot = -1;
         _overlayEngaged = false;
         _overlayDetached = false;
@@ -290,12 +302,18 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     /// </summary>
     private bool EnsureOverlaySlot()
     {
-        if (_overlaySlot >= 0)
+        if (_overlayWindowClosed)
         {
-            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            // MULTIWINDOW-L2: the managed window ended; a still-connected handler must not
+            // re-claim an overlay for a window that no longer exists.
             return false;
         }
-        int slot = OpenHarmonyOverlays.Acquire(this);
+        if (_overlaySlot >= 0)
+        {
+            OpenHarmonyChildWeb.TouchForWindow(_overlayWindowId, _overlaySlot, this);
+            return false;
+        }
+        int slot = OpenHarmonyChildWeb.AcquireForWindow(_overlayWindowId, this);
         if (slot < 0)
         {
             return false;
@@ -310,6 +328,32 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             return true;
         }
         return false;
+    }
+
+    private bool _overlayWindowClosed;
+
+    /// <summary>
+    /// MULTIWINDOW-L2: the window ended while this handler is still connected; release the
+    /// child-pool claim so no ArkWeb survives its window (the asset bridge is
+    /// primary-window-only in this wave, so a child claim is unmounted anyway). Called by
+    /// OpenHarmonyWebViewHandler.ReleaseWindowOverlays.
+    /// </summary>
+    internal static void ReleaseWindowOverlays(string windowId)
+    {
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers.ToArray())
+            {
+                if (string.Equals(handler._overlayWindowId, windowId, StringComparison.Ordinal) &&
+                    handler._overlaySlot >= 0)
+                {
+                    OpenHarmonyChildWeb.ReleaseForWindow(windowId, handler._overlaySlot, handler);
+                    handler._overlaySlot = -1;
+                    handler._overlayEngaged = false;
+                    handler._overlayWindowClosed = true;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -361,9 +405,10 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         _overlayEngaged = false;
         // Hide before the release: a hot slot keeps its ArkWeb component, and the tagged hide is
         // sent while the slot still exists (after a dynamic destroy it would be deferred and
-        // replayed onto the next incarnation of the slot).
-        OpenHarmonyBridge.WebCommand("hide", OpenHarmonyOverlays.Tag(slot));
-        OpenHarmonyOverlays.Release(slot, this);
+        // replayed onto the next incarnation of the slot). MULTIWINDOW-L2: both commands follow
+        // the handler's window.
+        OpenHarmonyChildWeb.CommandForWindow(_overlayWindowId, "hide", OpenHarmonyOverlays.Tag(slot));
+        OpenHarmonyChildWeb.ReleaseForWindow(_overlayWindowId, slot, this);
         OpenHarmonyBridge.WriteStatus($"[maui] hybrid overlay detached: slot {slot}");
     }
 
@@ -376,7 +421,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         if (_overlaySlot >= 0)
         {
             _overlayDetached = false;
-            OpenHarmonyOverlays.Touch(_overlaySlot, this);
+            OpenHarmonyChildWeb.TouchForWindow(_overlayWindowId, _overlaySlot, this);
             return;
         }
         if (!_overlayDetached && !_overlayPreempted)
@@ -424,7 +469,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         if (_overlaySlot >= 0)
         {
             _overlayEngaged = true;
-            OpenHarmonyWebViewHandler.SendPlatformFrame(frame, _overlaySlot);
+            OpenHarmonyWebViewHandler.SendPlatformFrame(_overlayWindowId, frame, _overlaySlot);
         }
         // First render: if ConnectHandler ran before the app context was published, this is
         // the point where the shell (and the extracted payload) is definitely available.
@@ -510,7 +555,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         }
         _overlayEngaged = true;
         EnsureHybridWebViewScript(payloadDir);
-        OpenHarmonyBridge.WebCommand("hybrid", JsonSerializer.Serialize(new HybridAssetsConfig
+        OpenHarmonyChildWeb.CommandForWindow(_overlayWindowId, "hybrid", JsonSerializer.Serialize(new HybridAssetsConfig
         {
             Base = payloadDir,
             Root = root,
@@ -880,7 +925,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         switch (command)
         {
             case nameof(IHybridWebView.EvaluateJavaScriptAsync) when args is EvaluateJavaScriptAsyncRequest request:
-                _ = CompleteEvaluateAsync(request, UseOverlaySlot());
+                _ = CompleteEvaluateAsync(request, UseOverlaySlot(), _overlayWindowId);
                 return;
             case nameof(IHybridWebView.SendRawMessage) when args is HybridWebViewRawMessage message:
                 if (message.Message is { } rawMessage)
@@ -916,7 +961,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
 
     /// <summary>Evaluates a script on the shell's ArkWeb page; null when no page or host answers.</summary>
     public Task<string?> EvaluateJavaScriptAsync(string script)
-        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, UseOverlaySlot());
+        => OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(script, UseOverlaySlot(), _overlayWindowId);
 
     /// <summary>
     /// Delivers a raw message to the hybrid page. The stock HybridWebView JavaScript receives
@@ -950,7 +995,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             "else{window.dispatchEvent(new CustomEvent('HybridWebViewMessageReceived',{detail:{message:m}}));}" +
             "return 'ok';})(" +
             JsonSerializer.Serialize(_pageId, OpenHarmonySliceJsonContext.Default.String) + "," + json + ")",
-            UseOverlaySlot()).ConfigureAwait(false);
+            UseOverlaySlot(), _overlayWindowId).ConfigureAwait(false);
         if (result is not null && result.Trim().Trim('"') == "skip")
         {
             OpenHarmonyBridge.WriteStatus(
@@ -1108,9 +1153,9 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             $"[maui] hybrid page payload rejected: {payload.Length} characters exceed the {MaxPagePayloadLength} character cap");
     }
 
-    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request, int slot)
+    private static async Task CompleteEvaluateAsync(EvaluateJavaScriptAsyncRequest request, int slot, string? windowId)
     {
-        string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(request.Script, slot).ConfigureAwait(false);
+        string? result = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(request.Script, slot, windowId).ConfigureAwait(false);
         // An empty string stands in for "the platform had no result" (HybridWebView returns null
         // for null, "null" and "undefined" results alike).
         request.TrySetResult(result ?? string.Empty);
@@ -1148,7 +1193,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         _ = await OpenHarmonyWebViewHandler.EvaluateJavaScriptAsyncCore(
             $"window.HybridWebView.__InvokeJavaScript({JsonSerializer.Serialize(taskId, OpenHarmonySliceJsonContext.Default.String)}, " +
             $"{JsonSerializer.Serialize(request.MethodName, OpenHarmonySliceJsonContext.Default.String)}, [{argList}])",
-            UseOverlaySlot()).ConfigureAwait(false);
+            UseOverlaySlot(), _overlayWindowId).ConfigureAwait(false);
         if (!OpenHarmonyWebViewHandler.IsJavaScriptBridgeAvailable)
         {
             // No host library: the page never received the kickoff, so do not wait for a reply.

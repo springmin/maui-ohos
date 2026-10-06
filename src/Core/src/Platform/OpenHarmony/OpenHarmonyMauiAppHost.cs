@@ -957,24 +957,25 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>
-    /// The host window id a view belongs to: the window of the element's tree. The window
-    /// handler's stamp is the fast path; the host's own table covers a window whose handler is
-    /// not connected (or not an OpenHarmonyWindowHandler) yet. Unknown/off-window views resolve
-    /// to the primary id (the historical single-window path), which keeps every existing caller
-    /// behaviorally unchanged.
+    /// The host window id a view belongs to: the window of the element's tree. The host's own
+    /// id table is the authoritative source: it is stamped before the window's element tree
+    /// connects (see TryOpenWindow/Adopt), so handlers that resolve while they are being
+    /// connected still see the secondary id; the window handler's stamp is the fallback for a
+    /// window the table does not know. Unknown/off-window views resolve to the primary id (the
+    /// historical single-window path), which keeps every existing caller behaviorally unchanged.
     /// </summary>
     internal static string ResolveWindowId(IView? view)
     {
         if (view is Microsoft.Maui.Controls.VisualElement element &&
             element.Window is IWindow window)
         {
-            if (window.Handler is OpenHarmonyWindowHandler handler)
-            {
-                return handler.WindowId;
-            }
             if (s_windowIdTable.TryGetValue(window, out WindowIdBox? box))
             {
                 return box.Id;
+            }
+            if (window.Handler is OpenHarmonyWindowHandler handler)
+            {
+                return handler.WindowId;
             }
         }
         return OpenHarmonyWindowSurface.PrimaryWindowId;

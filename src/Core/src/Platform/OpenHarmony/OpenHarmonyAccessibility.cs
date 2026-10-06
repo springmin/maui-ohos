@@ -226,6 +226,29 @@ public static partial class OpenHarmonyAccessibility
         }
     }
 
+    /// <summary>
+    /// Drops a closed window's shadow frame and its first-publish marker (SEC-SCAN-6 C): a window
+    /// that later reuses the id must publish its first frame again (the stale marker would let an
+    /// events==0 reopen skip it) and must not pin a dead tree. The primary window is untouched
+    /// (its frame keeps the historical lifecycle).
+    /// </summary>
+    internal static void ReleaseWindow(string windowId)
+    {
+        if (string.IsNullOrEmpty(windowId) ||
+            string.Equals(windowId, OpenHarmonyWindowSurface.PrimaryWindowId, StringComparison.Ordinal))
+        {
+            return;
+        }
+        lock (s_framesLock)
+        {
+            s_windowFrames.Remove(windowId);
+        }
+        lock (s_windowProviderLock)
+        {
+            s_providerPublishedWindows.Remove(windowId);
+        }
+    }
+
     private const string HostLibrary = "libopenharmonyhost.so";
     private static bool _available = true;
     private static bool _secondaryProviderLogged;

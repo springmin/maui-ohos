@@ -176,6 +176,11 @@ internal sealed class OpenHarmonyWindowHost
         // tree), so the window-scoped web claims are released here: no child ArkWeb survives
         // the window that hosted it.
         OpenHarmonyWebViewHandler.ReleaseWindowOverlays(WindowId);
+        // SEC-SCAN-6 C: the closed window's managed residual state goes with it - the child web
+        // pool (capacity/pending) and the a11y shadow frame + first-publish marker - so a window
+        // reusing the id starts from not-ready and re-publishes instead of inheriting them.
+        OpenHarmonyChildWeb.ReleaseWindow(WindowId);
+        OpenHarmonyAccessibility.ReleaseWindow(WindowId);
         lock (_sync)
         {
             _window = null;

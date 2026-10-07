@@ -754,17 +754,19 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         try
         {
             OpenHarmonyHybridWebViewHandler? handler;
-            if (OpenHarmonyOverlays.TryDecodeChildInvokeRequestId(requestId, out int childSlot, out _))
+            if (OpenHarmonyOverlays.TryDecodeChildInvokeRequestId(requestId, out int childWindow, out int childSlot, out _))
             {
                 // MULTIWINDOW-L3: the subwindow page tagged its request id with the child flag, so
                 // the invocation goes to the child-window hybrid that owns the slot (the child
-                // pool is a separate number space from the primary overlays).
-                handler = ChildHandlerForSlot(childSlot);
-                OpenHarmonyBridge.WriteStatus($"[maui] hybrid invoke (child slot {childSlot}): {methodName}");
+                // pool is a separate number space from the primary overlays). M4: the id also
+                // carries the window index, so two subwindows that both own slot 0 dispatch to
+                // their own handler instead of failing closed.
+                handler = ChildHandlerForWindow(childWindow, childSlot);
+                OpenHarmonyBridge.WriteStatus($"[maui] hybrid invoke (child window {childWindow} slot {childSlot}): {methodName}");
                 if (handler is null)
                 {
                     SendInvokeResult(requestId, ErrorPayload(new InvalidOperationException(
-                        $"no child HybridWebView owns slot {childSlot} in the subwindow pool")));
+                        $"no child HybridWebView owns window {childWindow} slot {childSlot} in the subwindow pool")));
                     return;
                 }
             }
@@ -811,19 +813,21 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     }
 
     /// <summary>
-    /// The connected child-window hybrid that owns <paramref name="slot"/> in the subwindow pool,
-    /// or null when none claims it. The child wire carries no window id, so when two child
-    /// windows both claim the same slot the dispatch fails closed (the error payload reaches the
-    /// page); the product-level one-application-child-window contract never hits that case.
+    /// The connected child-window hybrid that owns <paramref name="slot"/> in the subwindow pool
+    /// of the window at <paramref name="windowIndex"/>, or null when none claims it. The M4 child
+    /// wire carries both the window index and the slot, so two concurrent subwindows that both
+    /// own slot 0 each dispatch to their own handler.
     /// </summary>
-    private static OpenHarmonyHybridWebViewHandler? ChildHandlerForSlot(int slot)
+    private static OpenHarmonyHybridWebViewHandler? ChildHandlerForWindow(int windowIndex, int slot)
     {
         OpenHarmonyHybridWebViewHandler? found = null;
         lock (s_handlers)
         {
             foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers)
             {
-                if (OpenHarmonyChildWeb.IsApplicable(handler._overlayWindowId) && handler._overlaySlot == slot)
+                if (OpenHarmonyChildWeb.IsApplicable(handler._overlayWindowId)
+                    && OpenHarmonyChildWeb.WindowIndexOf(handler._overlayWindowId) == windowIndex
+                    && handler._overlaySlot == slot)
                 {
                     if (found is not null)
                     {

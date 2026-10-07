@@ -754,7 +754,21 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         try
         {
             OpenHarmonyHybridWebViewHandler? handler;
-            if (OpenHarmonyOverlays.TryDecodeInvokeRequestId(requestId, out int invokeSlot, out _))
+            if (OpenHarmonyOverlays.TryDecodeChildInvokeRequestId(requestId, out int childSlot, out _))
+            {
+                // MULTIWINDOW-L3: the subwindow page tagged its request id with the child flag, so
+                // the invocation goes to the child-window hybrid that owns the slot (the child
+                // pool is a separate number space from the primary overlays).
+                handler = ChildHandlerForSlot(childSlot);
+                OpenHarmonyBridge.WriteStatus($"[maui] hybrid invoke (child slot {childSlot}): {methodName}");
+                if (handler is null)
+                {
+                    SendInvokeResult(requestId, ErrorPayload(new InvalidOperationException(
+                        $"no child HybridWebView owns slot {childSlot} in the subwindow pool")));
+                    return;
+                }
+            }
+            else if (OpenHarmonyOverlays.TryDecodeInvokeRequestId(requestId, out int invokeSlot, out _))
             {
                 handler = HandlerForSlot(invokeSlot);
                 OpenHarmonyBridge.WriteStatus($"[maui] hybrid invoke (slot {invokeSlot}): {methodName}");
@@ -794,6 +808,32 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// The connected child-window hybrid that owns <paramref name="slot"/> in the subwindow pool,
+    /// or null when none claims it. The child wire carries no window id, so when two child
+    /// windows both claim the same slot the dispatch fails closed (the error payload reaches the
+    /// page); the product-level one-application-child-window contract never hits that case.
+    /// </summary>
+    private static OpenHarmonyHybridWebViewHandler? ChildHandlerForSlot(int slot)
+    {
+        OpenHarmonyHybridWebViewHandler? found = null;
+        lock (s_handlers)
+        {
+            foreach (OpenHarmonyHybridWebViewHandler handler in s_handlers)
+            {
+                if (OpenHarmonyChildWeb.IsApplicable(handler._overlayWindowId) && handler._overlaySlot == slot)
+                {
+                    if (found is not null)
+                    {
+                        return null;
+                    }
+                    found = handler;
+                }
+            }
+        }
+        return found;
     }
 
     /// <summary>

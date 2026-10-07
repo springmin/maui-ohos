@@ -247,6 +247,68 @@ public static partial class OpenHarmonyAccessibility
         {
             s_providerPublishedWindows.Remove(windowId);
         }
+        // MULTIWINDOW-L3 / SEC-SCAN-6 C: the host half of the close hook. The native table
+        // partition and the per-instance attach record go with the window, so the id's table
+        // slot returns to the capped pool and a later window reusing the id starts from
+        // not-attached; a host library without the export keeps the managed-only release.
+        ReleaseProviderState(windowId);
+    }
+
+    /// <summary>True when the host library exports the close-hook release entry (cached).</summary>
+    private static bool ReleaseExportAvailable
+    {
+        get
+        {
+            int known = Volatile.Read(ref s_releaseExport);
+            if (known != 0)
+            {
+                return known > 0;
+            }
+            bool available;
+            try
+            {
+                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
+                    NativeLibrary.TryGetExport(handle, "ohos_host_accessibility_release_for", out _);
+            }
+            catch (Exception)
+            {
+                available = false;
+            }
+            Volatile.Write(ref s_releaseExport, available ? 1 : -1);
+            return available;
+        }
+    }
+
+    /// <summary>
+    /// Drops the closed window's native accessibility provider state: the window's node-table
+    /// partition and its per-instance attach record in the host. Best effort (the close hook must
+    /// never throw) and a no-op when the host library predates the export.
+    /// </summary>
+    private static void ReleaseProviderState(string windowId)
+    {
+        if (!ReleaseExportAvailable)
+        {
+            return;
+        }
+        try
+        {
+            int released = AccessibilityRelease(windowId);
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(released != 0
+                ? $"[maui] accessibility: released the native provider state of '{windowId}'"
+                : $"[maui] accessibility: no native provider state for '{windowId}'");
+        }
+        catch (DllNotFoundException)
+        {
+            Volatile.Write(ref s_releaseExport, -1);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Volatile.Write(ref s_releaseExport, -1);
+        }
+        catch (Exception)
+        {
+            // The window has already closed; a failure here must not cascade into the close path.
+        }
     }
 
     private const string HostLibrary = "libopenharmonyhost.so";
@@ -257,6 +319,9 @@ public static partial class OpenHarmonyAccessibility
     // 0 unknown, 1 the per-window publish exports are present, -1 the host predates them
     // (cached like the announce-export probe; an old host keeps the local-frame degrade).
     private static int s_windowProviderExport;
+    // 0 unknown, 1 the close-hook release export is present, -1 the host predates it (cached
+    // like the other optional-export probes; an old host keeps the managed-only release).
+    private static int s_releaseExport;
     // Windows whose frame was already handed to an attached per-instance provider: the first
     // publish of a window bypasses the unchanged-frame skip (its frame may predate the attach),
     // after that only changed frames go out, matching the primary publish discipline.
@@ -321,6 +386,14 @@ public static partial class OpenHarmonyAccessibility
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status_for", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int ProviderStatusFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
+
+    // MULTIWINDOW-L3 / SEC-SCAN-6 C: the close hook's native half. ohos_host_accessibility_release_for
+    // frees the closed secondary window's shadow-table partition (host_a11y_table.c) and resets
+    // its per-instance NAPI attach record (host_napi.cpp), so a window reusing the id publishes
+    // into a fresh partition and never reaches the dead window's provider. Optional like the rest:
+    // ReleaseExportAvailable probes it once and an old host keeps the managed-only release.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_release_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityRelease([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
 
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event_for", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int SendEventFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance, int eventType);

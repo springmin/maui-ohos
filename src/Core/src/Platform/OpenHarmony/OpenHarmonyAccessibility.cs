@@ -322,8 +322,9 @@ public static partial class OpenHarmonyAccessibility
     private static bool _secondaryProviderLogged;
     private static bool _secondaryProviderAttachedLogged;
     private static bool _windowActionListenerLogged;
-    // 0 unknown, 1 the per-window publish exports are present, -1 the host predates them
-    // (cached like the announce-export probe; an old host keeps the local-frame degrade).
+    // 0 unknown, 1 a per-window provider-status call already succeeded, -1 the host predates the
+    // export (cached from the EntryPointNotFound catch; an old host keeps the local-frame
+    // degrade). A11Y-SELFCHECK: this is now the only cache; the gate calls the export itself.
     private static int s_windowProviderExport;
     // 0 unknown, 1 the close-hook release export is present, -1 the host predates it (cached
     // like the other optional-export probes; an old host keeps the managed-only release).
@@ -938,30 +939,10 @@ public static partial class OpenHarmonyAccessibility
         }
     }
 
-    /// <summary>True when the host library exports the per-window publish probe (cached).</summary>
-    private static bool WindowProviderExportAvailable
-    {
-        get
-        {
-            int known = Volatile.Read(ref s_windowProviderExport);
-            if (known != 0)
-            {
-                return known > 0;
-            }
-            bool available;
-            try
-            {
-                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                    NativeLibrary.TryGetExport(handle, "ohos_host_accessibility_provider_status_for", out _);
-            }
-            catch (Exception)
-            {
-                available = false;
-            }
-            Volatile.Write(ref s_windowProviderExport, available ? 1 : -1);
-            return available;
-        }
-    }
+    /// <summary>Test seam: the per-window provider status probe the publish gate and the
+    /// pending-publish check read. Null keeps the real host export (the interaction suite sets
+    /// it to simulate an attached provider instance without a device).</summary>
+    internal static Func<string, int>? ProviderStatusProbe { get; set; }
 
     /// <summary>
     /// MULTIWINDOW-L2 a: publishes a secondary window's frame. When the host attached a
@@ -970,10 +951,14 @@ public static partial class OpenHarmonyAccessibility
     /// that window's table partition and the diffed events are sent on that provider; the
     /// primary table and primary provider are never addressed. Otherwise the frame is kept
     /// locally exactly as in M4 (documented degrade; no partial publish, no double presentation).
+    /// A11Y-SELFCHECK: the attach status is read through the export call itself; the old
+    /// separate NativeLibrary probe could answer "no export" from the managed loader while the
+    /// in-process host (the one the shell attached to) served the window fine, which left the
+    /// first publish local and the shell's 3s self-check at nodes=0.
     /// </summary>
     private static void PublishSecondary(string windowId, Frame frame, OpenHarmonyAccessibilityNode[] nodes, int events)
     {
-        bool attached = nodes.Length > 0 && WindowProviderExportAvailable && WindowProviderAttached(windowId);
+        bool attached = nodes.Length > 0 && WindowProviderAttached(windowId);
         if (!attached)
         {
             SecondaryPublishes++;
@@ -1050,17 +1035,60 @@ public static partial class OpenHarmonyAccessibility
     }
 
     /// <summary>Status 1 means the per-instance provider for this window is attached; any other
-    /// status (0/3/4, an unknown instance or a missing export) keeps the local-frame degrade.</summary>
+    /// status (0/3/4 or an unknown instance) keeps the local-frame degrade. A11Y-SELFCHECK: the
+    /// probe is the export call itself, so the gate sees exactly the host state the shell
+    /// attached to; the retired separate NativeLibrary pre-probe could answer "no export" from
+    /// the managed loader while the in-process host served the window fine (first publish kept
+    /// local, shell self-check stuck at nodes=0). A host that predates the export answers
+    /// EntryPointNotFound once (cached), which keeps the documented old-host degrade.</summary>
     private static bool WindowProviderAttached(string windowId)
     {
+        if (ProviderStatusProbe is { } probe)
+        {
+            return probe(windowId) == 1;
+        }
+        if (Volatile.Read(ref s_windowProviderExport) < 0)
+        {
+            return false;
+        }
         try
         {
-            return ProviderStatusFor(windowId) == 1;
+            bool attached = ProviderStatusFor(windowId) == 1;
+            Volatile.Write(ref s_windowProviderExport, 1);
+            return attached;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Volatile.Write(ref s_windowProviderExport, -1);
+            return false;
         }
         catch (Exception)
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// A11Y-SELFCHECK: true when this window has a shadow frame, its own provider is attached
+    /// and the frame never went out to that provider. The shell attaches the child provider
+    /// after the page mounted, which can be later than the window's last rendered frame; the
+    /// window host forces one repaint while this is true, so the provider receives its first
+    /// frame inside the shell's self-check window instead of waiting for the next user input.
+    /// </summary>
+    internal static bool WindowPublishPending(string windowId)
+    {
+        if (FrameOf(windowId).Nodes.Length == 0)
+        {
+            return false;
+        }
+        lock (s_windowProviderLock)
+        {
+            if (s_providerPublishedWindows.Contains(windowId))
+            {
+                return false;
+            }
+        }
+        return WindowProviderAttached(windowId);
     }
 
     // Reused build buffers, guarded by s_buildLock. Only Refresh touches them, and it is driven

@@ -374,6 +374,14 @@ internal sealed class OpenHarmonyWindowHost
                 OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
                 _dirty = true;
             }
+            // A11Y-SELFCHECK: the shell attaches the per-window accessibility provider after the
+            // page mounted, which can be later than this window's last rendered frame (that
+            // frame was then kept local). Force one repaint while the provider still waits for
+            // its first frame, so the publish lands promptly instead of on the next user input.
+            if (!_dirty && OpenHarmonyAccessibility.WindowPublishPending(WindowId))
+            {
+                _dirty = true;
+            }
             if (_dirty)
             {
                 _dirty = false;

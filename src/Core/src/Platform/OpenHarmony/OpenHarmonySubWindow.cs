@@ -165,6 +165,11 @@ public static partial class OpenHarmonySubWindow
     /// <summary>MULTIWINDOW-L M4: route a per-window ArkUI focus/keyboard request into the child
     /// page (payload surfaceId/show/caret/text; the shell forwards it to the child's input).</summary>
     public const int TextFocusCommand = 6;
+    /// <summary>MULTIWINDOW-L3 M2: the identity handshake ack (payload surfaceId/id/gen). Sent
+    /// when the child page's PageReady claim matches the session the shell created; the shell
+    /// validates it against its own session and only then tells the page to mount the managed
+    /// surface, so an out-of-order, duplicate or unknown claim can never bind a surface.</summary>
+    public const int IdentityCommand = 7;
     // The shell's availability probe (mirrors kSubWindowProbeOp in host_napi.cpp).
     private const int ProbeCommand = 99;
 
@@ -192,6 +197,51 @@ public static partial class OpenHarmonySubWindow
     private static Rect s_bounds = Rect.Zero;
     // M3: the managed surface id (the shell XComponent id) once the shell reports one.
     private static string s_surfaceId = string.Empty;
+    // MULTIWINDOW-L3 M2: the managed side of the identity handshake. Every managed child is a
+    // session keyed by its surface id; the shell stamps a generation into the child window name
+    // on every (re)creation, so a late PageReady/Closed from a retired generation can never be
+    // mistaken for the live session. s_currentSurfaceId is the last created live session, whose
+    // state the legacy single-child properties (IsOpen/ContentReady/SurfaceId/...) mirror.
+    private static readonly Dictionary<string, SurfaceSession> s_sessions = new(StringComparer.Ordinal);
+    // Surface ids this side asked the shell to bring up. A PageReady naming one of them may
+    // legitimately arrive before the shell's Created (loadContent runs before showWindow), so it
+    // is buffered; a PageReady naming anything else is an unknown claim and is closed.
+    private static readonly HashSet<string> s_requestedSurfaces = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, PendingClaim> s_pendingClaims = new(StringComparer.Ordinal);
+    private static string s_currentSurfaceId = string.Empty;
+    private static int s_syntheticGeneration;
+
+    /// <summary>MULTIWINDOW-L3 M2: one live shell subwindow session.</summary>
+    private sealed class SurfaceSession
+    {
+        public SurfaceSession(string surfaceId, int shellWindowId, int generation)
+        {
+            SurfaceId = surfaceId;
+            ShellWindowId = shellWindowId;
+            Generation = generation;
+        }
+
+        public string SurfaceId { get; }
+        public int ShellWindowId { get; set; }
+        public int Generation { get; set; }
+        public bool Ready { get; set; }
+        public string ChildName { get; set; } = string.Empty;
+    }
+
+    /// <summary>MULTIWINDOW-L3 M2: a child page's ready claim that preceded its Created report.</summary>
+    private sealed class PendingClaim
+    {
+        public PendingClaim(int windowId, int generation, string name)
+        {
+            WindowId = windowId;
+            Generation = generation;
+            Name = name;
+        }
+
+        public int WindowId { get; }
+        public int Generation { get; }
+        public string Name { get; }
+    }
 
     /// <summary>
     /// Test/embedding seam: when set, commands go through this delegate instead of the native
@@ -291,6 +341,55 @@ public static partial class OpenHarmonySubWindow
         get { lock (s_sync) { return s_surfaceId; } }
     }
 
+    // MULTIWINDOW-L3 M2 introspection (the headless suite drives the handshake and the
+    // per-session lifecycle through HandleNativeEvent and reads these back).
+
+    /// <summary>Number of live managed surface sessions.</summary>
+    internal static int SessionCount
+    {
+        get { lock (s_sync) { return s_sessions.Count; } }
+    }
+
+    /// <summary>The last created live session's surface id (the legacy property mirror), empty
+    /// when none.</summary>
+    internal static string CurrentSurfaceId
+    {
+        get { lock (s_sync) { return s_currentSurfaceId; } }
+    }
+
+    /// <summary>True once the named session's child page reported ready and was confirmed.</summary>
+    internal static bool IsSessionReady(string surfaceId)
+    {
+        lock (s_sync)
+        {
+            return s_sessions.TryGetValue(surfaceId, out SurfaceSession? session) && session.Ready;
+        }
+    }
+
+    /// <summary>The generation the shell stamped into the named live session (0 when none).</summary>
+    internal static int GenerationOf(string surfaceId)
+    {
+        lock (s_sync)
+        {
+            return s_sessions.TryGetValue(surfaceId, out SurfaceSession? session) ? session.Generation : 0;
+        }
+    }
+
+    /// <summary>The shell window id recorded for the named live session (-1 when none).</summary>
+    internal static int ShellWindowIdOf(string surfaceId)
+    {
+        lock (s_sync)
+        {
+            return s_sessions.TryGetValue(surfaceId, out SurfaceSession? session) ? session.ShellWindowId : -1;
+        }
+    }
+
+    /// <summary>Number of buffered ready claims (a PageReady that preceded its Created).</summary>
+    internal static int PendingClaimCount
+    {
+        get { lock (s_sync) { return s_pendingClaims.Count; } }
+    }
+
     /// <summary>Registers the native event listener; a guarded no-op off-device.</summary>
     public static void Register()
     {
@@ -325,7 +424,18 @@ public static partial class OpenHarmonySubWindow
     /// the surface cannot be registered.
     /// </summary>
     public static bool CreateManagedSurface(string windowId, string name, int x, int y, int width, int height, string? title = null)
-        => Send(CreateCommand, BuildCreatePayload(name, x, y, width, height, title, windowId));
+    {
+        if (!string.IsNullOrEmpty(windowId))
+        {
+            lock (s_sync)
+            {
+                // M2: remember the request so an out-of-order PageReady for it is buffered and
+                // validated by the Created report instead of being treated as an unknown claim.
+                s_requestedSurfaces.Add(windowId);
+            }
+        }
+        return Send(CreateCommand, BuildCreatePayload(name, x, y, width, height, title, windowId));
+    }
 
     /// <summary>Moves the subwindow to (x, y) in window pixels.</summary>
     public static bool Move(int x, int y) => Send(MoveCommand, BuildRectPayload("x", x, "y", y));
@@ -346,9 +456,21 @@ public static partial class OpenHarmonySubWindow
     /// MULTIWINDOW-L3 M1: destroys the managed subwindow session named by
     /// <paramref name="windowId"/> (the shell's session key, e.g. "sub-1"). With more than one
     /// managed child a bare close is ambiguous, so the app host targets the session that owned
-    /// the closed MAUI window.
+    /// the closed MAUI window. M2: the local session record is retired eagerly, so the shell's
+    /// later Closed report is an idempotent no-op and a late PageReady for the id is closed
+    /// fail-closed instead of binding a surface.
     /// </summary>
-    public static bool Close(string windowId) => Send(CloseCommand, BuildSurfaceIdPayload(windowId));
+    public static bool Close(string windowId)
+    {
+        if (!string.IsNullOrEmpty(windowId))
+        {
+            lock (s_sync)
+            {
+                CloseSessionLocked(windowId);
+            }
+        }
+        return Send(CloseCommand, BuildSurfaceIdPayload(windowId));
+    }
 
     /// <summary>
     /// MULTIWINDOW-L M4: asks the child page to give ArkUI focus to its own hidden input
@@ -377,6 +499,116 @@ public static partial class OpenHarmonySubWindow
         }
         return Encoding.UTF8.GetString(stream.ToArray());
     }
+
+    // MULTIWINDOW-L3 M2: the per-session helpers below are called under s_sync.
+
+    // Drops every trace of a closed/closed-by-us session; the legacy properties either move to
+    // the next live session (the last one still mirrors the child state) or reset.
+    private static void CloseSessionLocked(string surfaceId)
+    {
+        if (surfaceId.Length == 0)
+        {
+            return;
+        }
+        s_sessions.Remove(surfaceId);
+        s_pendingClaims.Remove(surfaceId);
+        s_requestedSurfaces.Remove(surfaceId);
+        if (s_currentSurfaceId == surfaceId)
+        {
+            s_currentSurfaceId = string.Empty;
+            foreach (string id in s_sessions.Keys)
+            {
+                s_currentSurfaceId = id;
+            }
+            if (s_currentSurfaceId.Length > 0 && s_sessions.TryGetValue(s_currentSurfaceId, out SurfaceSession? next))
+            {
+                ApplySessionLegacyLocked(next);
+            }
+            else
+            {
+                s_open = false;
+                s_visible = false;
+                s_contentReady = false;
+                s_focused = false;
+                s_windowId = 0;
+                s_surfaceId = string.Empty;
+                s_bounds = Rect.Zero;
+            }
+        }
+    }
+
+    // Mirrors one session into the legacy single-child properties (the last created session is
+    // the one IsOpen/ContentReady/SurfaceId/... describe, preserving the M1 single-child wire).
+    private static void ApplySessionLegacyLocked(SurfaceSession session)
+    {
+        s_open = true;
+        s_visible = true;
+        s_surfaceId = session.SurfaceId;
+        s_contentReady = session.Ready;
+        if (session.ShellWindowId > 0)
+        {
+            s_windowId = session.ShellWindowId;
+        }
+    }
+
+    // Creates or refreshes the session a Created report describes. A repeated Created for the
+    // same shell window is idempotent; a same-id create with a different shell window is a
+    // reopen and retires the previous generation. A ready claim buffered before the Created is
+    // validated here and answered with the identity ack.
+    private static void UpsertSessionLocked(string surfaceId, int shellWindowId, int generation, int childId, string childName, out SurfaceSession? ackSession, out int ackWindowId)
+    {
+        ackSession = null;
+        ackWindowId = childId;
+        if (s_sessions.TryGetValue(surfaceId, out SurfaceSession? existing) &&
+            existing.ShellWindowId > 0 && existing.ShellWindowId == shellWindowId)
+        {
+            // Duplicate Created for the live session: idempotent, and a duplicate ready claim
+            // already answered is not answered again.
+            s_currentSurfaceId = surfaceId;
+            return;
+        }
+        int liveGeneration = generation > 0 ? generation : ++s_syntheticGeneration;
+        var session = new SurfaceSession(surfaceId, shellWindowId, liveGeneration);
+        s_sessions[surfaceId] = session;
+        s_currentSurfaceId = surfaceId;
+        ApplySessionLegacyLocked(session);
+        if (s_pendingClaims.Remove(surfaceId, out PendingClaim? claim))
+        {
+            // The claim may be stale (a retired generation): only an agreeing generation claims
+            // the session and gets the ack; a mismatch is dropped fail-closed.
+            if (claim.Generation == liveGeneration || claim.Generation == 0 || liveGeneration == 0)
+            {
+                session.Ready = true;
+                session.ChildName = claim.Name;
+                ApplySessionLegacyLocked(session);
+                ackSession = session;
+                // The ack carries the shell's authoritative child window id (the page's own id
+                // lookup may have resolved the main window); the page filters by surface id and
+                // generation, which are deterministic.
+                ackWindowId = shellWindowId > 0 ? shellWindowId : claim.WindowId;
+            }
+        }
+    }
+
+    private static string BuildIdentityPayload(SurfaceSession session, int windowId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("surfaceId", session.SurfaceId);
+            writer.WriteNumber("id", windowId);
+            writer.WriteNumber("gen", session.Generation);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static bool SendIdentityAck(SurfaceSession session, int windowId)
+        => Send(IdentityCommand, BuildIdentityPayload(session, windowId));
+
+    private static bool SendSessionClose(string surfaceId)
+        => Send(CloseCommand, BuildSurfaceIdPayload(surfaceId));
 
     private static bool Send(int op, string payload)
     {
@@ -471,6 +703,12 @@ public static partial class OpenHarmonySubWindow
         int code = 0;
         string? message = null;
         string surfaceId = string.Empty;
+        string childName = string.Empty;
+        int generation = 0;
+        int identityStatus = 0;
+        SurfaceSession? ackSession = null;
+        int ackWindowId = 0;
+        string closeSurfaceId = string.Empty;
         string? text = null;
         int compositionOffset = 0;
         int keyCode = 0;
@@ -493,53 +731,155 @@ public static partial class OpenHarmonySubWindow
                 // it even for text/key/back/closed, and an event without one falls back to the
                 // live child's id (the shell-drawn M path carries none and has no managed window).
                 surfaceId = ReadString(root, "surfaceId");
-                if (surfaceId.Length == 0)
+                // M2: the identity handshake fields. The shell stamps the generation into the
+                // child window name and reports it in the Created payload; the page returns it
+                // in its PageReady claim (with status != 0 when it rejected its own identity).
+                childName = ReadString(root, "name");
+                generation = ReadInt(root, "gen", 0);
+                identityStatus = ReadInt(root, "status", 0);
+                bool scoped = surfaceId.Length > 0;
+                // The legacy single-child properties mirror the addressed window when it is the
+                // current session - and, when no managed session is registered at all (the
+                // shell-drawn path or an embedding that only drives window-level events), for
+                // any addressed window, exactly like the pre-M2 single-session wire.
+                bool isCurrent = !scoped || s_sessions.Count == 0 || surfaceId == s_currentSurfaceId;
+                if (!scoped && kind != OpenHarmonySubWindowEventKind.Suspended && kind != OpenHarmonySubWindowEventKind.Resumed)
                 {
                     surfaceId = s_surfaceId;
                 }
                 switch (kind)
                 {
                     case OpenHarmonySubWindowEventKind.Created:
-                        s_open = true;
-                        s_visible = true;
-                        s_windowId = windowId;
-                        s_bounds = bounds;
-                        surfaceId = ReadString(root, "surfaceId");
-                        if (surfaceId.Length > 0)
+                        if (scoped)
                         {
-                            s_surfaceId = surfaceId;
+                            UpsertSessionLocked(surfaceId, windowId, generation, windowId, childName, out ackSession, out ackWindowId);
+                            if (s_currentSurfaceId == surfaceId)
+                            {
+                                s_bounds = bounds;
+                            }
+                            bounds = s_bounds;
+                        }
+                        else
+                        {
+                            // The shell-drawn M child (keyed ''): the historical M1 state only.
+                            s_open = true;
+                            s_visible = true;
+                            s_windowId = windowId;
+                            s_bounds = bounds;
                         }
                         break;
                     case OpenHarmonySubWindowEventKind.Shown:
-                        s_visible = true;
+                        if (isCurrent)
+                        {
+                            s_visible = true;
+                        }
                         break;
                     case OpenHarmonySubWindowEventKind.Hidden:
-                        s_visible = false;
+                        if (isCurrent)
+                        {
+                            s_visible = false;
+                        }
                         break;
                     case OpenHarmonySubWindowEventKind.Moved:
                     case OpenHarmonySubWindowEventKind.Resized:
-                        s_bounds = bounds;
+                        if (isCurrent)
+                        {
+                            s_bounds = bounds;
+                        }
                         break;
                     case OpenHarmonySubWindowEventKind.Closed:
-                        s_open = false;
-                        s_visible = false;
-                        s_contentReady = false;
-                        s_focused = false;
-                        s_windowId = 0;
-                        s_surfaceId = string.Empty;
-                        s_bounds = Rect.Zero;
-                        bounds = Rect.Zero;
-                        windowId = 0;
+                        if (scoped)
+                        {
+                            // A late Closed from a retired generation (the payload's shell window
+                            // id differs from the live session's) must not retire the live one.
+                            bool lateClose = s_sessions.TryGetValue(surfaceId, out SurfaceSession? closedSession)
+                                && windowId > 0 && closedSession.ShellWindowId > 0
+                                && closedSession.ShellWindowId != windowId;
+                            if (!lateClose)
+                            {
+                                CloseSessionLocked(surfaceId);
+                            }
+                            // An unknown id is a no-op: the other sessions' state is untouched.
+                            bounds = Rect.Zero;
+                        }
+                        else
+                        {
+                            s_open = false;
+                            s_visible = false;
+                            s_contentReady = false;
+                            s_focused = false;
+                            s_windowId = 0;
+                            s_surfaceId = string.Empty;
+                            s_bounds = Rect.Zero;
+                            bounds = Rect.Zero;
+                            windowId = 0;
+                        }
                         break;
                     case OpenHarmonySubWindowEventKind.PageReady:
-                        s_windowId = windowId;
-                        s_contentReady = true;
-                        surfaceId = ReadString(root, "surfaceId");
-                        if (surfaceId.Length > 0)
+                        if (!scoped)
                         {
-                            s_surfaceId = surfaceId;
+                            // The shell-drawn M path: the historical state only.
+                            s_windowId = windowId;
+                            s_contentReady = true;
+                            bounds = s_bounds;
+                            break;
                         }
-                        bounds = s_bounds;
+                        if (identityStatus != 0)
+                        {
+                            // The page rejected its identity (window name/LocalStorage conflict
+                            // or no matching shell claim): close the claimed session if it is
+                            // one of ours and never bind it (fail-closed).
+                            if (s_sessions.ContainsKey(surfaceId) || s_requestedSurfaces.Contains(surfaceId)
+                                || s_pendingClaims.ContainsKey(surfaceId))
+                            {
+                                closeSurfaceId = surfaceId;
+                                CloseSessionLocked(surfaceId);
+                            }
+                            kind = OpenHarmonySubWindowEventKind.Failed;
+                            code = 801;
+                            message = childName.Length > 0
+                                ? $"subwindow identity rejected: {childName}"
+                                : "subwindow identity rejected";
+                            bounds = s_bounds;
+                            break;
+                        }
+                        if (s_sessions.TryGetValue(surfaceId, out SurfaceSession? pageSession))
+                        {
+                            if (pageSession.Generation != 0 && generation != 0
+                                && pageSession.Generation != generation)
+                            {
+                                // A ready claim from a retired generation: ignore it; the live
+                                // session's state and the ack channel stay untouched.
+                                bounds = s_bounds;
+                                break;
+                            }
+                            if (!pageSession.Ready)
+                            {
+                                pageSession.Ready = true;
+                                pageSession.ChildName = childName.Length > 0 ? childName : pageSession.ChildName;
+                                ackSession = pageSession;
+                                // The shell's child window id is authoritative; see the buffered
+                                // claim path above for why the page-reported id is not used.
+                                ackWindowId = pageSession.ShellWindowId > 0 ? pageSession.ShellWindowId : windowId;
+                                ApplySessionLegacyLocked(pageSession);
+                            }
+                            bounds = s_bounds;
+                        }
+                        else if (s_requestedSurfaces.Contains(surfaceId))
+                        {
+                            // Out-of-order: the page finished before the shell's Created report
+                            // (loadContent runs before showWindow). Buffer the claim; the Created
+                            // path validates its generation and answers the ack.
+                            s_pendingClaims[surfaceId] = new PendingClaim(windowId, generation, childName);
+                            bounds = s_bounds;
+                        }
+                        else
+                        {
+                            // An id this side never requested: an unknown claim. Close it
+                            // fail-closed; the live sessions are untouched.
+                            closeSurfaceId = surfaceId;
+                            bounds = s_bounds;
+                        }
                         break;
                     case OpenHarmonySubWindowEventKind.Suspended:
                         s_suspended = true;
@@ -554,16 +894,21 @@ public static partial class OpenHarmonySubWindow
                     // window that owns that surface (Active/Inactive) or to the window's text
                     // handlers (TextInput/TextComposition/TextSubmitted) and key hook (Key).
                     case OpenHarmonySubWindowEventKind.Active:
-                        s_focused = true;
-                        surfaceId = ReadString(root, "surfaceId");
-                        if (surfaceId.Length > 0)
+                        if (isCurrent)
                         {
-                            s_surfaceId = surfaceId;
+                            s_focused = true;
+                            if (scoped)
+                            {
+                                s_surfaceId = surfaceId;
+                            }
                         }
                         bounds = s_bounds;
                         break;
                     case OpenHarmonySubWindowEventKind.Inactive:
-                        s_focused = false;
+                        if (isCurrent)
+                        {
+                            s_focused = false;
+                        }
                         bounds = s_bounds;
                         break;
                     case OpenHarmonySubWindowEventKind.TextInput:
@@ -623,6 +968,18 @@ public static partial class OpenHarmonySubWindow
             kind = OpenHarmonySubWindowEventKind.Failed;
             code = -1;
             message = "malformed subwindow payload";
+        }
+
+        // M2: the handshake answers are sent outside the state lock: a close for an unknown or
+        // rejected claim, and the identity ack for a validated claim (op 7; the shell validates
+        // it against its own session before the page may mount the managed surface).
+        if (closeSurfaceId.Length > 0)
+        {
+            SendSessionClose(closeSurfaceId);
+        }
+        if (ackSession is not null)
+        {
+            SendIdentityAck(ackSession, ackWindowId);
         }
 
         if (touch is not null)

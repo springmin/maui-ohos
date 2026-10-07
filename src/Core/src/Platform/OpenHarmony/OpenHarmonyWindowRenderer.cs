@@ -421,17 +421,17 @@ public sealed class OpenHarmonyWindowRenderer
             return;
         }
         _canvas.FillColor = s_alertScrim;
-        _canvas.FillRectangle(0, 0, (float)OpenHarmonyAlertHost.Width, (float)OpenHarmonyAlertHost.Height);
-        RectF box = OpenHarmonyAlertHost.BoxRect;
+        _canvas.FillRectangle(0, 0, (float)alert.SurfaceWidth, (float)alert.SurfaceHeight);
+        RectF box = alert.BoxRect;
         _canvas.FillColor = Colors.DimGray;
         _canvas.FillRoundedRectangle(box.X, box.Y, box.Width, box.Height, 12);
         _canvas.FontColor = Colors.White;
         _canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(30);
-        RectF title = OpenHarmonyAlertHost.TitleRect;
+        RectF title = alert.TitleRect;
         _canvas.DrawString(alert.Title ?? string.Empty, title.X, title.Y, title.Width, title.Height,
             HorizontalAlignment.Left, VerticalAlignment.Center);
         _canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(24);
-        RectF message = OpenHarmonyAlertHost.MessageRect;
+        RectF message = alert.MessageRect;
         _canvas.DrawString(alert.Message ?? string.Empty, message.X, message.Y, message.Width, message.Height,
             HorizontalAlignment.Left, VerticalAlignment.Top);
         _canvas.FontSize = OpenHarmonyFontManager.ScaleFontSize(26);
@@ -439,7 +439,7 @@ public sealed class OpenHarmonyWindowRenderer
         {
             for (int i = 0; i < alert.Options.Count; i++)
             {
-                RectF row = OpenHarmonyAlertHost.OptionRect(i);
+                RectF row = alert.OptionRect(i);
                 _canvas.FillColor = i == alert.Options.Count - 1 ? Colors.Gray : Colors.DodgerBlue;
                 _canvas.FillRoundedRectangle(row.X + 12, row.Y + 4, row.Width - 24, row.Height - 8, 8);
                 _canvas.FontColor = Colors.White;
@@ -450,7 +450,7 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (alert.Kind == OpenHarmonyAlertKind.Prompt)
         {
-            RectF field = OpenHarmonyAlertHost.PromptRect;
+            RectF field = alert.PromptRect;
             _canvas.FillColor = Colors.Black;
             _canvas.FillRoundedRectangle(field.X, field.Y, field.Width, field.Height, 8);
             _canvas.FontColor = Colors.White;
@@ -459,7 +459,7 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (!string.IsNullOrEmpty(alert.Accept))
         {
-            RectF accept = OpenHarmonyAlertHost.AcceptRect;
+            RectF accept = alert.AcceptRect;
             _canvas.FillColor = Colors.DodgerBlue;
             _canvas.FillRoundedRectangle(accept.X, accept.Y, accept.Width, accept.Height, 8);
             _canvas.FontColor = Colors.White;
@@ -468,7 +468,7 @@ public sealed class OpenHarmonyWindowRenderer
         }
         if (!string.IsNullOrEmpty(alert.Cancel))
         {
-            RectF cancel = OpenHarmonyAlertHost.CancelRect;
+            RectF cancel = alert.CancelRect;
             _canvas.FillColor = Colors.Gray;
             _canvas.FillRoundedRectangle(cancel.X, cancel.Y, cancel.Width, cancel.Height, 8);
             _canvas.FontColor = Colors.White;
@@ -1483,25 +1483,25 @@ public sealed class OpenHarmonyWindowRenderer
             }
             if (up)
             {
-                int optionIndex = OpenHarmonyAlertHost.OptionIndexAt(x, y);
+                int optionIndex = alertState.OptionIndexAt(x, y);
                 if (optionIndex >= 0 && alertState.Options.Count > optionIndex)
                 {
-                    OpenHarmonyAlertHost.Hide();
+                    OpenHarmonyAlertHost.Hide(RenderWindowId);
                     alertState.CompleteOption?.Invoke(alertState.Options[optionIndex]);
                     return true;
                 }
-                RectF accept = OpenHarmonyAlertHost.AcceptRect;
-                RectF cancel = OpenHarmonyAlertHost.CancelRect;
+                RectF accept = alertState.AcceptRect;
+                RectF cancel = alertState.CancelRect;
                 // Complete first: the prompt reads its text from the (still current) state.
                 if (accept.Contains(x, y))
                 {
                     alertState.Complete(true);
-                    OpenHarmonyAlertHost.Hide();
+                    OpenHarmonyAlertHost.Hide(RenderWindowId);
                 }
                 else if (cancel.Contains(x, y))
                 {
                     alertState.Complete(false);
-                    OpenHarmonyAlertHost.Hide();
+                    OpenHarmonyAlertHost.Hide(RenderWindowId);
                 }
                 return true;
             }

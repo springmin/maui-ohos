@@ -243,6 +243,12 @@ public static partial class OpenHarmonyAccessibility
         {
             s_windowFrames.Remove(windowId);
         }
+        // M3: the diff baseline goes with the frame, so a window that reuses the id publishes
+        // its first frame again instead of diffing against the retired tree.
+        lock (s_previousListsLock)
+        {
+            s_previousLists.Remove(windowId);
+        }
         lock (s_windowProviderLock)
         {
             s_providerPublishedWindows.Remove(windowId);
@@ -1304,34 +1310,34 @@ public static partial class OpenHarmonyAccessibility
         string? title = !string.IsNullOrEmpty(alert.Title) ? alert.Title : null;
         string? message = !string.IsNullOrEmpty(alert.Message) ? alert.Message : null;
         AddAlertNode(previous, 0, "dialog", title ?? message, null, null,
-            OpenHarmonyAlertHost.BoxRect, focusable: true, ref changed);
+            alert.BoxRect, focusable: true, ref changed);
         if (title is not null && message is not null)
         {
             AddAlertNode(previous, rootId, "text", message, null, null,
-                OpenHarmonyAlertHost.MessageRect, focusable: true, ref changed);
+                alert.MessageRect, focusable: true, ref changed);
         }
         if (alert.Kind == OpenHarmonyAlertKind.Prompt)
         {
             AddAlertNode(previous, rootId, "textInput", alert.PromptText, null, null,
-                OpenHarmonyAlertHost.PromptRect, focusable: true, ref changed);
+                alert.PromptRect, focusable: true, ref changed);
         }
         if (alert.Kind == OpenHarmonyAlertKind.ActionSheet)
         {
             for (int i = 0; i < alert.Options.Count; i++)
             {
                 AddAlertNode(previous, rootId, "button", alert.Options[i], null, null,
-                    OpenHarmonyAlertHost.OptionRect(i), focusable: true, ref changed);
+                    alert.OptionRect(i), focusable: true, ref changed);
             }
         }
         if (!string.IsNullOrEmpty(alert.Accept))
         {
             AddAlertNode(previous, rootId, "button", alert.Accept, null, null,
-                OpenHarmonyAlertHost.AcceptRect, focusable: true, ref changed);
+                alert.AcceptRect, focusable: true, ref changed);
         }
         if (!string.IsNullOrEmpty(alert.Cancel))
         {
             AddAlertNode(previous, rootId, "button", alert.Cancel, null, null,
-                OpenHarmonyAlertHost.CancelRect, focusable: true, ref changed);
+                alert.CancelRect, focusable: true, ref changed);
         }
         return (rootId, changed);
     }

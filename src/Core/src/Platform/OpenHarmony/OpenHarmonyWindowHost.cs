@@ -179,6 +179,9 @@ internal sealed class OpenHarmonyWindowHost
         // SEC-SCAN-6 C: the closed window's managed residual state goes with it - the child web
         // pool (capacity/pending) and the a11y shadow frame + first-publish marker - so a window
         // reusing the id starts from not-ready and re-publishes instead of inheriting them.
+        // MULTIWINDOW-L3 M3: its alert slot goes too, so a dialog left open when the window
+        // closed can never resurface on the id's next incarnation.
+        OpenHarmonyAlertHost.Hide(WindowId);
         OpenHarmonyChildWeb.ReleaseWindow(WindowId);
         OpenHarmonyAccessibility.ReleaseWindow(WindowId);
         lock (_sync)
@@ -334,6 +337,26 @@ internal sealed class OpenHarmonyWindowHost
         }
     }
 
+    /// <summary>
+    /// MULTIWINDOW-L3 M3: runs this window's own Back handling (the modal stack, then the page's
+    /// SendBackButtonPressed chain) for a Back key the shell delivered to this window. The shell
+    /// channel is one-way (no synchronous consume answer), so the platform default still runs;
+    /// this is what makes Back act on the focused window's tree instead of the primary's.
+    /// </summary>
+    internal bool HandleBackRequested()
+    {
+        IWindow? window;
+        lock (_sync)
+        {
+            window = _window;
+            if (window is null || _stopped || !_created)
+            {
+                return false;
+            }
+        }
+        return window.BackButtonClicked();
+    }
+
     /// <summary>The frame tick: advances this window's animation state and paints the dirty
     /// surface (the device's secondary frame routing arrives with M3; off-device tests drive it).</summary>
     internal void OnFrame()
@@ -377,10 +400,11 @@ internal sealed class OpenHarmonyWindowHost
 
     /// <summary>
     /// Focus returned to this window (the shell's child WINDOW_ACTIVE): raises IWindow.Activated
-    /// for a window Controls has deactivated. Controls throws when Activated runs twice without
-    /// an intervening Deactivated, and Stopped does not deactivate the window, so a focus gain
-    /// on a merely backgrounded window only clears the stopped flag (the Resumed path raises the
-    /// lifecycle event).
+    /// for a window Controls has deactivated. MULTIWINDOW-L3 M2: focus transitions are ignored
+    /// while the window is stopped (the app is backgrounded; a late child WINDOW_ACTIVE must not
+    /// clear the stopped flag or deliver an event the matching Resumed owns), and only the
+    /// Resumed path leaves the stopped state - so Stopped/Resumed stay a well-formed pair no
+    /// matter how focus events interleave.
     /// </summary>
     internal void Activated()
     {
@@ -388,31 +412,30 @@ internal sealed class OpenHarmonyWindowHost
         lock (_sync)
         {
             window = _window;
-            if (window is null)
+            if (window is null || _stopped)
             {
                 return;
             }
             if (_activated)
             {
-                _stopped = false;
                 return;
             }
             _activated = true;
             _deactivated = false;
-            _stopped = false;
             ActivatedCount++;
         }
         window.Activated();
     }
 
-    /// <summary>Focus left this window (the shell's child WINDOW_INACTIVE): Deactivated once.</summary>
+    /// <summary>Focus left this window (the shell's child WINDOW_INACTIVE): Deactivated once.
+    /// A focus loss while the window is stopped is ignored (the suspend owns the lifecycle).</summary>
     internal void Deactivated()
     {
         IWindow? window;
         lock (_sync)
         {
             window = _window;
-            if (window is null || !_activated)
+            if (window is null || _stopped || !_activated)
             {
                 return;
             }

@@ -377,10 +377,11 @@ internal sealed class OpenHarmonyWindowHost
 
     /// <summary>
     /// Focus returned to this window (the shell's child WINDOW_ACTIVE): raises IWindow.Activated
-    /// for a window Controls has deactivated. Controls throws when Activated runs twice without
-    /// an intervening Deactivated, and Stopped does not deactivate the window, so a focus gain
-    /// on a merely backgrounded window only clears the stopped flag (the Resumed path raises the
-    /// lifecycle event).
+    /// for a window Controls has deactivated. MULTIWINDOW-L3 M2: focus transitions are ignored
+    /// while the window is stopped (the app is backgrounded; a late child WINDOW_ACTIVE must not
+    /// clear the stopped flag or deliver an event the matching Resumed owns), and only the
+    /// Resumed path leaves the stopped state - so Stopped/Resumed stay a well-formed pair no
+    /// matter how focus events interleave.
     /// </summary>
     internal void Activated()
     {
@@ -388,31 +389,30 @@ internal sealed class OpenHarmonyWindowHost
         lock (_sync)
         {
             window = _window;
-            if (window is null)
+            if (window is null || _stopped)
             {
                 return;
             }
             if (_activated)
             {
-                _stopped = false;
                 return;
             }
             _activated = true;
             _deactivated = false;
-            _stopped = false;
             ActivatedCount++;
         }
         window.Activated();
     }
 
-    /// <summary>Focus left this window (the shell's child WINDOW_INACTIVE): Deactivated once.</summary>
+    /// <summary>Focus left this window (the shell's child WINDOW_INACTIVE): Deactivated once.
+    /// A focus loss while the window is stopped is ignored (the suspend owns the lifecycle).</summary>
     internal void Deactivated()
     {
         IWindow? window;
         lock (_sync)
         {
             window = _window;
-            if (window is null || !_activated)
+            if (window is null || _stopped || !_activated)
             {
                 return;
             }

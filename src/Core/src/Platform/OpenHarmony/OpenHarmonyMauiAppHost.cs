@@ -831,11 +831,26 @@ public sealed class OpenHarmonyMauiAppHost
                 break;
             case OpenHarmonySubWindowEventKind.Suspended:
                 // The main window went hidden (or the Home focus-loss chain fired): every child
-                // window stops with it (the shell's single managed child today).
-                StopSecondaryWindows();
+                // window stops with it. MULTIWINDOW-L3 M2: when the shell names one session the
+                // stop is scoped to it, so two children each stop exactly once.
+                if (e.SurfaceId.Length > 0)
+                {
+                    FindSecondaryBySurface(e.SurfaceId)?.Stopped();
+                }
+                else
+                {
+                    StopSecondaryWindows();
+                }
                 break;
             case OpenHarmonySubWindowEventKind.Resumed:
-                ResumeSecondaryWindows();
+                if (e.SurfaceId.Length > 0)
+                {
+                    FindSecondaryBySurface(e.SurfaceId)?.Resumed();
+                }
+                else
+                {
+                    ResumeSecondaryWindows();
+                }
                 break;
             case OpenHarmonySubWindowEventKind.TextInput:
                 // Only the host that owns the addressed window dispatches: a process with more

@@ -179,6 +179,9 @@ internal sealed class OpenHarmonyWindowHost
         // SEC-SCAN-6 C: the closed window's managed residual state goes with it - the child web
         // pool (capacity/pending) and the a11y shadow frame + first-publish marker - so a window
         // reusing the id starts from not-ready and re-publishes instead of inheriting them.
+        // MULTIWINDOW-L3 M3: its alert slot goes too, so a dialog left open when the window
+        // closed can never resurface on the id's next incarnation.
+        OpenHarmonyAlertHost.Hide(WindowId);
         OpenHarmonyChildWeb.ReleaseWindow(WindowId);
         OpenHarmonyAccessibility.ReleaseWindow(WindowId);
         lock (_sync)
@@ -332,6 +335,26 @@ internal sealed class OpenHarmonyWindowHost
         {
             return _app.HandleAccessibilityActionCore(WindowId, nodeId, action);
         }
+    }
+
+    /// <summary>
+    /// MULTIWINDOW-L3 M3: runs this window's own Back handling (the modal stack, then the page's
+    /// SendBackButtonPressed chain) for a Back key the shell delivered to this window. The shell
+    /// channel is one-way (no synchronous consume answer), so the platform default still runs;
+    /// this is what makes Back act on the focused window's tree instead of the primary's.
+    /// </summary>
+    internal bool HandleBackRequested()
+    {
+        IWindow? window;
+        lock (_sync)
+        {
+            window = _window;
+            if (window is null || _stopped || !_created)
+            {
+                return false;
+            }
+        }
+        return window.BackButtonClicked();
     }
 
     /// <summary>The frame tick: advances this window's animation state and paints the dirty

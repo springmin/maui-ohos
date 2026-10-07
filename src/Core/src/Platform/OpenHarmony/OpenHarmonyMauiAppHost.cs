@@ -76,9 +76,25 @@ public sealed class OpenHarmonyMauiAppHost
         OpenHarmonyBridge.KeystoreResult += (requestId, rc, data) => OpenHarmonyKeystore.Complete(requestId, rc, data);
         OpenHarmonyBridge.PickerResult += (requestId, rc, name, data) => OpenHarmonyPickerClient.Complete(requestId, rc, name, data);
         OpenHarmonyBridge.WebEvent += (state, url) => OpenHarmonyWebViewHandler.OnPageEvent(state, url);
-        // While a prompt overlay is open the keyboard text edits it instead of an Entry.
-        OpenHarmonyBridge.TextInput += text => { if (OpenHarmonyAlertHost.Current?.Kind == OpenHarmonyAlertKind.Prompt) { OpenHarmonyAlertHost.PromptAppend(text); } };
-        OpenHarmonyBridge.TextSubmitted += () => { if (OpenHarmonyAlertHost.Current?.Kind == OpenHarmonyAlertKind.Prompt) { OpenHarmonyAlertHost.Hide(); OpenHarmonyAlertHost.Current?.Complete(true); } };
+        // While a prompt overlay is open the keyboard text edits it instead of an Entry. M3:
+        // the process-global bridge is the primary window's keyboard path only; a secondary
+        // window's prompt consumes that window's tagged text in OnSubWindowChanged. The prompt
+        // is captured before Hide so the completion still reads its own text.
+        OpenHarmonyBridge.TextInput += text =>
+        {
+            if (OpenHarmonyAlertHost.CurrentFor(OpenHarmonyWindowSurface.PrimaryWindowId) is { Kind: OpenHarmonyAlertKind.Prompt })
+            {
+                OpenHarmonyAlertHost.PromptAppend(OpenHarmonyWindowSurface.PrimaryWindowId, text);
+            }
+        };
+        OpenHarmonyBridge.TextSubmitted += () =>
+        {
+            if (OpenHarmonyAlertHost.CurrentFor(OpenHarmonyWindowSurface.PrimaryWindowId) is { Kind: OpenHarmonyAlertKind.Prompt } primaryPrompt)
+            {
+                OpenHarmonyAlertHost.Hide(OpenHarmonyWindowSurface.PrimaryWindowId);
+                primaryPrompt.Complete(true);
+            }
+        };
         // Bindable objects created outside the service scope (TabbedPage/MultiPage, ...) resolve
         // their dispatcher through this provider.
         Microsoft.Maui.Dispatching.DispatcherProvider.SetCurrent(
@@ -133,6 +149,10 @@ public sealed class OpenHarmonyMauiAppHost
         // plus the main-window suspension/resume. Each is routed to the window that owns the
         // event's surface id, so two windows never share keyboard or lifecycle state.
         OpenHarmonySubWindow.Changed += OnSubWindowChanged;
+
+        // MULTIWINDOW-L3 M3: an alert opened/edited/closed in a secondary window repaints that
+        // window only (the primary path keeps the renderer's legacy Changed -> RequestRedraw).
+        OpenHarmonyAlertHost.ChangedFor += OnAlertHostChanged;
 
         OpenHarmonyBridge.Touch += args =>
         {
@@ -813,6 +833,22 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>
+    /// MULTIWINDOW-L3 M3: repaints the window whose alert state changed. The primary window
+    /// keeps the historical RequestRedraw path (the renderer's Changed hook); a secondary
+    /// window paints one frame on its own renderer, so a dialog in one window cannot dirty
+    /// another.
+    /// </summary>
+    private void OnAlertHostChanged(string windowId)
+    {
+        if (string.IsNullOrEmpty(windowId) || windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            OpenHarmonyBridge.RequestRedraw();
+            return;
+        }
+        FindSecondaryWindow(windowId)?.OnFrame();
+    }
+
+    /// <summary>
     /// Routes one shell subwindow event (see <see cref="OpenHarmonySubWindow.Changed"/>) to the
     /// window that owns the event's surface id. The child window's focus (Active/Inactive), its
     /// own text input, hardware keys and Back, plus the main window's suspension (Suspended) and
@@ -857,11 +893,22 @@ public sealed class OpenHarmonyMauiAppHost
                 // than one host (the test harness) must not deliver the child's text twice.
                 if (FindSecondaryBySurface(e.SurfaceId) is not null)
                 {
-                    OpenHarmonyWindowInputRouter.DispatchText(e.SurfaceId, e.Text ?? string.Empty);
+                    // M3: an open prompt in this window owns the keyboard text (the modal has
+                    // priority over the focused Entry behind it); otherwise the tagged text
+                    // follows the normal per-window input router.
+                    if (OpenHarmonyAlertHost.CurrentFor(e.SurfaceId) is { Kind: OpenHarmonyAlertKind.Prompt })
+                    {
+                        OpenHarmonyAlertHost.PromptAppend(e.SurfaceId, e.Text ?? string.Empty);
+                    }
+                    else
+                    {
+                        OpenHarmonyWindowInputRouter.DispatchText(e.SurfaceId, e.Text ?? string.Empty);
+                    }
                 }
                 break;
             case OpenHarmonySubWindowEventKind.TextComposition:
-                if (FindSecondaryBySurface(e.SurfaceId) is not null)
+                if (FindSecondaryBySurface(e.SurfaceId) is not null
+                    && OpenHarmonyAlertHost.CurrentFor(e.SurfaceId) is not { Kind: OpenHarmonyAlertKind.Prompt })
                 {
                     OpenHarmonyWindowInputRouter.DispatchComposition(e.SurfaceId, e.Text ?? string.Empty, e.CompositionOffset);
                 }
@@ -869,7 +916,17 @@ public sealed class OpenHarmonyMauiAppHost
             case OpenHarmonySubWindowEventKind.TextSubmitted:
                 if (FindSecondaryBySurface(e.SurfaceId) is not null)
                 {
-                    OpenHarmonyWindowInputRouter.DispatchSubmitted(e.SurfaceId, e.Text);
+                    if (OpenHarmonyAlertHost.CurrentFor(e.SurfaceId) is { Kind: OpenHarmonyAlertKind.Prompt } childPrompt)
+                    {
+                        // Return completes the prompt with its own text (the primary path's
+                        // contract), instead of leaking the Return into the background entry.
+                        OpenHarmonyAlertHost.Hide(e.SurfaceId);
+                        childPrompt.Complete(true);
+                    }
+                    else
+                    {
+                        OpenHarmonyWindowInputRouter.DispatchSubmitted(e.SurfaceId, e.Text);
+                    }
                 }
                 break;
             case OpenHarmonySubWindowEventKind.Key:
@@ -881,7 +938,25 @@ public sealed class OpenHarmonyMauiAppHost
             case OpenHarmonySubWindowEventKind.Back:
                 if (FindSecondaryBySurface(e.SurfaceId) is not null)
                 {
-                    OpenHarmonyWindowInputRouter.DispatchBack(e.SurfaceId);
+                    if (OpenHarmonyAlertHost.CurrentFor(e.SurfaceId) is { } backAlert)
+                    {
+                        // M3: Back belongs to the focused window first; a modal dialog in that
+                        // window consumes it (dismiss with the negative result) and no other
+                        // window's dialog or handler is involved.
+                        OpenHarmonyAlertHost.Hide(e.SurfaceId);
+                        backAlert.Complete(false);
+                        OpenHarmonyBridge.WriteStatus(
+                            $"[maui] window back: the prompt of '{e.SurfaceId}' consumed it");
+                    }
+                    else
+                    {
+                        // The window's own Back handling (modal stack/page SendBackButtonPressed)
+                        // runs first; the advisory per-window event stays for app handlers that
+                        // registered through the router.
+                        FindSecondaryBySurface(e.SurfaceId)?.HandleBackRequested();
+                        OpenHarmonyWindowInputRouter.DispatchBack(e.SurfaceId);
+                        OpenHarmonyBridge.WriteStatus($"[maui] window back: surface={e.SurfaceId}");
+                    }
                 }
                 break;
             case OpenHarmonySubWindowEventKind.Closed:

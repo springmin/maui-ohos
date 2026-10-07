@@ -3,10 +3,12 @@
 // OpenHarmonyMauiAppHost.Run attaches it before creating the first window, so Application.Handler
 // is non-null and Application.Windows reflects the windows the host actually shows.
 //
-// Window model (M2, MULTIWINDOW-L): the app host is windowed. The shell owns the process; its
-// primary XComponent backs the primary MAUI window ("main"). A second MAUI window can be
-// adopted when the shell has reported a secondary surface (the host's window-id routing), and
-// then owns its own surface/renderer pair. The commands map honestly in every case:
+// Window model (M2, MULTIWINDOW-L; N=2 sessions in L3-M1): the app host is windowed. The shell
+// owns the process; its primary XComponent backs the primary MAUI window ("main"), and its
+// subwindow session registry carries up to two managed children (sub-1, sub-2). A second MAUI
+// window is adopted when the shell has reported a secondary surface (the host's window-id
+// routing), or parked while the host asks the shell for a subwindow XComponent (deferred). The
+// commands map honestly in every case:
 //   * Quit ("Terminate"): the ability lifecycle belongs to the shell, which has no terminate
 //     export; the request is reported once and the app keeps running.
 //   * OpenWindow: the requested window is realized with IApplication.CreateWindow(request.State).
@@ -172,7 +174,7 @@ public sealed class OpenHarmonyApplicationHandler : ElementHandler<IApplication,
         {
             handler.LastOpenWindowResult = OpenHarmonyOpenWindowResult.NotSupported;
             WriteOnce(ref s_openWindowUnsupportedLogged,
-                "[maui] OpenWindow could not adopt the created window on the single-window host");
+                "[maui] OpenWindow could not adopt the created window: no shell subwindow session was available");
             // A realized window that was not adopted would leave Application.Windows ahead of
             // what the platform shows, so close it again to keep the list honest.
             CloseRealizedWindow(window);

@@ -9,11 +9,12 @@
 // so the shell and the slice can extend the command/event set without a host rebuild.
 //
 // Honest degradation (matches the platform-limits doc E2 and the multiwindow prestudy A1):
-// the application still has ONE managed surface/renderer, so the subwindow hosts shell-drawn
-// ArkUI content, not a second MAUI visual tree. The managed side owns the lifecycle, geometry
-// and interaction contract (this class); per-window surface/renderer state is the L remainder.
-// Every native call is guarded: off-device (desktop harness) or with an older host library the
-// feature reports unavailable and no call throws.
+// without a shell sink the subwindow hosts shell-drawn ArkUI content; with the L/L2 shell each
+// managed child owns its surface/renderer (window-id routing in the app host). MULTIWINDOW-L3
+// M1 carries up to two managed children; the shell's session registry (SUB_WINDOW_MAX) and this
+// class's command wire are keyed by the managed surface id. Every native call is guarded:
+// off-device (desktop harness) or with an older host library the feature reports unavailable
+// and no call throws.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -342,6 +343,14 @@ public static partial class OpenHarmonySubWindow
     public static bool Close() => Send(CloseCommand, "{}");
 
     /// <summary>
+    /// MULTIWINDOW-L3 M1: destroys the managed subwindow session named by
+    /// <paramref name="windowId"/> (the shell's session key, e.g. "sub-1"). With more than one
+    /// managed child a bare close is ambiguous, so the app host targets the session that owned
+    /// the closed MAUI window.
+    /// </summary>
+    public static bool Close(string windowId) => Send(CloseCommand, BuildSurfaceIdPayload(windowId));
+
+    /// <summary>
     /// MULTIWINDOW-L M4: asks the child page to give ArkUI focus to its own hidden input
     /// (<paramref name="focused"/> true) or back to its surface (false). The managed text
     /// handlers of a secondary window use this instead of the process-global keyboard/focus
@@ -430,6 +439,20 @@ public static partial class OpenHarmonySubWindow
             writer.WriteStartObject();
             writer.WriteNumber(firstKey, firstValue);
             writer.WriteNumber(secondKey, secondValue);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    // MULTIWINDOW-L3 M1: the session key of one managed child (the shell targets its session
+    // registry with it). Absent/empty keeps the historical untargeted request.
+    private static string BuildSurfaceIdPayload(string windowId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("surfaceId", windowId ?? string.Empty);
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());

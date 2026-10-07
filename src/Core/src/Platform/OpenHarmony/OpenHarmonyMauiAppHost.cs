@@ -49,6 +49,11 @@ public sealed class OpenHarmonyMauiAppHost
     // M3: realized windows waiting for the shell's subwindow XComponent surface, keyed by the
     // id the shell was asked to bring up. Guarded by _sync.
     private readonly Dictionary<string, IWindow> _awaitingWindows = new(StringComparer.Ordinal);
+    // MULTIWINDOW-L3 M1: the shell's session registry carries this many managed children
+    // (SUB_WINDOW_MAX in the shell template); the host offers the same bound, so a request
+    // beyond it is declined honestly instead of parked for a surface the shell would answer
+    // 801 to.
+    internal const int MaxManagedSubWindows = 2;
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {
@@ -437,7 +442,9 @@ public sealed class OpenHarmonyMauiAppHost
         {
             try
             {
-                OpenHarmonySubWindow.Close();
+                // MULTIWINDOW-L3 M1: target the session that owned the closed window; a bare
+                // close would end the wrong managed child once two sessions coexist.
+                OpenHarmonySubWindow.Close(shellCloseId);
             }
             catch (Exception ex)
             {
@@ -545,19 +552,17 @@ public sealed class OpenHarmonyMauiAppHost
     /// M3 deferred window: with no second surface reported yet, asks the shell to bring up a
     /// subwindow XComponent for the realized window and parks the window until
     /// <see cref="RouteSurface"/> reports that id. The id is the lowest free "sub-N", so a close
-    /// followed by a re-open reuses the same id (the shell re-registers it). Returns the id, or
-    /// null when the shell could not be asked (the caller falls back to the documented decline).
+    /// followed by a re-open reuses the same id (the shell re-registers it). MULTIWINDOW-L3 M1:
+    /// the shell carries <see cref="MaxManagedSubWindows"/> sessions, so the request is served
+    /// while a session slot is free; a full set returns null so the caller declines honestly
+    /// instead of parking the window for a surface that will not come (SEC-SCAN-5b).
     /// </summary>
     internal string? TryOpenWindowDeferred(IWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
         lock (_sync)
         {
-            // The shell carries one managed child (its create answers 801 for a second managed
-            // surface id), so a deferred request while one surface is already awaiting or bound
-            // can never be served; returning null lets the caller close the realized window
-            // honestly instead of parking it for a surface that will not come (SEC-SCAN-5b).
-            if (_awaitingWindows.Count > 0 || _secondaryWindows.Count > 0)
+            if (_awaitingWindows.Count + _secondaryWindows.Count >= MaxManagedSubWindows)
             {
                 return null;
             }
@@ -581,10 +586,13 @@ public sealed class OpenHarmonyMauiAppHost
             bool requested;
             try
             {
+                // L3-M1: stagger a second child so two sessions do not stack exactly (the shell
+                // honors the explicit rect; the offset is cosmetic evidence aid).
+                int slot = _secondaryWindows.Count + _awaitingWindows.Count;
                 requested = requester is not null
                     ? requester(windowId)
                     : OpenHarmonySubWindow.CreateManagedSurface(
-                        windowId, "maui-child", 120, 160, 720, 480, null);
+                        windowId, "maui-child", 120 + slot * 48, 160 + slot * 48, 720, 480, null);
             }
             catch (Exception ex)
             {

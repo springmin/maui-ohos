@@ -260,45 +260,26 @@ public static partial class OpenHarmonyAccessibility
         ReleaseProviderState(windowId);
     }
 
-    /// <summary>True when the host library exports the close-hook release entry (cached).</summary>
-    private static bool ReleaseExportAvailable
-    {
-        get
-        {
-            int known = Volatile.Read(ref s_releaseExport);
-            if (known != 0)
-            {
-                return known > 0;
-            }
-            bool available;
-            try
-            {
-                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                    NativeLibrary.TryGetExport(handle, "ohos_host_accessibility_release_for", out _);
-            }
-            catch (Exception)
-            {
-                available = false;
-            }
-            Volatile.Write(ref s_releaseExport, available ? 1 : -1);
-            return available;
-        }
-    }
-
     /// <summary>
     /// Drops the closed window's native accessibility provider state: the window's node-table
     /// partition and its per-instance attach record in the host. Best effort (the close hook must
     /// never throw) and a no-op when the host library predates the export.
+    /// SEC-SCAN-7 A: the export is called directly and only EntryPointNotFound is cached - the
+    /// retired separate NativeLibrary pre-probe could answer "no export" from the managed loader
+    /// while the in-process host served the export fine (the A11Y-SELFCHECK root cause), which
+    /// silently skipped this native half of the SEC-SCAN-6 C close hook; a host that predates the
+    /// export still degrades to the managed-only release through the cached EntryPointNotFound.
     /// </summary>
     private static void ReleaseProviderState(string windowId)
     {
-        if (!ReleaseExportAvailable)
+        if (Volatile.Read(ref s_releaseExport) < 0)
         {
             return;
         }
         try
         {
             int released = AccessibilityRelease(windowId);
+            Volatile.Write(ref s_releaseExport, 1);
             Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(released != 0
                 ? $"[maui] accessibility: released the native provider state of '{windowId}'"
                 : $"[maui] accessibility: no native provider state for '{windowId}'");
@@ -398,7 +379,8 @@ public static partial class OpenHarmonyAccessibility
     // frees the closed secondary window's shadow-table partition (host_a11y_table.c) and resets
     // its per-instance NAPI attach record (host_napi.cpp), so a window reusing the id publishes
     // into a fresh partition and never reaches the dead window's provider. Optional like the rest:
-    // ReleaseExportAvailable probes it once and an old host keeps the managed-only release.
+    // ReleaseProviderState calls it directly (SEC-SCAN-7 A) and an old host keeps the managed-only
+    // release through the cached EntryPointNotFound.
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_release_for", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int AccessibilityRelease([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
 

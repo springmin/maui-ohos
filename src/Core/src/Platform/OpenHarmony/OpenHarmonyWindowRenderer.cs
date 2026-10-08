@@ -2269,8 +2269,15 @@ public sealed class OpenHarmonyWindowRenderer
     }
 
     /// <summary>Routes a shell pinch report to the deepest view that owns a pinch recognizer.</summary>
+    /// <remarks>
+    /// SEC-SCAN-5c E: a report with a non-finite centre/scale is dropped before the tree walk
+    /// (the walk would pay the per-node hit test only to fail on the first non-finite
+    /// rectangle compare); a running scale outside the documented bounds is clamped by
+    /// <see cref="OpenHarmonyPinch.TryNormalize"/> at the dispatch gate.
+    /// </remarks>
     public bool HandlePinch(IView root, int phase, double scale, float x, float y)
-        => FindPinchTarget(root, x, y, OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root)) is { } target
+        => OpenHarmonyPinch.TryNormalize(phase, scale, x, y, out _)
+            && FindPinchTarget(root, x, y, OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root)) is { } target
             && OpenHarmonyPinch.Dispatch(target, phase, scale, x, y);
 
     private IView? FindPinchTarget(IView view, float x, float y,

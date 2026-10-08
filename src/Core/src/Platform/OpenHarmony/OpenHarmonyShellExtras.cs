@@ -20,9 +20,10 @@
 // bridge: they are materialized as real views by OpenHarmonyShellFlyout and drawn by the
 // compositor (the ArkTS panel keeps its flat text labels for string/Label sections).
 //
-// Every native call is probed once with NativeLibrary.TryGetExport (the screen reader's announce
-// probe pattern). Without libopenharmonyhost.so (desktop tests) the managed snapshot below stays
-// the live state, no call is attempted after the first miss and one status line records it.
+// Every native call is issued directly (SEC7 pre-probe sweep). A missing host library or export
+// (DllNotFoundException/EntryPointNotFoundException) is cached as a miss: without
+// libopenharmonyhost.so (desktop tests) the managed snapshot below stays the live state, no call
+// is attempted after the first miss and one status line records it.
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Dispatching;
 using Microsoft.OpenHarmony.Hosting;
@@ -68,7 +69,8 @@ public static partial class OpenHarmonyShellExtras
     [LibraryImport(HostLibrary, EntryPoint = FlyoutFooterEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int ShellFlyoutFooterNative([MarshalAs(UnmanagedType.LPUTF8Str)] string? text);
 
-    // 0 unknown, 1 exported, -1 missing (cached probes; see the header).
+    // 0 unknown, 1 the export answered a call, -1 missing (cached from the direct call; see the
+    // header).
     private static int s_searchSetExport;
     private static int s_searchListenerExport;
     private static int s_flyoutHeaderExport;
@@ -184,7 +186,7 @@ public static partial class OpenHarmonyShellExtras
         }
         s_lastSearchPayload = payload;
         EnsureSearchListener();
-        if (!ExportAvailable(SearchSetEntryPoint, ref s_searchSetExport))
+        if (Volatile.Read(ref s_searchSetExport) < 0)
         {
             LogMissingOnce(ref s_searchMissingLogged, SearchSetEntryPoint);
             return;
@@ -198,6 +200,7 @@ public static partial class OpenHarmonyShellExtras
                 state.IsVisible ? state.Placeholder : null,
                 state.IsVisible ? 1 : 0,
                 state.IsEnabled ? 1 : 0);
+            Volatile.Write(ref s_searchSetExport, 1);
             if (rc != 0)
             {
                 LogOnce($"search state not queued (host rc={rc})");
@@ -221,7 +224,7 @@ public static partial class OpenHarmonyShellExtras
             return;
         }
         s_searchListenerRegistered = true;
-        if (!ExportAvailable(SearchListenerEntryPoint, ref s_searchListenerExport))
+        if (Volatile.Read(ref s_searchListenerExport) < 0)
         {
             LogMissingOnce(ref s_searchMissingLogged, SearchListenerEntryPoint);
             return;
@@ -229,6 +232,7 @@ public static partial class OpenHarmonyShellExtras
         try
         {
             ShellSearchSetListenerNative(s_searchInteractionThunk);
+            Volatile.Write(ref s_searchListenerExport, 1);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
@@ -317,7 +321,7 @@ public static partial class OpenHarmonyShellExtras
         string entryPoint = header ? FlyoutHeaderEntryPoint : FlyoutFooterEntryPoint;
         ref int export = ref (header ? ref s_flyoutHeaderExport : ref s_flyoutFooterExport);
         ref bool missingLogged = ref (header ? ref s_flyoutHeaderMissingLogged : ref s_flyoutFooterMissingLogged);
-        if (!ExportAvailable(entryPoint, ref export))
+        if (Volatile.Read(ref export) < 0)
         {
             LogMissingOnce(ref missingLogged, entryPoint);
             return;
@@ -325,6 +329,7 @@ public static partial class OpenHarmonyShellExtras
         try
         {
             int rc = header ? ShellFlyoutHeaderNative(text) : ShellFlyoutFooterNative(text);
+            Volatile.Write(ref export, 1);
             if (rc != 0)
             {
                 LogOnce($"flyout text not queued (host rc={rc})");
@@ -339,28 +344,6 @@ public static partial class OpenHarmonyShellExtras
         {
             LogOnce($"flyout text publish failed: {ex.GetType().Name}");
         }
-    }
-
-    /// <summary>True when the loaded host library exports <paramref name="entryPoint"/>.</summary>
-    private static bool ExportAvailable(string entryPoint, ref int cache)
-    {
-        int known = Volatile.Read(ref cache);
-        if (known != 0)
-        {
-            return known > 0;
-        }
-        bool available;
-        try
-        {
-            available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                NativeLibrary.TryGetExport(handle, entryPoint, out _);
-        }
-        catch (Exception)
-        {
-            available = false;
-        }
-        Volatile.Write(ref cache, available ? 1 : -1);
-        return available;
     }
 
     private static void LogMissingOnce(ref bool logged, string entryPoint)

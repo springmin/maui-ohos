@@ -11,11 +11,11 @@
 // produced file (non-empty and complete), not the return code, so a host half that only signals
 // through the file still works; the code is logged on failure.
 //
-// IsCaptureSupported probes the host library with NativeLibrary.TryLoad/TryGetExport for the
-// frozen entry point (the other bridges discover availability on first call; a capture cannot be
-// attempted as a probe because it would take a screenshot). Off-device the property is false and
-// CaptureAsync returns null without throwing, like the reference implementation's
-// "not supported" path.
+// IsCaptureSupported asks the host directly (SEC7 pre-probe sweep): the frozen export is called
+// with an empty output path, which the host rejects before it queues a snapshot, so the probe has
+// no side effect; a missing library/export (DllNotFound/EntryPointNotFound) is cached as false.
+// Off-device the property is false and CaptureAsync returns null without throwing, like the
+// reference implementation's "not supported" path.
 //
 // ScreenshotFormat/quality: CaptureAsync takes the PNG (the default format) and Png reads hand
 // those bytes back. A Jpeg read asks the shell for a JPEG through ohos_host_screenshot_format
@@ -57,9 +57,12 @@ internal static partial class OpenHarmonyScreenshotBridge
     [LibraryImport(HostLibrary, EntryPoint = FormatEntryPoint, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int ScreenshotFormatNative(string outPath, int format, int quality);
 
-    private static int s_available;   // 0 unknown, 1 exported, -1 missing (cached probe)
+    private static int s_available;   // 0 unknown, 1 exported, -1 missing (cached from the direct call)
 
-    /// <summary>True when the host library exports ohos_host_screenshot.</summary>
+    /// <summary>True when the host library exports ohos_host_screenshot. SEC7 pre-probe sweep:
+    /// the export is called directly with an empty output path - the host rejects it before it
+    /// queues a snapshot, so there is no capture side effect - instead of asking the managed
+    /// loader, whose misreport could hide a served export; a missing library/export is cached.</summary>
     internal static bool IsAvailable
     {
         get
@@ -69,47 +72,30 @@ internal static partial class OpenHarmonyScreenshotBridge
             {
                 return known > 0;
             }
-            bool available;
             try
             {
-                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                    NativeLibrary.TryGetExport(handle, EntryPoint, out _);
+                // Side-effect-free probe: any return (the -1 empty-path rejection included)
+                // proves the export exists; only a load/lookup failure means it does not.
+                ScreenshotNative(string.Empty);
+                Volatile.Write(ref s_available, 1);
+                return true;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                Volatile.Write(ref s_available, -1);
+                return false;
             }
             catch (Exception)
             {
-                available = false;
+                Volatile.Write(ref s_available, -1);
+                return false;
             }
-            Volatile.Write(ref s_available, available ? 1 : -1);
-            return available;
         }
     }
 
-    private static int s_formatAvailable;   // 0 unknown, 1 exported, -1 missing (cached probe)
-
-    /// <summary>True when the host library exports the format-aware capture entry point.</summary>
-    internal static bool IsFormatAvailable
-    {
-        get
-        {
-            int known = Volatile.Read(ref s_formatAvailable);
-            if (known != 0)
-            {
-                return known > 0;
-            }
-            bool available;
-            try
-            {
-                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                    NativeLibrary.TryGetExport(handle, FormatEntryPoint, out _);
-            }
-            catch (Exception)
-            {
-                available = false;
-            }
-            Volatile.Write(ref s_formatAvailable, available ? 1 : -1);
-            return available;
-        }
-    }
+    // 0 unknown, 1 the format export answered a call, -1 missing (cached from the direct call in
+    // CaptureFormatToFile below; the Jpeg read then keeps the PNG fallback without retrying).
+    private static int s_formatAvailable;
 
     /// <summary>
     /// Asks the host to write a PNG to <paramref name="outPath"/>. Returns the host code, or -1
@@ -130,14 +116,22 @@ internal static partial class OpenHarmonyScreenshotBridge
 
     /// <summary>
     /// Asks the host to write the requested format/quality to <paramref name="outPath"/>
-    /// (format 0 = PNG, format 1 = JPEG). Returns the host code, or -1 when the export is
-    /// unavailable (the caller falls back to the PNG capture).
+    /// (format 0 = PNG, format 1 = JPEG). SEC7 pre-probe sweep: the export is called directly
+    /// (the first call is the probe) and a missing library/export is cached, so the caller's PNG
+    /// fallback still happens without a managed-loader pre-check that could hide a served export.
+    /// Returns the host code, or -1 when the export is unavailable.
     /// </summary>
     internal static int CaptureFormatToFile(string outPath, int format, int quality)
     {
+        if (Volatile.Read(ref s_formatAvailable) < 0)
+        {
+            return -1;
+        }
         try
         {
-            return ScreenshotFormatNative(outPath, format, quality);
+            int rc = ScreenshotFormatNative(outPath, format, quality);
+            Volatile.Write(ref s_formatAvailable, 1);
+            return rc;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
@@ -297,10 +291,6 @@ public sealed class OpenHarmonyScreenshot : IScreenshot
     /// </summary>
     internal static async Task<byte[]?> CaptureJpegAsync(int quality)
     {
-        if (!OpenHarmonyScreenshotBridge.IsFormatAvailable)
-        {
-            return null;
-        }
         string path = Path.Combine(
             Path.GetTempPath(),
             "maui-ohos-screenshot-" + Guid.NewGuid().ToString("N") + ".jpg");

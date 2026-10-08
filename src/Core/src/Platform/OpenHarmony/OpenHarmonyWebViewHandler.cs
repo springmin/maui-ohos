@@ -25,6 +25,16 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// <summary>Shell envelope asking for a Navigating decision on a cancelled load (B6).</summary>
     private const string NavRequestPrefix = "__OHNAV|";
 
+    /// <summary>
+    /// MULTIWINDOW-L3 B6: the child-window decision channel. A subwindow page cannot use the
+    /// primary JS-message channel, so its ask travels on the web-event channel that already
+    /// routes by window and slot: the state "w:&lt;window&gt;|s&lt;slot&gt;|navask|&lt;id&gt;"
+    /// carries the request id and the event URL carries the cancelled URL. The answer is the
+    /// child command "nav" ("s&lt;slot&gt;\n&lt;id&gt;\n&lt;url&gt;"), exactly the primary
+    /// approval shape on the child transport.
+    /// </summary>
+    private const string ChildNavRequestPrefix = "navask|";
+
     /// <summary>Shell web-event state carrying ArkWeb history availability ("history|b|f").</summary>
     private const string HistoryStatePrefix = "history|";
 
@@ -874,6 +884,45 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     }
 
     /// <summary>
+    /// MULTIWINDOW-L3 B6: the child-window counterpart of
+    /// <see cref="HandleNavigationRequest(string)"/>. The subwindow page cancelled a main-frame
+    /// load it did not originate and asks for a decision on the web-event channel
+    /// ("w:&lt;window&gt;|s&lt;slot&gt;|navask|&lt;id&gt;", URL in the event URL). The same
+    /// validation, the same synchronous Navigating decision and the same one-shot approval
+    /// apply; the approval answer travels on the child command transport ("nav" to that
+    /// window), so only the window that asked can reload the URL it kept.
+    /// </summary>
+    internal static void HandleChildNavigationRequest(string windowId, int slot, string url, string requestId)
+    {
+        if (!OpenHarmonyChildWeb.IsValidWindowTag(windowId) ||
+            slot < 0 || slot >= OpenHarmonyChildWeb.MaxOverlays ||
+            requestId.Length == 0 || requestId.Length > 128 ||
+            url.Length == 0 || url.Length > MaxNavUrlLength ||
+            ContainsControlCharacter(url) || ContainsControlCharacter(requestId))
+        {
+            OpenHarmonyBridge.WriteStatus("[maui] child web navigation rejected: malformed request");
+            return;
+        }
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? target) || !IsApprovableNavigation(target))
+        {
+            // Fail closed exactly like the primary channel (H-C2): only an absolute http(s)
+            // URL with a host may be approved back; a network-path spelling lands here as a
+            // file:// URI and stays blocked.
+            OpenHarmonyBridge.WriteStatus("[maui] child web navigation rejected: not an http(s) navigation");
+            return;
+        }
+        if (!RaiseNavigating(url, WebNavigationEvent.NewPage, slot, windowId))
+        {
+            // The app cancelled: leave the child load blocked (no approval is sent).
+            OpenHarmonyBridge.WriteStatus($"[maui] child web navigation cancelled: {SanitizeUrlForLog(url)}");
+            return;
+        }
+        ApproveChildNavigation(windowId, slot, url);
+        OpenHarmonyChildWeb.CommandForWindow(windowId, "nav", OpenHarmonyOverlays.Tag(slot, requestId + "\n" + url));
+        OpenHarmonyBridge.WriteStatus($"[maui] child web navigation approved: {windowId} {slot} {SanitizeUrlForLog(url)}");
+    }
+
+    /// <summary>
     /// True when a URL the shell cancelled may be approved back to it (B6). The shell
     /// short-circuits its own origins, local files, inline documents and relative references,
     /// so only an absolute http/https target with a host is a real external navigation; letting
@@ -966,7 +1015,20 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// looping main-frame navigations cannot grow it. The matching reload still consumes its
     /// entry exactly once, so the approval stays one-shot.
     /// </summary>
-    private static void ApproveNavigation(string url)
+    private static void ApproveNavigation(string url) => ApproveNavigationEntry(url);
+
+    /// <summary>
+    /// MULTIWINDOW-L3 B6: records the one-shot approval for a child-window reload. The key is
+    /// namespaced ("child|&lt;window&gt;|&lt;slot&gt;|&lt;url&gt;"), so it can never collide with
+    /// the primary channel's absolute-URL keys and the shared cap/prune logic still bounds both.
+    /// </summary>
+    private static void ApproveChildNavigation(string windowId, int slot, string url)
+        => ApproveNavigationEntry(ChildApprovalKey(windowId, slot, url));
+
+    private static string ChildApprovalKey(string windowId, int slot, string url)
+        => "child|" + windowId + "|" + slot.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + url;
+
+    private static void ApproveNavigationEntry(string key)
     {
         long now = Environment.TickCount64;
         long expires = now + (long)s_navApprovalWindow.TotalMilliseconds;
@@ -993,7 +1055,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                     s_approvedNavigations.Remove(oldest);
                 }
             }
-            s_approvedNavigations[url] = expires;
+            s_approvedNavigations[key] = expires;
         }
     }
 
@@ -1143,18 +1205,25 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     /// One-shot: the entry is removed here, and it expires on its own if the load never starts.
     /// </summary>
     private static bool ConsumeApprovedNavigation(string url)
+        => !string.IsNullOrEmpty(url) && ConsumeApprovalEntry(url);
+
+    /// <summary>
+    /// MULTIWINDOW-L3 B6: the child-channel counterpart of
+    /// <see cref="ConsumeApprovedNavigation(string)"/> for the window-scoped approval key.
+    /// </summary>
+    private static bool ConsumeChildApprovedNavigation(string windowId, int slot, string url)
+        => !string.IsNullOrEmpty(url) && !string.IsNullOrEmpty(windowId) && slot >= 0
+           && ConsumeApprovalEntry(ChildApprovalKey(windowId, slot, url));
+
+    private static bool ConsumeApprovalEntry(string key)
     {
-        if (string.IsNullOrEmpty(url))
-        {
-            return false;
-        }
         lock (s_navSync)
         {
-            if (!s_approvedNavigations.TryGetValue(url, out long expires))
+            if (!s_approvedNavigations.TryGetValue(key, out long expires))
             {
                 return false;
             }
-            s_approvedNavigations.Remove(url);
+            s_approvedNavigations.Remove(key);
             return expires >= Environment.TickCount64;
         }
     }
@@ -1485,12 +1554,29 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
             }
             return;
         }
+        if (windowId is not null && slot >= 0 &&
+            effectiveState.StartsWith(ChildNavRequestPrefix, StringComparison.Ordinal))
+        {
+            // MULTIWINDOW-L3 B6: a child-window load the subwindow page cancelled asks for the
+            // same Navigating decision the primary channel raises; the URL travels in the event
+            // URL slot and the id in the state, so no delimiter can be confused.
+            HandleChildNavigationRequest(windowId, slot, url, effectiveState.Substring(ChildNavRequestPrefix.Length));
+            return;
+        }
         if (effectiveState == "started")
         {
             // A load the shell already asked about (B6) raised Navigating before it started;
             // do not raise it a second time. App-origin loads never take that path. The event
             // kind is the one the triggering command set (Back/Forward/Refresh or NewPage).
-            if (windowId is null && ConsumeApprovedNavigation(url))
+            // MULTIWINDOW-L3 B6: the child channel's approval is one-shot per window+slot.
+            if (windowId is null)
+            {
+                if (ConsumeApprovedNavigation(url))
+                {
+                    return;
+                }
+            }
+            else if (slot >= 0 && ConsumeChildApprovedNavigation(windowId, slot, url))
             {
                 return;
             }

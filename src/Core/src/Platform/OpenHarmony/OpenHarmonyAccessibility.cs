@@ -398,37 +398,15 @@ public static partial class OpenHarmonyAccessibility
     // The dedicated text-carrying announcement export (host_napi.cpp): it builds an
     // ANNOUNCE_FOR_ACCESSIBILITY event, sets the announced text on it and sends it through the
     // attached provider. A host library built before this export only has
-    // ohos_host_accessibility_send_event, which carries the event kind alone; Announce keeps
-    // that as its fallback path.
+    // ohos_host_accessibility_send_event, which carries the event kind alone; Announce calls this
+    // export directly (SEC7 pre-probe sweep) and keeps the event-kind path as the fallback once
+    // the call reports the export missing.
     [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_announce", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int AccessibilityAnnounce([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
 
-    private static int s_announceExport;   // 0 unknown, 1 exported, -1 missing (cached probe)
-
-    /// <summary>True when the host library exports <c>ohos_host_accessibility_announce</c>.</summary>
-    private static bool AnnounceExportAvailable
-    {
-        get
-        {
-            int known = Volatile.Read(ref s_announceExport);
-            if (known != 0)
-            {
-                return known > 0;
-            }
-            bool available;
-            try
-            {
-                available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                    NativeLibrary.TryGetExport(handle, "ohos_host_accessibility_announce", out _);
-            }
-            catch (Exception)
-            {
-                available = false;
-            }
-            Volatile.Write(ref s_announceExport, available ? 1 : -1);
-            return available;
-        }
-    }
+    // 0 unknown, 1 the text-carrying announce export answered a call, -1 missing (cached from the
+    // direct call; a host that predates the export keeps the event-kind fallback).
+    private static int s_announceExport;
 
     private static unsafe IntPtr _actionThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnAction;
     private static Action<int, int>? _actionHandler;
@@ -579,8 +557,9 @@ public static partial class OpenHarmonyAccessibility
     /// ANNOUNCE_FOR_ACCESSIBILITY event
     /// (ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY), sets the announced
     /// text (OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility) and sends it through the
-    /// attached provider (host_napi.cpp). The export is probed once (NativeLibrary); a host
-    /// library built before it falls back to the older event-kind-only path
+    /// attached provider (host_napi.cpp). The export is called directly (SEC7 pre-probe sweep): a
+    /// missing export (cached, like the other optional exports) falls back to the older
+    /// event-kind-only path
     /// <c>ohos_host_accessibility_send_event(EventAnnouncement)</c>, which maps to
     /// OH_ArkUI_AccessibilityEventSetEventType + OH_ArkUI_SendAccessibilityAsyncEvent and cannot
     /// carry the text itself (the text still lands in <see cref="LastAnnouncement"/>). Both paths
@@ -599,44 +578,54 @@ public static partial class OpenHarmonyAccessibility
         {
             return false;
         }
-        bool textPath = AnnounceExportAvailable;
+        if (Volatile.Read(ref s_announceExport) < 0)
+        {
+            return SendAnnounceFallback();
+        }
         try
         {
             // The host answers 1 when the event was created and sent, 0 when no provider is
             // attached (nothing to announce to) - that is not a failure of availability.
-            if ((textPath ? AccessibilityAnnounce(text) : SendEvent(EventAnnouncement)) != 0)
+            int sent = AccessibilityAnnounce(text);
+            Volatile.Write(ref s_announceExport, 1);
+            if (sent != 0)
             {
                 AnnouncementsSent++;
-                if (!textPath)
-                {
-                    LogAnnounceFallbackOnce();
-                }
                 return true;
             }
+            return false;
         }
-        catch (EntryPointNotFoundException)
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
-            // The probe saw the export but this call could not resolve it (a different library
-            // won the load): mark the export missing and retry once through the event-kind path.
+            // The host library or the export is missing: this host predates the export, so the
+            // event-kind path takes over from here on (the miss is cached).
             Volatile.Write(ref s_announceExport, -1);
-            try
-            {
-                if (SendEvent(EventAnnouncement) != 0)
-                {
-                    AnnouncementsSent++;
-                    LogAnnounceFallbackOnce();
-                    return true;
-                }
-            }
-            catch (Exception)
-            {
-                _available = false;
-            }
         }
         catch (Exception)
         {
             // Same visibility rule as Publish: availability flips off, but WouldAnnounce stays
             // true because the call attempted the host boundary ("would have talked to it").
+            _available = false;
+            return false;
+        }
+        return SendAnnounceFallback();
+    }
+
+    /// <summary>The event-kind-only announcement path for hosts that predate the text-carrying
+    /// export (or when the text export just reported missing).</summary>
+    private static bool SendAnnounceFallback()
+    {
+        try
+        {
+            if (SendEvent(EventAnnouncement) != 0)
+            {
+                AnnouncementsSent++;
+                LogAnnounceFallbackOnce();
+                return true;
+            }
+        }
+        catch (Exception)
+        {
             _available = false;
         }
         return false;

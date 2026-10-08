@@ -6,11 +6,12 @@
 //   int ohos_host_set_window_rect(int x, int y, int w, int h)
 // which the ArkTS shell applies to the main window (window.setWindowTitle through the
 // SessionManager syscap, API 15+; window.moveWindowTo + window.resize, API 11+). Both exports are
-// probed once with NativeLibrary.TryGetExport (the screen reader's announce probe pattern); a host
-// library that predates them keeps the recorded-field behaviour - Title/X/Y/Width/Height below stay
-// observable off-device - and the handler degrades silently with one status line. The host clamps
-// the rectangle it queues (width/height into (0, 16384], x/y into [-32768, 32768]) and rejects a
-// non-positive size, so a rectangle is only published once a usable size is known.
+// called directly (SEC7 pre-probe sweep); a host library that predates them answers
+// DllNotFound/EntryPointNotFound, which is cached so the managed-recorded fields
+// (Title/X/Y/Width/Height below stay observable off-device) degrade with one status line instead
+// of asking the managed loader up front (a loader misreport could silently hide a served export).
+// The host clamps the rectangle it queues (width/height into (0, 16384], x/y into [-32768, 32768])
+// and rejects a non-positive size, so a rectangle is only published once a usable size is known.
 // Window.TitleBar additionally maps onto the compositor: MapTitleBar builds the title-bar row
 // (OpenHarmonyTitleBarRow) that the renderer measures/arranges/draws above the window content and
 // through which touches reach the TitleBar's own views; the renderer resolves the row from the
@@ -63,7 +64,8 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
     [LibraryImport(HostLibrary, EntryPoint = RectEntryPoint)]
     private static partial int SetWindowRectNative(int x, int y, int w, int h);
 
-    // 0 unknown, 1 exported, -1 missing (cached probes; see the header).
+    // 0 unknown, 1 the export answered a call, -1 missing (cached from the direct call; see the
+    // header).
     private static int s_titleExport;
     private static int s_rectExport;
     private static bool s_chromeMissingLogged;
@@ -207,7 +209,7 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
             return;
         }
         Interlocked.Increment(ref s_titlePublishCount);
-        if (!ExportAvailable(TitleEntryPoint, ref s_titleExport))
+        if (Volatile.Read(ref s_titleExport) < 0)
         {
             LogMissingOnce(TitleEntryPoint);
             return;
@@ -215,6 +217,7 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         try
         {
             int rc = SetWindowTitleNative(title);
+            Volatile.Write(ref s_titleExport, 1);
             if (rc != 0)
             {
                 LogFailureOnce($"title not applied (host rc={rc})");
@@ -242,7 +245,7 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         {
             return;
         }
-        if (!ExportAvailable(RectEntryPoint, ref s_rectExport))
+        if (Volatile.Read(ref s_rectExport) < 0)
         {
             LogMissingOnce(RectEntryPoint);
             return;
@@ -250,6 +253,7 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         try
         {
             int rc = SetWindowRectNative(x, y, w, h);
+            Volatile.Write(ref s_rectExport, 1);
             if (rc != 0)
             {
                 LogFailureOnce($"rect not applied (host rc={rc})");
@@ -273,6 +277,8 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
         return true;
     }
 
+    /// <summary>Records a load/lookup failure as a cached missing export (one status line); any
+    /// other failure is reported once without disabling the export.</summary>
     private static void OnNativeFailure(Exception ex, string entryPoint, ref int cache, string what)
     {
         if (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -282,28 +288,6 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
             return;
         }
         LogFailureOnce($"{what} failed: {ex.GetType().Name}");
-    }
-
-    /// <summary>True when the loaded host library exports <paramref name="entryPoint"/>.</summary>
-    private static bool ExportAvailable(string entryPoint, ref int cache)
-    {
-        int known = Volatile.Read(ref cache);
-        if (known != 0)
-        {
-            return known > 0;
-        }
-        bool available;
-        try
-        {
-            available = NativeLibrary.TryLoad(HostLibrary, out IntPtr handle) &&
-                NativeLibrary.TryGetExport(handle, entryPoint, out _);
-        }
-        catch (Exception)
-        {
-            available = false;
-        }
-        Volatile.Write(ref cache, available ? 1 : -1);
-        return available;
     }
 
     private static void LogMissingOnce(string entryPoint)

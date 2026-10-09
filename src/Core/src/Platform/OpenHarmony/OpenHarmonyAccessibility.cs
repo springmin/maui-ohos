@@ -160,8 +160,25 @@ public static partial class OpenHarmonyAccessibility
     // s_frame (the historical Volatile.Read path, zero change); a secondary window's frame is
     // kept in this table so its render pass can no longer overwrite the primary tree (the M3
     // regression: both windows called Refresh/Publish, last renderer won).
+    //
+    // SEC-SCAN-5c F: the secondary tables are bounded. MaxWindowFrames mirrors the native
+    // shadow-table partition cap (OHOS_A11Y_MAX_NAMED_PARTITIONS, host_a11y_table.h) and a
+    // frame walk longer than MaxWindowFrameNodes is truncated to a well-formed prefix, so an
+    // id churn or a pathological tree cannot grow managed memory without a live window. A
+    // window's frame, diff baseline and provider first-publish marker are released together
+    // (ReleaseWindow), which also frees its frame slot for reuse; the primary window keeps the
+    // historical unbounded frame (zero change).
+    internal const int MaxWindowFrames = 8;
+    internal const int MaxWindowFrameNodes = 4096;
     private static readonly object s_framesLock = new();
     private static readonly Dictionary<string, Frame> s_windowFrames = new(StringComparer.Ordinal);
+
+    /// <summary>Secondary-window frames refused because <see cref="MaxWindowFrames"/> was
+    /// reached (diagnostics; a window close frees its slot for reuse).</summary>
+    internal static int WindowFramesDropped { get; private set; }
+
+    /// <summary>Secondary-frame walks stopped at <see cref="MaxWindowFrameNodes"/> (diagnostics).</summary>
+    internal static int WindowFrameWalksTruncated { get; private set; }
 
     /// <summary>Nodes of the last published primary frame (root first, parents before children).</summary>
     public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_frame).Nodes;
@@ -201,6 +218,39 @@ public static partial class OpenHarmonyAccessibility
     /// <summary>Nodes of the last kept secondary frame (diagnostics).</summary>
     internal static int LastSecondaryPublishedCount { get; private set; }
 
+    /// <summary>Number of stored diff baselines, primary included when published (diagnostics
+    /// for the SEC-SCAN-5c F baseline bound: a secondary baseline only exists while its frame
+    /// does).</summary>
+    internal static int BaselineWindowCount
+    {
+        get
+        {
+            lock (s_previousListsLock)
+            {
+                return s_previousLists.Count;
+            }
+        }
+    }
+
+    /// <summary>True when the window has a stored shadow frame (primary: a published frame; a
+    /// secondary window: an entry in the bounded frame table). Diagnostics for the SEC-SCAN-5c F
+    /// cap/release checks.</summary>
+    internal static bool HasWindowFrame(string windowId)
+    {
+        if (string.IsNullOrEmpty(windowId))
+        {
+            return false;
+        }
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            return Volatile.Read(ref s_frame) != Frame.Empty;
+        }
+        lock (s_framesLock)
+        {
+            return s_windowFrames.ContainsKey(windowId);
+        }
+    }
+
     private static Frame FrameOf(string windowId)
     {
         if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
@@ -213,6 +263,33 @@ public static partial class OpenHarmonyAccessibility
         }
     }
 
+    private static bool _windowFrameCapLogged;
+
+    private static void LogWindowFrameCapOnce()
+    {
+        if (_windowFrameCapLogged)
+        {
+            return;
+        }
+        _windowFrameCapLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            $"[maui] accessibility: the secondary shadow-frame cap ({MaxWindowFrames}) is full; " +
+            "dropping new window frames until a window closes (the native partition cap is the same)");
+    }
+
+    private static bool _nullRefreshLogged;
+
+    private static void LogNullRefreshOnce()
+    {
+        if (_nullRefreshLogged)
+        {
+            return;
+        }
+        _nullRefreshLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] accessibility: a shadow-frame refresh without a window id or root was ignored (fail-safe no-op)");
+    }
+
     private static void StoreFrame(string windowId, Frame frame)
     {
         if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
@@ -222,6 +299,14 @@ public static partial class OpenHarmonyAccessibility
         }
         lock (s_framesLock)
         {
+            if (!s_windowFrames.ContainsKey(windowId) && s_windowFrames.Count >= MaxWindowFrames)
+            {
+                // SEC-SCAN-5c F: full table = drop the new id's frame (ReleaseWindow frees a
+                // slot). The window's publish degrades to the empty-frame no-op.
+                WindowFramesDropped++;
+                LogWindowFrameCapOnce();
+                return;
+            }
             s_windowFrames[windowId] = frame;
         }
     }
@@ -811,6 +896,15 @@ public static partial class OpenHarmonyAccessibility
     /// </summary>
     public static void Refresh(string windowId, IView root)
     {
+        // SEC-SCAN-5c F: a missing window id or root is not a content change (the renderer
+        // always passes both). Fail-safe no-op: the published frame and provider state stay,
+        // and the build buffers are not touched, so a buggy caller cannot clear a window's
+        // shadow tree or start a walk without a tree.
+        if (string.IsNullOrEmpty(windowId) || root is null)
+        {
+            LogNullRefreshOnce();
+            return;
+        }
         // The build buffers are render-thread state and are reused across frames: an unchanged
         // frame walks the tree, reuses every previous node and view and swaps nothing, so it
         // allocates no nodes, no lists and no arrays. A changed frame allocates only the new
@@ -826,7 +920,11 @@ public static partial class OpenHarmonyAccessibility
             // are appended after it as the only focusable region (the focus trap). Only the
             // window the alert belongs to appends them.
             OpenHarmonyAlertState? alert = OpenHarmonyAlertHost.CurrentFor(windowId);
-            bool changed = Visit(root, previous, alert is not null);
+            // SEC-SCAN-5c F: only a secondary window's walk is capped; the primary frame keeps
+            // its historical unbounded walk (int.MaxValue never triggers the stop).
+            bool secondaryFrame = windowId != OpenHarmonyWindowSurface.PrimaryWindowId;
+            bool changed = Visit(root, previous, alert is not null,
+                secondaryFrame ? MaxWindowFrameNodes : int.MaxValue);
             s_walkRoot = null;
             s_titleBarView = null;
             (int modalRootId, bool modalChanged) = AppendAlertNodes(previous, alert);
@@ -860,13 +958,22 @@ public static partial class OpenHarmonyAccessibility
     {
         Frame frame = FrameOf(windowId);
         OpenHarmonyAccessibilityNode[] nodes = frame.Nodes;
-        // The event source is managed state, so the diff runs even when the host is unavailable.
-        int events = DiffFrames(windowId, nodes);
         if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
         {
-            PublishSecondary(windowId, frame, nodes, events);
+            // SEC-SCAN-5c F: an empty secondary frame (an id that never had a frame, a window
+            // dropped by the frame cap, or a frame already released with its window) publishes
+            // nothing: no diff baseline for an id without a frame (the baseline table stays
+            // bounded by the frame table) and no per-window provider probe or counters. The
+            // provider state keeps following the window lifecycle (ReleaseWindow).
+            if (nodes.Length == 0)
+            {
+                return;
+            }
+            PublishSecondary(windowId, frame, nodes, DiffFrames(windowId, nodes));
             return;
         }
+        // The event source is managed state, so the diff runs even when the host is unavailable.
+        int events = DiffFrames(windowId, nodes);
         PendingEventCount = events;
         if (!_available || nodes.Length == 0)
         {
@@ -1187,7 +1294,7 @@ public static partial class OpenHarmonyAccessibility
             && node.RangeCurrent.Equals(rangeCurrent)
             && node.Checked == checkedState;
 
-    private static bool Visit(IView root, Frame previous, bool modal)
+    private static bool Visit(IView root, Frame previous, bool modal, int nodeLimit)
     {
         // N4: the Window.TitleBar row is a logical child of the window, not of the page the walk
         // starts from, so it is seeded as the render root's first child (it is the topmost row).
@@ -1201,6 +1308,15 @@ public static partial class OpenHarmonyAccessibility
         s_buildPending.Push((root, 0));
         while (s_buildPending.Count > 0)
         {
+            if (s_buildNodes.Count >= nodeLimit)
+            {
+                // SEC-SCAN-5c F: the secondary-window walk stops at the node cap. Parents are
+                // always added before their children, so the truncated frame is a well-formed
+                // prefix (every published parent id resolves); the truncation republishes as a
+                // length change. The primary window passes int.MaxValue and never stops here.
+                WindowFrameWalksTruncated++;
+                break;
+            }
             (IView view, int parent) = s_buildPending.Pop();
             int index = s_buildNodes.Count;
             int id = index + 1;

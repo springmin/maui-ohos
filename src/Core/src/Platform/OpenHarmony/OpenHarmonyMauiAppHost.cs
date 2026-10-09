@@ -49,11 +49,43 @@ public sealed class OpenHarmonyMauiAppHost
     // M3: realized windows waiting for the shell's subwindow XComponent surface, keyed by the
     // id the shell was asked to bring up. Guarded by _sync.
     private readonly Dictionary<string, IWindow> _awaitingWindows = new(StringComparer.Ordinal);
-    // MULTIWINDOW-L3 M1: the shell's session registry carries this many managed children
-    // (SUB_WINDOW_MAX in the shell template); the host offers the same bound, so a request
-    // beyond it is declined honestly instead of parked for a surface the shell would answer
-    // 801 to.
-    internal const int MaxManagedSubWindows = 2;
+    // MULTIWINDOW-L3 M1/N-SUBWINDOW: the shell's session registry carries this many managed
+    // children (SUB_WINDOW_DEFAULT_MAX / SUB_WINDOW_MAX in the shell template); the host offers
+    // the same bound, so a request beyond it is declined honestly instead of parked for a
+    // surface the shell would answer 801 to. The default stays at two sessions; the
+    // OHOS_SUBWINDOW_MAX environment variable - the same switch the shell reads (with its
+    // rawfile twin on the shell side) - raises the offer up to the supported ceiling. The value
+    // is read on first use (the first deferred OpenWindow), after the app's startup code could
+    // have set the variable.
+    internal const int DefaultMaxManagedSubWindows = 2;
+    internal const int MaxSupportedManagedSubWindows = 8;
+    private static int s_maxManagedSubWindows = -1;
+
+    /// <summary>The offered managed-child bound (default 2; env OHOS_SUBWINDOW_MAX).</summary>
+    internal static int MaxManagedSubWindows
+    {
+        get
+        {
+            if (s_maxManagedSubWindows < 0)
+            {
+                s_maxManagedSubWindows = ReadMaxManagedSubWindows();
+            }
+            return s_maxManagedSubWindows;
+        }
+    }
+
+    /// <summary>Reads the managed-child bound from OHOS_SUBWINDOW_MAX and clamps it to
+    /// [<see cref="DefaultMaxManagedSubWindows"/>, <see cref="MaxSupportedManagedSubWindows"/>];
+    /// an absent or unparsable value is the default.</summary>
+    private static int ReadMaxManagedSubWindows()
+    {
+        string? raw = Environment.GetEnvironmentVariable("OHOS_SUBWINDOW_MAX");
+        if (int.TryParse(raw, out int value))
+        {
+            return Math.Clamp(value, DefaultMaxManagedSubWindows, MaxSupportedManagedSubWindows);
+        }
+        return DefaultMaxManagedSubWindows;
+    }
 
     public OpenHarmonyMauiAppHost(IServiceProvider services)
     {

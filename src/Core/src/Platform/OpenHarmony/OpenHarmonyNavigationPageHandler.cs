@@ -94,6 +94,13 @@ public sealed class OpenHarmonyNavigationPageHandler : OpenHarmonyViewHandler<Na
             {
                 navigation.NavigationFinished(request.NavigationStack);
             }
+            // A push/pop replaces the visible page without raising a measure invalidation the
+            // compositor's layout gate can see, so the new page would stay unarranged (and its
+            // handlers unconnected) until an unrelated invalidation happens to arrive - the
+            // deep-link/quiet-app "page never lands" defect. The standard handlers re-arrange
+            // their container in RequestNavigation; this slice has no platform layout, so the
+            // mark is the equivalent signal for the renderer's next frame.
+            OpenHarmonyLayoutInvalidation.Mark();
             UpdateNavigationBar();
             OpenHarmonyBridge.RequestRedraw();
             return;

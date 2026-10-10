@@ -298,6 +298,7 @@ public sealed class OpenHarmonyMauiAppHost
             OpenHarmonyBridge.WriteStatus("[maui] application did not create a window");
             return;
         }
+        WatchModalLayout(_window);
         OpenHarmonyHandlerConnector.Context = _context;
         lock (_sync)
         {
@@ -390,6 +391,31 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>
+    /// Subscribes to the window's modal stack so a modal push/pop marks the compositor's layout
+    /// gate and requests a redraw, exactly like the NavigationPage RequestNavigation path. A
+    /// modal swaps <see cref="RootView"/> from the window content to the pushed page; the root
+    /// swap alone re-arranges on the next frame, but a quiet app (deep link, no input) never
+    /// requests that frame, so the modal page stayed unarranged and its handlers unconnected -
+    /// the PushModalAsync twin of the deep-link navigation defect. Marking the gate is
+    /// thread-safe (Interlocked) and RequestRedraw is the bridge's normal wakeup, so the
+    /// managed push may run on any callback thread.
+    /// </summary>
+    private static void WatchModalLayout(IWindow window)
+    {
+        if (window is Microsoft.Maui.Controls.Window controlsWindow)
+        {
+            controlsWindow.ModalPushed += (_, _) => OnModalStackChanged();
+            controlsWindow.ModalPopped += (_, _) => OnModalStackChanged();
+        }
+    }
+
+    private static void OnModalStackChanged()
+    {
+        OpenHarmonyLayoutInvalidation.Mark();
+        OpenHarmonyBridge.RequestRedraw();
+    }
+
+    /// <summary>
     /// Makes <paramref name="window"/> the host's single live window: connects the slice handlers,
     /// arranges it for the last reported surface size, raises Created and (the platform is already
     /// foregrounded when a window is adopted after startup) Activated, and starts rendering.
@@ -406,6 +432,7 @@ public sealed class OpenHarmonyMauiAppHost
         _window = window;
         _created = false;
         _activated = false;
+        WatchModalLayout(_window);
         OpenHarmonyHandlerConnector.Context = _context;
         lock (_sync)
         {
@@ -1191,7 +1218,7 @@ public sealed class OpenHarmonyMauiAppHost
                 return;
             }
             // Activity indicators keep animating: advance the shared angle and redraw.
-            if (_renderer.HasAnimations(_window?.Content as IView))
+            if (_renderer.HasAnimations(RootView))
             {
                 OpenHarmonyView.AnimationAngle = (OpenHarmonyView.AnimationAngle + 24f) % 360f;
                 _dirty = true;
@@ -1204,17 +1231,20 @@ public sealed class OpenHarmonyMauiAppHost
         }
     }
 
-    /// <summary>Measures/arranges the current window content for the given surface size.</summary>
+    /// <summary>Measures/arranges the current render root for the given surface size.</summary>
     public void Arrange(int width, int height)
     {
         lock (_sync)
         {
             _width = width;
             _height = height;
-            if (!_ready || _window?.Content is not IView content)
+            if (!_ready || _window is null || RootView is not IView content)
             {
                 return;
             }
+            // The modal-aware root, not the window content: with a modal up the window shows
+            // the modal page, and the modal's tree only gets connected/arranged through its own
+            // arrange walk (the content-tree walk never reaches a page that is not in it).
             ArrangeContent(_window, content, new Rect(0, 0, width, height));
         }
     }
@@ -1269,10 +1299,16 @@ public sealed class OpenHarmonyMauiAppHost
     {
         lock (_sync)
         {
-            if (!_ready || _window?.Content is not IView content || _width <= 0)
+            if (!_ready || RootView is not IView content || _width <= 0)
             {
                 return false;
             }
+            // The modal-aware render root: a pushed modal page replaces the window content on
+            // screen (RootView reads the modal stack). A modal page sits outside the window
+            // content tree, so connect it before the renderer measures/arranges it - the
+            // renderer's layout pass does not run the connect walk itself. Cheap when the root
+            // is already connected (the normal case).
+            OpenHarmonyHandlerConnector.ConnectTree(content);
             return _renderer.Render(content, _width, _height);
         }
     }

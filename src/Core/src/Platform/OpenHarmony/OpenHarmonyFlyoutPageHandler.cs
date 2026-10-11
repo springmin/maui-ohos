@@ -78,6 +78,10 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
         {
             flyoutPage.IsPresentedChanged -= OnIsPresentedChanged;
             OpenHarmonyBridge.BackPressed -= OnBackPressed;
+            // MODAL-OVERLAY: a disconnected drawer no longer renders, so it must not keep the
+            // overlay suspension armed (a page the window dropped would otherwise suppress every
+            // later modal's overlay).
+            OpenHarmonyOverlaySuspension.DrawerChanged(flyoutPage, presented: false);
         }
         base.DisconnectHandler(platformView);
     }
@@ -99,16 +103,14 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
 
     private void OnIsPresentedChanged(object? sender, EventArgs args)
     {
-        MapIsPresented(this, VirtualView!);
         // FIX-WVP: the single ArkWeb overlay renders above the managed surface, so the drawer
-        // the compositor draws would be covered by a visible web page. Suspend the overlay while
-        // the drawer is open (the shell then ignores frame/load re-shows) and resume its previous
-        // visibility when it closes, so a drawer on a page without a web control cannot make a
-        // stale overlay reappear.
-        if (VirtualView is { IsPresented: false })
-        {
-            OpenHarmonyBridge.WebCommand("resume");
-        }
+        // the compositor draws would be covered by a visible web page. The overlay suspension
+        // hides every overlay while the drawer is open (the shell then ignores frame/load
+        // re-shows) and restores its previous visibility when it closes, so a drawer on a page
+        // without a web control cannot make a stale overlay reappear. MODAL-OVERLAY: the
+        // suspension is state-owned (OpenHarmonyOverlaySuspension), so a presented drawer also
+        // stops hiding the overlays of a modal that is on top of it.
+        MapIsPresented(this, VirtualView!);
         ArrangeContent();
         OpenHarmonyBridge.RequestRedraw();
     }
@@ -153,14 +155,12 @@ public sealed class OpenHarmonyFlyoutPageHandler : OpenHarmonyViewHandler<Flyout
     public static void MapIsPresented(OpenHarmonyFlyoutPageHandler handler, FlyoutPage flyoutPage)
     {
         handler.PlatformView.FlyoutPresented = flyoutPage.IsPresented;
-        if (flyoutPage.IsPresented)
-        {
-            // FIX-WVP: the ArkWeb overlay sits above the managed surface; suspend it while the
-            // compositor-drawn drawer is open (also covers a drawer that starts presented). The
-            // flyout handler's own arrange cycle re-emits the detail's web frame, which the
-            // shell ignores while suspended.
-            OpenHarmonyBridge.WebCommand("suspend");
-        }
+        // FIX-WVP: the ArkWeb overlay sits above the managed surface; the suspension hides it
+        // while the compositor-drawn drawer is open (also covers a drawer that starts presented).
+        // The flyout handler's own arrange cycle re-emits the detail's web frame, which the
+        // shell ignores while suspended. MODAL-OVERLAY: the state owner keeps this idempotent
+        // (repeated mapper calls) and lifts the suspension while a modal is on top of the drawer.
+        OpenHarmonyOverlaySuspension.DrawerChanged(flyoutPage, flyoutPage.IsPresented);
     }
 
     public static void MapContent(OpenHarmonyFlyoutPageHandler handler, FlyoutPage flyoutPage)

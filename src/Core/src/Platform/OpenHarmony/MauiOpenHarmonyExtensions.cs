@@ -63,6 +63,8 @@ public static class MauiOpenHarmonyExtensions
         [typeof(Microsoft.Maui.Controls.TemplatedView)] = new(typeof(OpenHarmonyContentViewHandler)),
         [typeof(IWebView)] = new(typeof(OpenHarmonyWebViewHandler)),
         [typeof(IHybridWebView)] = new(typeof(OpenHarmonyHybridWebViewHandler)),
+        // MEDIAELEMENT-ARKWEB A-M1: the ArkWeb HTML5 media element (surface + handler pair).
+        [typeof(IOpenHarmonyMediaElementView)] = new(typeof(OpenHarmonyMediaElementHandler)),
 #if OPENHARMONY_BLAZOR_WEBVIEW
         [typeof(Microsoft.AspNetCore.Components.WebView.Maui.IBlazorWebView)] = new(typeof(OpenHarmonyBlazorWebViewHandler)),
 #endif

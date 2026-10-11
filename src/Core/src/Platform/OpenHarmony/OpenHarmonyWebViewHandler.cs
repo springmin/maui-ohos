@@ -837,6 +837,9 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         }
         JsMessage?.Invoke(payload);
         OpenHarmonyHybridWebViewHandler.OnJsMessage(payload);
+        // MEDIAELEMENT-ARKWEB A-M1: media page events (the surface validates the envelope and
+        // routes by document id; foreign payloads are ignored).
+        OpenHarmonyMediaElementSurface.OnJsMessage(payload);
     }
 
     /// <summary>

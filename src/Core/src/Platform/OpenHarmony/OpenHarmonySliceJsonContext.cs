@@ -47,6 +47,8 @@ namespace Microsoft.Maui.Platform;
 [JsonSerializable(typeof(OpenHarmonyHybridWebViewHandler.HybridAssetsConfig))]
 [JsonSerializable(typeof(OpenHarmonyHybridWebViewHandler.DotNetInvokeResult))]
 [JsonSerializable(typeof(OpenHarmonyWebViewHandler.WasmSiteConfig))]
+// MEDIAELEMENT-ARKWEB A-M1: the "media" registration payload (the surface's MediaAssetsConfig).
+[JsonSerializable(typeof(OpenHarmonyMediaElementSurface.MediaAssetsConfig))]
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(string))]
 // The BlazorWebView IPC payload shape; see the header. Kept outside the OPENHARMONY_BLAZOR_WEBVIEW

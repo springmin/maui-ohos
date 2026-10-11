@@ -52,16 +52,18 @@ public sealed class OpenHarmonyMauiAppHost
     // MULTIWINDOW-L3 M1/N-SUBWINDOW: the shell's session registry carries this many managed
     // children (SUB_WINDOW_DEFAULT_MAX / SUB_WINDOW_MAX in the shell template); the host offers
     // the same bound, so a request beyond it is declined honestly instead of parked for a
-    // surface the shell would answer 801 to. The default stays at two sessions; the
+    // surface the shell would answer 801 to. The default is four sessions; the
     // OHOS_SUBWINDOW_MAX environment variable - the same switch the shell reads (with its
-    // rawfile twin on the shell side) - raises the offer up to the supported ceiling. The value
-    // is read on first use (the first deferred OpenWindow), after the app's startup code could
-    // have set the variable.
-    internal const int DefaultMaxManagedSubWindows = 2;
+    // rawfile twin on the shell side) - may lower the offer down to the floor or raise it up to
+    // the supported ceiling. The value is read on first use (the first deferred OpenWindow),
+    // after the app's startup code could have set the variable.
+    internal const int MinManagedSubWindows = 2;
+    internal const int DefaultMaxManagedSubWindows = 4;
     internal const int MaxSupportedManagedSubWindows = 8;
     private static int s_maxManagedSubWindows = -1;
 
-    /// <summary>The offered managed-child bound (default 2; env OHOS_SUBWINDOW_MAX).</summary>
+    /// <summary>The offered managed-child bound (default 4; env OHOS_SUBWINDOW_MAX, clamped
+    /// into [<see cref="MinManagedSubWindows"/>, <see cref="MaxSupportedManagedSubWindows"/>]).</summary>
     internal static int MaxManagedSubWindows
     {
         get
@@ -75,14 +77,14 @@ public sealed class OpenHarmonyMauiAppHost
     }
 
     /// <summary>Reads the managed-child bound from OHOS_SUBWINDOW_MAX and clamps it to
-    /// [<see cref="DefaultMaxManagedSubWindows"/>, <see cref="MaxSupportedManagedSubWindows"/>];
-    /// an absent or unparsable value is the default.</summary>
+    /// [<see cref="MinManagedSubWindows"/>, <see cref="MaxSupportedManagedSubWindows"/>]; an
+    /// absent or unparsable value is the default.</summary>
     private static int ReadMaxManagedSubWindows()
     {
         string? raw = Environment.GetEnvironmentVariable("OHOS_SUBWINDOW_MAX");
         if (int.TryParse(raw, out int value))
         {
-            return Math.Clamp(value, DefaultMaxManagedSubWindows, MaxSupportedManagedSubWindows);
+            return Math.Clamp(value, MinManagedSubWindows, MaxSupportedManagedSubWindows);
         }
         return DefaultMaxManagedSubWindows;
     }

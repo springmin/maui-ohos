@@ -18,10 +18,16 @@
 //                  through the page's own events; the state enum is the T20 AVPlayer-shaped
 //                  OpenHarmonyMediaPlaybackState so both media bridges speak one type.
 //
-// Degradation: no host library (off-device), no slot (the subwindow pool is full or the window
-// is a secondary one - the subwindow ArkWeb pool has no media service in this wave) and a shell
-// without the media origin all answer Unavailable/Failed without throwing; the surface must be
-// explicitly attached, so the off-device suite can drive it with a stub slot owner.
+// Degradation: no host library (off-device), no slot (the element's window pool is full) and a
+// shell without the media origin all answer Unavailable/Failed without throwing; the surface must
+// be explicitly attached, so the off-device suite can drive it with a stub slot owner.
+//
+// MULTIWINDOW (B-M1): the window-aware transport reaches secondary windows too. A media element
+// in a subwindow claims that window's child ArkWeb slot (OpenHarmonyChildWeb), the shell's child
+// page serves the shared media origin, and the page's events travel back through the child
+// dotnetHost proxy carrying the media document id - the same trusted route as the primary
+// window's (see OpenHarmonyMediaElementSurface.ReleaseWindowOverlays and the child "media" op in
+// pages/SubWindow.ets).
 //
 // AOT: Utf8 LibraryImport only through the shared eval/command transports; JSON goes through
 // the source-generated OpenHarmonySliceJsonContext, and the page payload parser uses JsonDocument
@@ -228,7 +234,7 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
 
     /// <summary>
     /// Claims the overlay slot and arms the shell bridge. Called by the handler when the control
-    /// connects; idempotent. Without a slot (a full subwindow pool) the element stays Failed.
+    /// connects; idempotent. Without a slot (a full window pool) the element stays Failed.
     /// </summary>
     public void Attach()
     {
@@ -562,7 +568,8 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         return null;
     }
 
-    /// <summary>Drops the slot claim of an ended window (called with the window host reset).</summary>
+    /// <summary>Drops the slot claim of an ended window (called with the window host reset; the
+    /// child page destroys the released slot, so no media page survives its window).</summary>
     internal static void ReleaseWindowOverlays(string windowId)
     {
         if (string.IsNullOrEmpty(windowId) || windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
@@ -618,13 +625,10 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         {
             return false;
         }
-        if (OpenHarmonyChildWeb.IsApplicable(_windowId))
-        {
-            // The subwindow ArkWeb pool has no media service in this wave: degrade instead of
-            // tagging a command the child page never serves.
-            OpenHarmonyBridge.WriteStatus($"[maui] media element unavailable in window {_windowId} (no child media service)");
-            return false;
-        }
+        // The owning control's window is the claim scope (B-M1): resolve it before claiming, so
+        // a media element that connects inside a secondary window takes that window's child pool
+        // instead of a primary overlay.
+        RefreshWindow();
         if (_slot >= 0)
         {
             OpenHarmonyChildWeb.TouchForWindow(_windowId, _slot, this);
@@ -646,7 +650,12 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         return true;
     }
 
-    /// <summary>Re-resolves the managed window (a late stamp after a deferred OpenWindow).</summary>
+    /// <summary>
+    /// Re-resolves the managed window (a late stamp after a deferred OpenWindow). A claim that
+    /// belonged to the previous window is released with it; the element then re-claims through
+    /// the same replay path AUTODISCONNECT/preemption use (the next AttachOverlay/Arrange), so a
+    /// late window stamp can never leave the element pointing at the wrong window's pool.
+    /// </summary>
     private void RefreshWindow()
     {
         if (_windowClosed || _windowIdResolver is null)
@@ -658,11 +667,14 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         {
             return;
         }
+        bool held = _slot >= 0;
         OpenHarmonyChildWeb.ReleaseForWindow(_windowId, _slot, this);
         _slot = -1;
-        _preempted = false;
-        _detached = false;
         _windowId = resolved;
+        if (held)
+        {
+            _detached = true;
+        }
     }
 
     /// <summary>
@@ -766,6 +778,11 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
             case "error":
             case "playfailed":
                 ApplyError(json);
+                return;
+            case "hls":
+                // HLS diagnostics (B-M1): manifest-parsed/recover-*/fallback-native/error
+                // lines from the media page; the shell log carries them for the device round.
+                OpenHarmonyBridge.WriteStatus($"[maui] media hls event: {json}");
                 return;
             default:
                 return;

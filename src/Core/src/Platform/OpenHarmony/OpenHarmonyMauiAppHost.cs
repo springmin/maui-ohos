@@ -404,13 +404,20 @@ public sealed class OpenHarmonyMauiAppHost
     {
         if (window is Microsoft.Maui.Controls.Window controlsWindow)
         {
-            controlsWindow.ModalPushed += (_, _) => OnModalStackChanged();
-            controlsWindow.ModalPopped += (_, _) => OnModalStackChanged();
+            controlsWindow.ModalPushed += (_, _) => OnModalStackChanged(controlsWindow);
+            controlsWindow.ModalPopped += (_, _) => OnModalStackChanged(controlsWindow);
         }
     }
 
-    private static void OnModalStackChanged()
+    private static void OnModalStackChanged(Microsoft.Maui.Controls.Window window)
     {
+        // MODAL-OVERLAY: a modal replaces the whole window content, so a presented drawer is not
+        // rendered while one is up. The drawer's FIX-WVP overlay suspension has to follow that:
+        // lifted on the push (otherwise the modal page's own overlay - WebView, media element -
+        // stays suppressed by the shell's sticky suspension and only its managed placeholder is
+        // on screen) and re-armed on the pop, when the drawer comes back. The command pair is
+        // owned by OpenHarmonyOverlaySuspension and emitted only when the state actually flips.
+        OpenHarmonyOverlaySuspension.ModalChanged(window.Navigation.ModalStack.Count > 0);
         OpenHarmonyLayoutInvalidation.Mark();
         OpenHarmonyBridge.RequestRedraw();
     }

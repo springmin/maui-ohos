@@ -261,6 +261,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         }
         OpenHarmonyHybridWebViewHandler.ReleaseWindowOverlays(windowId);
         OpenHarmonyBlazorWebViewHandler.ReleaseWindowOverlays(windowId);
+        // MEDIA-SUBWIN (B-M1): a closed window's media elements drop their child slot claims too,
+        // so the child page's ArkWeb slot is destroyed with the window and a later window reusing
+        // the id starts without media state.
+        OpenHarmonyMediaElementSurface.ReleaseWindowOverlays(windowId);
     }
 
     /// <summary>

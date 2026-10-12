@@ -354,11 +354,18 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         _ = RunCommandAsync($"window.__ohMedia.setAspect(\"{(aspect == OpenHarmonyMediaAspect.AspectFill ? "fill" : "fit")}\")");
     }
 
-    /// <summary>Starts playback. The page must have a loaded source (see SetSource).</summary>
-    public Task<OpenHarmonyMediaResult> PlayAsync()
+    /// <summary>
+    /// Starts playback. The page must have a loaded source (see SetSource). A cold start races
+    /// the page: SetSource registers it and the page publishes window.__ohMedia a moment later,
+    /// so a play issued into that window used to answer Unavailable and was replayed by
+    /// HandleReady. The bounded wait keeps the first answer the page's own; a bridge that never
+    /// delivers the page still answers Unavailable (the off-device contract is unchanged).
+    /// </summary>
+    public async Task<OpenHarmonyMediaResult> PlayAsync()
     {
         _playRequested = true;
-        return RunCommandAsync("window.__ohMedia.play()");
+        await WaitForPageReadyAsync().ConfigureAwait(false);
+        return await RunCommandAsync("window.__ohMedia.play()").ConfigureAwait(false);
     }
 
     /// <summary>Pauses playback; the current position is kept.</summary>
@@ -869,6 +876,35 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         _state = (int)OpenHarmonyMediaPlaybackState.Error;
         StateChanged?.Invoke(this, new OpenHarmonyMediaStateChangedEventArgs(OpenHarmonyMediaPlaybackState.Error, message));
         Failed?.Invoke(this, new OpenHarmonyMediaFailedEventArgs(code, message));
+    }
+
+    // The cold-start wait bound: the shell serves the media page from its rawfile in ~100 ms on
+    // this device; 1.5 s covers a slow start and still answers Unavailable on a dead bridge.
+    // The wait is armed only while a registration is actually in flight, so a source-less or
+    // detached element (and the off-device stub) answers immediately.
+    private const int PageReadyWaitMs = 1500;
+    private const int PageReadyPollMs = 50;
+
+    /// <summary>True while SetSource registered the page and its "ready" event has not arrived.</summary>
+    private bool PendingPageLoad()
+    {
+        if (!IsSupported || !_hasSource || _registeredKey is null)
+        {
+            return false;
+        }
+        lock (_stateSync)
+        {
+            return !_pageReady;
+        }
+    }
+
+    /// <summary>Waits (bounded) for a page load that is already in flight. Never throws.</summary>
+    private async Task WaitForPageReadyAsync()
+    {
+        for (int waited = 0; waited < PageReadyWaitMs && PendingPageLoad(); waited += PageReadyPollMs)
+        {
+            await Task.Delay(PageReadyPollMs).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

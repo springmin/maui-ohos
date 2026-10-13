@@ -631,6 +631,8 @@ Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.OpenHarmonyScrollViewHandle
 Microsoft.Maui.Platform.OpenHarmonySearchBarHandler
 Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.OpenHarmonySearchBarHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonySecureStorage
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.FailClosed.get -> bool
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.FailClosed.set -> void
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.GetAsync(string! key) -> System.Threading.Tasks.Task<string?>!
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.IsHardwareBacked.get -> bool
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.OpenHarmonySecureStorage(string? path = null) -> void

@@ -13,8 +13,34 @@ internal static partial class OpenHarmonyKeystore
     private static readonly ConcurrentDictionary<int, TaskCompletionSource<(int Rc, string Data)>> s_pending = new();
     private static int s_nextId;
     private static bool s_unavailable;
+    private static KeystoreTestMode s_testMode;
 
     public static bool IsUnavailable => s_unavailable;
+
+    /// <summary>
+    /// Slice-harness seam: the keystore shapes a device cannot be asked to produce on demand,
+    /// so the storage contracts (the HUKS-first write, the fail-closed refusal, the documented
+    /// fallback) are exercised off-device. <see cref="KeystoreTestMode.Off"/> is the real host
+    /// path; the other modes answer every request in memory and never touch the native code.
+    /// </summary>
+    internal enum KeystoreTestMode
+    {
+        /// <summary>The real host path (the device probe and the request queue).</summary>
+        Off,
+        /// <summary>A working keystore: generate/encrypt/decrypt/delete round-trip in memory.</summary>
+        Working,
+        /// <summary>The capability probe reports HUKS, but every operation is rejected.</summary>
+        OperationFailed,
+        /// <summary>No keystore: every request fails and the capability probe is false.</summary>
+        Unavailable,
+    }
+
+    /// <summary>The harness-selected keystore behaviour (see <see cref="KeystoreTestMode"/>).</summary>
+    internal static KeystoreTestMode TestMode
+    {
+        get => s_testMode;
+        set => s_testMode = value;
+    }
 
     public static void Complete(int requestId, int rc, string data)
     {
@@ -72,6 +98,14 @@ internal static partial class OpenHarmonyKeystore
     {
         get
         {
+            switch (s_testMode)
+            {
+                case KeystoreTestMode.Working:
+                case KeystoreTestMode.OperationFailed:
+                    return true;
+                case KeystoreTestMode.Unavailable:
+                    return false;
+            }
             if (s_available is bool cached)
             {
                 return cached;
@@ -96,6 +130,14 @@ internal static partial class OpenHarmonyKeystore
 
     private static async Task<string?> ExecuteAsync(string op, string alias, string dataBase64, int timeoutMs)
     {
+        switch (s_testMode)
+        {
+            case KeystoreTestMode.Working:
+                return Simulate(op, dataBase64);
+            case KeystoreTestMode.OperationFailed:
+            case KeystoreTestMode.Unavailable:
+                return null;
+        }
         if (s_unavailable)
         {
             return null;
@@ -126,6 +168,31 @@ internal static partial class OpenHarmonyKeystore
             return null;
         }
         return data;
+    }
+
+    /// <summary>
+    /// The harness keystore's stand-in cipher: XOR 0x5A, so a sealed payload differs from the
+    /// plaintext and round-trips for any input. The device's AES-256-GCM path is exercised on
+    /// hardware, not here.
+    /// </summary>
+    private static string? Simulate(string op, string dataBase64)
+    {
+        switch (op)
+        {
+            case "generate":
+            case "delete":
+                return string.Empty;
+            case "encrypt":
+            case "decrypt":
+                byte[] bytes = Convert.FromBase64String(dataBase64);
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    bytes[i] ^= 0x5A;
+                }
+                return Convert.ToBase64String(bytes);
+            default:
+                return null;
+        }
     }
 
     [System.Runtime.InteropServices.LibraryImport("libopenharmonyhost.so", EntryPoint = "ohos_host_keystore_request", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf8)]

@@ -1,7 +1,8 @@
 // ISecureStorage for OpenHarmony: values are sealed through HUKS (Universal KeyStore) with a
 // device-bound AES-256-GCM key when the device provides the keystore (the host's native engine,
 // see OpenHarmonyKeystore); otherwise they fall back to a per-install obfuscation key next to the
-// data file (documented as not hardware-backed).
+// data file (documented as not hardware-backed). Setting OpenHarmonySecureStorage.FailClosed
+// refuses that fallback: a failed keystore path throws and no value is written.
 using System.Globalization;
 using System.Text;
 using Microsoft.Maui.Storage;
@@ -85,6 +86,18 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
     }
 
     /// <summary>
+    /// Security policy for a failed keystore path. False (the default) keeps the documented
+    /// fallback: a value whose HUKS path fails is obfuscated with the per-install file key and
+    /// the downgrade is reported once through <see cref="OpenHarmonyStatus.Once"/>. True
+    /// (fail-closed) refuses the downgrade: a Set that cannot use HUKS throws and nothing is
+    /// written to the data file, and a sealed <c>k1:</c> value that cannot be decrypted throws
+    /// instead of reading as absent. Credential-bearing apps should set this before using the
+    /// store; the process-wide default stays false so the fallback contract of already-shipped
+    /// apps (headless and reduced hosts) is unchanged.
+    /// </summary>
+    public static bool FailClosed { get; set; }
+
+    /// <summary>
     /// True when this device exposes the HUKS-backed keystore path: the value key is generated
     /// and kept by the system keystore so the ciphertext on disk is device-bound. False is the
     /// honest fallback state: values are obfuscated with the per-install file key only, not
@@ -119,6 +132,14 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
                 return null;
             }
             byte[]? plain = await OpenHarmonyKeystore.DecryptAsync(_alias, cipher).ConfigureAwait(false);
+            if (plain is null && FailClosed)
+            {
+                // Fail-closed: the value exists but its HUKS-backed read failed (no keystore,
+                // a rejected op, or lost key material). Reading as absent would hide the
+                // failure; the caller decides what an unreadable credential means.
+                throw new InvalidOperationException(
+                    $"secure storage is fail-closed and the HUKS-backed read failed for '{key}'");
+            }
             return plain is null ? null : Encoding.UTF8.GetString(plain);
         }
         return value;
@@ -141,6 +162,15 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
                 }
                 return;
             }
+        }
+        if (FailClosed)
+        {
+            // Fail-closed: a value that cannot be sealed by HUKS is not persisted at all, so a
+            // host without the keystore can never silently downgrade a credential to the
+            // per-install file key. The throw is the observable signal; the caller owns the
+            // failure (no fallback write, no status note).
+            throw new InvalidOperationException(
+                "secure storage is fail-closed and the HUKS-backed key path is unavailable: the value was not stored (OpenHarmonySecureStorage.FailClosed)");
         }
         // The keystore path failed (no HUKS on this device, or the op was rejected): the value
         // is obfuscated with the per-install file key only. Report it once so the weaker

@@ -10,29 +10,37 @@
 //     hand-off runs on a pool thread, never on the activation callback thread: that thread is
 //     the shell's JS thread, which the startAbility round trip would have to wait on (it is
 //     still inside the notifyActivation call), so a synchronous launch there can only time out.
-//  2. The browser's redirect to the callback scheme comes back as a new want: the ability's
-//     onNewWant (or the cold-start onCreate) hands the want uri to the host
-//     (host.notifyActivation), OpenHarmonyBridge.Activation delivers it here, and this class
-//     matches the route against options.CallbackUrl (scheme/host ignore case, the effective port
-//     and a non-root path must match - the same rules as the MAUI request manager) and parses
-//     the result through WebAuthenticatorResult, which consumes the query string AND the
-//     fragment and honours options.ResponseDecoder. A duplicate or non-matching delivery is
-//     ignored, never a second completion.
+//  2a. The custom-scheme route: the browser's redirect to the callback scheme comes back as a
+//     new want: the ability's onNewWant (or the cold-start onCreate) hands the want uri to the
+//     host (host.notifyActivation), OpenHarmonyBridge.Activation delivers it here, and this
+//     class matches the route against options.CallbackUrl (scheme/host ignore case, the
+//     effective port and a non-root path must match - the same rules as the MAUI request
+//     manager) and parses the result through WebAuthenticatorResult, which consumes the query
+//     string AND the fragment and honours options.ResponseDecoder. A duplicate or non-matching
+//     delivery is ignored, never a second completion.
+//  2b. The loopback route (http://127.0.0.1|localhost:<port>/...): the app binds its own
+//     one-shot listener (OpenHarmonyLoopbackListener) on the callback route and the browser's
+//     redirect reaches it directly - no callback skill, no "open with" chooser. The same route
+//     match applies, the first matching request wins, and the listener is torn down when the
+//     await ends. See OpenHarmonyWebAuthenticatorLoopback.cs for the route rules and the
+//     limitations (query-only, https/default-port rejection).
 //  3. Cancellation is the caller's token (MAUI defines no built-in timeout; a wait limit is a
 //     CancellationTokenSource passed by the app) and surfaces as the canceled await. A launch
 //     failure is the platform contract's InvalidOperationException; a missing platform host
 //     (desktop, minimal shell) keeps the documented FeatureNotSupportedException degrade.
 //
-// What the app/HAP must declare (runtime cannot verify it): module.json5 needs a
-// browsable/viewData skill carrying the callback scheme and host; the workload packaging
-// injects one from OpenHarmonyWebAuthenticatorCallbackUrls through
+// What the app/HAP must declare (runtime cannot verify it) for the custom-scheme route:
+// module.json5 needs a browsable/viewData skill carrying the callback scheme and host; the
+// workload packaging injects one from OpenHarmonyWebAuthenticatorCallbackUrls through
 // OpenHarmonyGenerateModuleJson (Callbacks), so the system can dispatch the redirect back to
 // the app. The shell side needs nothing new: the shipped EntryAbility template already captures
-// onCreate/onNewWant wants and forwards them (P2c).
+// onCreate/onNewWant wants and forwards them (P2c). The loopback route needs no declaration at
+// all (the browser resolves 127.0.0.1 itself); the app's HTTP stack needs the INTERNET
+// permission, which any flow whose authorize URL is remote already requires.
 //
 // Not representable here (noted once per process instead of failing the flow):
-//  - form_post responses: a POST to the redirect route has no want carrier; only a URI redirect
-//    (query or fragment) can reach the app.
+//  - form_post responses: neither a POST to the redirect route (no want carrier) nor a POST to
+//    the loopback listener (answered 405) can reach the result.
 //  - PrefersEphemeralWebBrowserSession: startAbility opens the regular external browser and has
 //    no ephemeral-session knob.
 using System.Reflection;
@@ -45,10 +53,12 @@ namespace Microsoft.Maui.Platform;
 
 /// <summary>
 /// WebAuthenticator for OpenHarmony. Starts the flow in the external system browser through the
-/// ability bridge and completes when the shell forwards the redirect want (callback scheme,
-/// host and path matched against <see cref="WebAuthenticatorOptions.CallbackUrl"/>), parsing the
-/// callback URI into a <see cref="WebAuthenticatorResult"/> with the MAUI semantics. Installed as
-/// the Essentials <see cref="WebAuthenticator.Default"/> and registered in DI by
+/// ability bridge and completes when the redirect comes back: a custom scheme arrives as the
+/// want the shell forwards (scheme, host and path matched against
+/// <see cref="WebAuthenticatorOptions.CallbackUrl"/>), a loopback http URL arrives at the app's
+/// own one-shot listener (<see cref="OpenHarmonyLoopbackListener"/>); either way the callback
+/// URI is parsed into a <see cref="WebAuthenticatorResult"/> with the MAUI semantics. Installed
+/// as the Essentials <see cref="WebAuthenticator.Default"/> and registered in DI by
 /// <see cref="MauiOpenHarmonyExtensions.UseOpenHarmony"/>.
 /// </summary>
 public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
@@ -57,17 +67,19 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
     public static readonly OpenHarmonyWebAuthenticator Instance = new();
 
     /// <summary>
-    /// Diagnoses the degrade when no platform host is present: the flow needs the HAP's callback
+    /// Diagnoses the degrade when no platform host is present: the flow needs the native host
+    /// the browser hand-off goes through, plus (for the custom-scheme route) the HAP's callback
     /// skill (injected from the packaging's OpenHarmonyWebAuthenticatorCallbackUrls) and the
-    /// shell's want forwarding, plus the native host the browser hand-off goes through.
+    /// shell's want forwarding.
     /// </summary>
     internal const string UnsupportedMessage =
         "WebAuthenticator cannot run on this platform host: the browser hand-off goes through " +
         "OpenHarmonyAbilityBridge (libopenharmonyhost.so + the shell's startAbility sink), which is " +
-        "not available here. On a device the HAP must declare the callback route " +
+        "not available here. On a device the custom-scheme route needs the HAP's callback route " +
         "(module.json5 abilities[].skills[].uris with the callback scheme/host; the packaging injects " +
-        "it from OpenHarmonyWebAuthenticatorCallbackUrls) and the shipped shell forwards the redirect " +
-        "want (onCreate/onNewWant -> host.notifyActivation) to reach AuthenticateAsync.";
+        "it from OpenHarmonyWebAuthenticatorCallbackUrls) and the shipped shell's forwarding of the " +
+        "redirect want (onCreate/onNewWant -> host.notifyActivation) to reach AuthenticateAsync; the " +
+        "loopback route needs no declaration and completes through the app's own listener.";
 
     /// <summary>
     /// Test seam replacing the platform browser hand-off: returns whether the authorize URL was
@@ -127,7 +139,18 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
             OpenHarmonyWebAuthenticatorLog.EphemeralOnce();
         }
 
+        // The callback route picks the return path: a custom scheme comes back through the
+        // shell's activation forwarding, a loopback http URL through the app's own listener.
+        // An http(s) route that is not a supported loopback fails synchronously (the platform
+        // cannot dispatch it; the same contract Windows applies to http(s) callbacks).
+        bool loopback = OpenHarmonyWebAuthenticatorLoopback.IsHttpCallback(callbackUrl);
+        if (loopback)
+        {
+            OpenHarmonyWebAuthenticatorLoopback.ValidateCallbackUrl(callbackUrl);
+        }
+
         var request = new Request(url, callbackUrl, webAuthenticatorOptions.ResponseDecoder, cancellationToken);
+        OpenHarmonyLoopbackListener? loopbackListener = null;
         bool subscribed = false;
         CancellationTokenRegistration registration = default;
         try
@@ -145,6 +168,15 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
                 OpenHarmonyBridge.Activation += s_onActivation;
                 subscribed = true;
             }
+
+            // A loopback route owns its port before the browser opens: the provider redirects
+            // to exactly this listener. A bind failure is the contract's synchronous
+            // InvalidOperationException (nothing was launched, nothing stays claimed).
+            if (loopback)
+            {
+                loopbackListener = OpenHarmonyLoopbackListener.Start(callbackUrl);
+            }
+
             registration = cancellationToken.Register(
                 static state =>
                 {
@@ -180,10 +212,19 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
                 }
             });
 
+            if (loopbackListener is not null)
+            {
+                // The listener pump competes with nothing: it is the only completion source of
+                // the loopback route (a stray activation for the same route is route-matched
+                // but loses the atomic completion claim).
+                StartLoopbackPump(request, loopbackListener);
+            }
+
             return await request.Task.ConfigureAwait(false);
         }
         finally
         {
+            loopbackListener?.Dispose();
             registration.Dispose();
             lock (s_sync)
             {
@@ -219,8 +260,9 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
 
     /// <summary>
     /// The bridge activation hook: completes the active request when the delivered want uri
-    /// matches its callback route. Runs on the shell callback thread, so nothing may escape into
-    /// the native frame; the route match and parse failures are silent/no-op by design.
+    /// matches its callback route (the custom-scheme route). Runs on the shell callback thread,
+    /// so nothing may escape into the native frame; the route match and parse failures are
+    /// silent/no-op by design.
     /// </summary>
     private static void OnActivation(OpenHarmonyActivationEventArgs activation)
     {
@@ -231,30 +273,72 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
             {
                 request = s_active;
             }
-            if (request is null || request.CompletionClaimed || string.IsNullOrEmpty(activation.Uri))
+            if (request is null || string.IsNullOrEmpty(activation.Uri))
             {
                 return;
             }
-            if (!Uri.TryCreate(activation.Uri, UriKind.Absolute, out Uri? callbackUri) ||
-                !CanHandleCallback(request.CallbackUrl, callbackUri))
+            if (!Uri.TryCreate(activation.Uri, UriKind.Absolute, out Uri? callbackUri))
             {
                 return;
             }
-            request.CompletionClaimed = true;
-            try
-            {
-                request.TrySetResult(new WebAuthenticatorResult(callbackUri, request.ResponseDecoder));
-            }
-            catch (Exception ex)
-            {
-                // A throwing IWebAuthenticatorResponseDecoder is delivered to the caller.
-                request.TrySetException(ex);
-            }
+            TryComplete(request, callbackUri);
         }
         catch (Exception)
         {
             // Never throw across the native activation callback boundary.
         }
+    }
+
+    /// <summary>
+    /// The single completion point of both routes: the route match, the atomic completion claim
+    /// (a duplicate, a replay or a racing delivery loses it) and the result parse. Returns
+    /// whether this delivery completed the request.
+    /// </summary>
+    private static bool TryComplete(Request request, Uri callbackUri)
+    {
+        if (!CanHandleCallback(request.CallbackUrl, callbackUri))
+        {
+            return false;
+        }
+        if (!request.TryClaimCompletion())
+        {
+            return false;
+        }
+        try
+        {
+            request.TrySetResult(new WebAuthenticatorResult(callbackUri, request.ResponseDecoder));
+        }
+        catch (Exception ex)
+        {
+            // A throwing IWebAuthenticatorResponseDecoder is delivered to the caller.
+            request.TrySetException(ex);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Drives the loopback listener for <paramref name="request"/> on a pool thread: each
+    /// candidate request URI goes through the same route match and single completion claim as
+    /// the activation route, and the listener is stopped by the caller's finally (completion,
+    /// cancellation or failure) as well as by its own successful completion.
+    /// </summary>
+    private static void StartLoopbackPump(Request request, OpenHarmonyLoopbackListener listener)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await listener.RunAsync(
+                    callbackUri => TryComplete(request, callbackUri),
+                    request.CancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The listener loop ends through completion, disposal or cancellation; a
+                // transport failure never faults the caller (the request stays pending until
+                // its own cancellation, exactly like a redirect that never arrives).
+            }
+        });
     }
 
     /// <summary>
@@ -323,6 +407,9 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
         private readonly TaskCompletionSource<WebAuthenticatorResult> s_source =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>0 while the completion is open, 1 once a delivery claimed it.</summary>
+        private int _completionClaimed;
+
         public Request(
             Uri url, Uri callbackUrl, IWebAuthenticatorResponseDecoder? responseDecoder, CancellationToken cancellationToken)
         {
@@ -340,8 +427,14 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
 
         public CancellationToken CancellationToken { get; }
 
-        /// <summary>Set once a matching delivery claimed the completion (duplicates are dropped).</summary>
-        public bool CompletionClaimed { get; set; }
+        /// <summary>Whether a delivery claimed the completion (duplicates and replays are dropped).</summary>
+        public bool CompletionClaimed => Volatile.Read(ref _completionClaimed) != 0;
+
+        /// <summary>
+        /// Atomically claims the one completion: exactly one delivery (activation or loopback,
+        /// whichever races first) gets true.
+        /// </summary>
+        public bool TryClaimCompletion() => Interlocked.CompareExchange(ref _completionClaimed, 1, 0) == 0;
 
         public Task<WebAuthenticatorResult> Task => s_source.Task;
 

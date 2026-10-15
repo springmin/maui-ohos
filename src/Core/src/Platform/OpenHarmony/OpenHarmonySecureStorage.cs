@@ -1,8 +1,17 @@
-// ISecureStorage for OpenHarmony: values are sealed through HUKS (Universal KeyStore) with a
-// device-bound AES-256-GCM key when the device provides the keystore (the host's native engine,
-// see OpenHarmonyKeystore); otherwise they fall back to a per-install obfuscation key next to the
-// data file (documented as not hardware-backed). Setting OpenHarmonySecureStorage.FailClosed
-// refuses that fallback: a failed keystore path throws and no value is written.
+// ISecureStorage for OpenHarmony: values are stored in the platform Asset Store (OH_Asset_*,
+// DEVICE_FIRST_UNLOCKED; host_asset.c) when the device provides it - the preferred,
+// credential-oriented backend - and sealed through HUKS (Universal KeyStore) with a device-bound
+// AES-256-GCM key otherwise (the host's native engine, see OpenHarmonyKeystore). Only when
+// neither strong backend is available does the store fall back to a per-install obfuscation key
+// next to the data file (documented as not hardware-backed); OpenHarmonySecureStorage.FailClosed
+// (the default) refuses even that: a Set that cannot use a strong backend throws and no value is
+// written, so a credential-bearing app never silently downgrades. An app that accepts the weak
+// fallback opts out by setting FailClosed = false.
+//
+// The data file stays the key index and the legacy store: a key written through the Asset Store
+// carries the "a1:" marker (the value itself lives only in the store), a HUKS-sealed value
+// carries "k1:", and pre-existing file-key values stay readable. Reads consult the backend the
+// index names, so old data (k1: / file fallback entries) parses unchanged.
 using System.Globalization;
 using System.Text;
 using Microsoft.Maui.Storage;
@@ -14,8 +23,16 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
     /// <summary>Bytes of the per-install fallback key (AES-256 key material for the XOR stream).</summary>
     private const int FileKeyBytes = 32;
 
+    /// <summary>
+    /// The data-file marker of a value that lives in the Asset Store. Not a secret: it names the
+    /// backend, so RemoveAll can enumerate the store-backed keys without the value ever touching
+    /// this file.
+    /// </summary>
+    private const string AssetMarker = "a1:";
+
     private readonly string _path;
     private readonly string _alias;
+    private readonly string _assetAliasPrefix;
     private readonly byte[] _key;
     // Serializes the load-modify-save sequences (and the file reads) of this store: two
     // concurrent Set calls would otherwise apply their values to the same snapshot and the
@@ -30,6 +47,10 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
         // namespaces the key for this library and v1 pins the scheme
         // (AES-256-GCM, sealed as nonce||ciphertext||tag).
         _alias = "maui.ohos.securestorage.v1." + PathHash(_path);
+        // One Asset Store alias per key: the store hash namespaces the install and the key hash
+        // keeps the key name (possibly sensitive itself) out of the system asset database and
+        // every log. Both halves are stable across processes and runs.
+        _assetAliasPrefix = "maui.ohos.securestorage.asset.v1." + PathHash(_path) + ".";
         _key = LoadOrCreateFileKey(_path + ".key");
     }
 
@@ -86,24 +107,23 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
     }
 
     /// <summary>
-    /// Security policy for a failed keystore path. False (the default) keeps the documented
-    /// fallback: a value whose HUKS path fails is obfuscated with the per-install file key and
-    /// the downgrade is reported once through <see cref="OpenHarmonyStatus.Once"/>. True
-    /// (fail-closed) refuses the downgrade: a Set that cannot use HUKS throws and nothing is
-    /// written to the data file, and a sealed <c>k1:</c> value that cannot be decrypted throws
-    /// instead of reading as absent. Credential-bearing apps should set this before using the
-    /// store; the process-wide default stays false so the fallback contract of already-shipped
-    /// apps (headless and reduced hosts) is unchanged.
+    /// Security policy for a failed strong chain. True (the default) is fail-closed: a Set that
+    /// can use neither the Asset Store nor the HUKS-backed keystore throws and nothing is
+    /// written, and an indexed value whose backend read fails throws instead of reading as
+    /// absent. False is the explicit opt-out for hosts without a strong backend: the value is
+    /// obfuscated with the per-install file key and the downgrade is reported once through
+    /// <see cref="OpenHarmonyStatus.Once"/>. Credential-bearing apps keep the default; the
+    /// weak fallback exists for headless and reduced hosts that opt out deliberately.
     /// </summary>
-    public static bool FailClosed { get; set; }
+    public static bool FailClosed { get; set; } = true;
 
     /// <summary>
-    /// True when this device exposes the HUKS-backed keystore path: the value key is generated
-    /// and kept by the system keystore so the ciphertext on disk is device-bound. False is the
-    /// honest fallback state: values are obfuscated with the per-install file key only, not
-    /// hardware-backed.
+    /// True when this device exposes a device-bound credential backend: the Asset Store
+    /// (OH_Asset_*) or the HUKS-backed keystore. False is the honest fallback state: values
+    /// would be obfuscated with the per-install file key only, not hardware-backed (and the
+    /// default fail-closed policy refuses to write them).
     /// </summary>
-    public static bool IsHardwareBacked => OpenHarmonyKeystore.IsAvailable;
+    public static bool IsHardwareBacked => OpenHarmonyAssetStore.IsAvailable || OpenHarmonyKeystore.IsAvailable;
 
     private const string KeystorePrefix = "k1:";
 
@@ -116,6 +136,34 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
         }
         if (!values.TryGetValue(key, out string? value))
         {
+            return null;
+        }
+        if (value == AssetMarker)
+        {
+            // The index names the Asset Store backend: a missing entry or a failed read is the
+            // same data-loss shape as an undecryptable sealed value, and fail-closed reports it
+            // instead of answering absent.
+            (int rc, string data) = await OpenHarmonyAssetStore.GetAsync(AssetAlias(key)).ConfigureAwait(false);
+            if (rc == OpenHarmonyAssetStore.RcOk)
+            {
+                byte[] plain;
+                try
+                {
+                    plain = Convert.FromBase64String(data);
+                }
+                catch (FormatException)
+                {
+                    // A corrupted answer reads as absent; malformed data never throws out of
+                    // GetAsync (mirroring the k1: shape below).
+                    return null;
+                }
+                return Encoding.UTF8.GetString(plain);
+            }
+            if (FailClosed)
+            {
+                throw new InvalidOperationException(
+                    $"secure storage is fail-closed and the Asset Store read failed for '{key}'");
+            }
             return null;
         }
         if (value.StartsWith(KeystorePrefix, StringComparison.Ordinal))
@@ -147,8 +195,15 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
 
     public async Task SetAsync(string key, string value)
     {
-        // Prefer the HUKS-backed keystore; the wrapper never throws. The keystore work happens
-        // before the file lock, so the store never blocks a thread across an await.
+        // Prefer the Asset Store - the credential backend; the HUKS keystore is the second
+        // strong tier, and the per-install file key the weak fallback that fail-closed refuses.
+        // Every network/keystore/store call happens before the file lock, so the store never
+        // blocks a thread across an await.
+        if (await OpenHarmonyAssetStore.PutAsync(AssetAlias(key), Convert.ToBase64String(Encoding.UTF8.GetBytes(value))).ConfigureAwait(false))
+        {
+            RecordAssetEntry(key);
+            return;
+        }
         if (await OpenHarmonyKeystore.EnsureKeyAsync(_alias).ConfigureAwait(false))
         {
             byte[]? cipher = await OpenHarmonyKeystore.EncryptAsync(_alias, Encoding.UTF8.GetBytes(value)).ConfigureAwait(false);
@@ -165,18 +220,17 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
         }
         if (FailClosed)
         {
-            // Fail-closed: a value that cannot be sealed by HUKS is not persisted at all, so a
-            // host without the keystore can never silently downgrade a credential to the
-            // per-install file key. The throw is the observable signal; the caller owns the
-            // failure (no fallback write, no status note).
+            // Fail-closed (the default): no strong backend answered, so the value is not
+            // persisted at all - a credential is never silently downgraded to the per-install
+            // file key. The throw is the observable signal; the caller owns the failure (no
+            // fallback write, no status note).
             throw new InvalidOperationException(
-                "secure storage is fail-closed and the HUKS-backed key path is unavailable: the value was not stored (OpenHarmonySecureStorage.FailClosed)");
+                "secure storage is fail-closed and neither the Asset Store nor the HUKS-backed key path is available: the value was not stored (OpenHarmonySecureStorage.FailClosed)");
         }
-        // The keystore path failed (no HUKS on this device, or the op was rejected): the value
-        // is obfuscated with the per-install file key only. Report it once so the weaker
-        // protection is visible at runtime, not just in the header.
+        // The opt-out path: the value is obfuscated with the per-install file key only. Report
+        // it once so the weaker protection is visible at runtime, not just in the header.
         OpenHarmonyStatus.Once("securestorage.filekey",
-            "secure storage is using the per-install file key: the HUKS-backed key path failed, values are obfuscated but not hardware-backed");
+            "secure storage is using the per-install file key: no device-bound backend answered, values are obfuscated but not hardware-backed");
         lock (_fileSync)
         {
             Dictionary<string, string> values = Load();
@@ -187,33 +241,80 @@ public sealed class OpenHarmonySecureStorage : ISecureStorage
 
     public bool Remove(string key)
     {
+        bool removed;
+        bool wasAsset;
         lock (_fileSync)
         {
             Dictionary<string, string> values = Load();
-            bool removed = values.Remove(key);
+            wasAsset = values.TryGetValue(key, out string? existing) && existing == AssetMarker;
+            removed = values.Remove(key);
             Save(values);
-            return removed;
         }
+        // Best effort: drop the store entry too (the index entry is already gone, so the value
+        // is unreachable even if the background delete fails). The call never throws.
+        if (wasAsset)
+        {
+            _ = OpenHarmonyAssetStore.RemoveAsync(AssetAlias(key));
+        }
+        return removed;
     }
 
     public void RemoveAll()
     {
+        List<string> assetKeys = new();
         lock (_fileSync)
         {
+            Dictionary<string, string> values = Load();
+            foreach (KeyValuePair<string, string> entry in values)
+            {
+                if (entry.Value == AssetMarker)
+                {
+                    assetKeys.Add(entry.Key);
+                }
+            }
             Save(new Dictionary<string, string>());
         }
-        // Best effort: drop the device-bound key too, so a cleared store leaves no key that
-        // could decrypt a stray ciphertext. The call never throws and is intentionally not
-        // awaited (ISecureStorage.RemoveAll is synchronous).
+        // Best effort: drop the indexed store entries and the device-bound key too, so a
+        // cleared store leaves no value that could be read again. The calls never throw and are
+        // intentionally not awaited (ISecureStorage.RemoveAll is synchronous).
+        _ = RemoveAssetEntriesAsync(assetKeys);
         _ = OpenHarmonyKeystore.DeleteKeyAsync(_alias);
     }
 
-    // FNV-1a over the UTF-8 path: a stable alias across processes and runs (HUKS aliases must
-    // be stable) and across .NET versions, unlike string.GetHashCode.
-    private static string PathHash(string path)
+    private async Task RemoveAssetEntriesAsync(List<string> keys)
+    {
+        foreach (string key in keys)
+        {
+            await OpenHarmonyAssetStore.RemoveAsync(AssetAlias(key)).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The key's Asset Store alias (see the constructor for the scheme).</summary>
+    private string AssetAlias(string key) => _assetAliasPrefix + Hash64(key);
+
+    /// <summary>
+    /// Records that the key lives in the Asset Store (the value itself is not copied here).
+    /// The marker also replaces any legacy value for the key, so the index always names exactly
+    /// one backend.
+    /// </summary>
+    private void RecordAssetEntry(string key)
+    {
+        lock (_fileSync)
+        {
+            Dictionary<string, string> values = Load();
+            values[key] = AssetMarker;
+            Save(values);
+        }
+    }
+
+    // FNV-1a over the UTF-8 text: a stable alias/hash across processes and runs, unlike
+    // string.GetHashCode. The key name stays out of the asset database (the hash is opaque).
+    private static string PathHash(string path) => Hash64(path);
+
+    private static string Hash64(string value)
     {
         ulong hash = 14695981039346656037UL;
-        foreach (byte b in Encoding.UTF8.GetBytes(path))
+        foreach (byte b in Encoding.UTF8.GetBytes(value))
         {
             hash ^= b;
             hash *= 1099511628211UL;

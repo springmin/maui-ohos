@@ -49,8 +49,17 @@ public static class OpenHarmonyHandlerConnector
     /// </summary>
     [UnconditionalSuppressMessage("Trimming", "IL2070",
         Justification = "Interfaces cannot be trimmed off a type; the slice handler interfaces are rooted as SliceHandlers keys in this assembly.")]
+    // App-supplied registrations live in their own map so RegisterHandler can run before the
+    // host is up without forcing MauiOpenHarmonyExtensions' static initializer (whose handler
+    // types assume the host services exist).
+    private static readonly Dictionary<Type, SliceHandlerRegistration> s_appHandlers = new();
+
     internal static SliceHandlerRegistration? FindSliceHandler(Type viewType)
     {
+        if (s_appHandlers.TryGetValue(viewType, out SliceHandlerRegistration? app))
+        {
+            return app;
+        }
         if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(viewType, out SliceHandlerRegistration? exact))
         {
             return exact;
@@ -131,7 +140,7 @@ public static class OpenHarmonyHandlerConnector
         Type viewType,
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type handlerType)
     {
-        MauiOpenHarmonyExtensions.SliceHandlers[viewType] = new SliceHandlerRegistration(handlerType);
+        s_appHandlers[viewType] = new SliceHandlerRegistration(handlerType);
     }
 
     private static void ConnectTreeCore(IElement? element)

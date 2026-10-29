@@ -121,6 +121,19 @@ public static class OpenHarmonyHandlerConnector
         }
     }
 
+    /// <summary>
+    /// Registers an app-supplied handler for a third-party view type (CommunityToolkit,
+    /// Syncfusion, a line-of-business control, ...). The slice registry intentionally covers
+    /// MAUI's own view types only; this is the supported extension point for library controls,
+    /// with the handler type kept visible to the trim/AOT analyzers by the attribute.
+    /// </summary>
+    public static void RegisterHandler(
+        Type viewType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type handlerType)
+    {
+        MauiOpenHarmonyExtensions.SliceHandlers[viewType] = new SliceHandlerRegistration(handlerType);
+    }
+
     private static void ConnectTreeCore(IElement? element)
     {
         ConnectCore(element);

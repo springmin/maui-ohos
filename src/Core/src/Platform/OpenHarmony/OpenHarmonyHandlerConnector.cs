@@ -37,6 +37,11 @@ public static class OpenHarmonyHandlerConnector
     /// <summary>Resolves the slice handler for a view type (exact type, interfaces, base types).</summary>
     public static Type? FindSliceHandlerType(Type viewType) => FindSliceHandler(viewType)?.HandlerType;
 
+    // App-supplied registrations live in their own map so RegisterHandler can run before the
+    // host is up without forcing MauiOpenHarmonyExtensions' static initializer (whose handler
+    // types assume the host services exist).
+    private static readonly Dictionary<Type, SliceHandlerRegistration> s_appHandlers = new();
+
     /// <summary>
     /// Resolves the slice handler registration for a view type (exact type, interfaces, base
     /// types). The interface walk is safe for trimming/AOT even though the analyzer cannot
@@ -49,11 +54,6 @@ public static class OpenHarmonyHandlerConnector
     /// </summary>
     [UnconditionalSuppressMessage("Trimming", "IL2070",
         Justification = "Interfaces cannot be trimmed off a type; the slice handler interfaces are rooted as SliceHandlers keys in this assembly.")]
-    // App-supplied registrations live in their own map so RegisterHandler can run before the
-    // host is up without forcing MauiOpenHarmonyExtensions' static initializer (whose handler
-    // types assume the host services exist).
-    private static readonly Dictionary<Type, SliceHandlerRegistration> s_appHandlers = new();
-
     internal static SliceHandlerRegistration? FindSliceHandler(Type viewType)
     {
         if (s_appHandlers.TryGetValue(viewType, out SliceHandlerRegistration? app))

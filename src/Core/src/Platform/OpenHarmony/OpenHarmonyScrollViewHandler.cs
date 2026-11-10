@@ -1,5 +1,12 @@
 // ScrollView handler for OpenHarmony: keeps the platform view's offsets in sync; the
 // renderer clips and translates the content, and drags update the offsets.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 
@@ -21,15 +28,15 @@ public sealed class OpenHarmonyScrollViewHandler : OpenHarmonyViewHandler<IScrol
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
     {
-        if (VirtualView is Microsoft.Maui.Controls.ScrollView { Content: IView content } scrollView)
+        if (VirtualView is IScrollView { Content: IView content } scrollView)
         {
             Size contentSize = content.Measure(widthConstraint, double.PositiveInfinity);
             PlatformView.ScrollContentWidth = (float)contentSize.Width;
             PlatformView.ScrollContentHeight = (float)contentSize.Height;
             // HeightRequest acts as a fixed viewport (a scroll view must be smaller than its
             // content for scrolling to be possible).
-            double height = scrollView.HeightRequest > 0
-                ? scrollView.HeightRequest
+            double height = scrollView.Height > 0
+                ? scrollView.Height
                 : Math.Min(contentSize.Height, heightConstraint);
             return new Size(Math.Min(contentSize.Width, widthConstraint), Math.Min(height, heightConstraint));
         }
@@ -39,7 +46,7 @@ public sealed class OpenHarmonyScrollViewHandler : OpenHarmonyViewHandler<IScrol
     public override void PlatformArrange(Rect frame)
     {
         base.PlatformArrange(frame);
-        if (VirtualView is Microsoft.Maui.Controls.ScrollView { Content: IView content })
+        if (VirtualView is IScrollView { Content: IView content })
         {
             content.Measure(frame.Width, double.PositiveInfinity);
             double contentHeight = Math.Max(frame.Height, content.DesiredSize.Height);

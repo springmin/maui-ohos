@@ -2,6 +2,13 @@
 // weekday row and a 6x7 day grid). Only days inside MinimumDate..MaximumDate are selectable -
 // the day grid draws the rest disabled and refuses to hit-test them - and the header clamps to
 // the range's first/last month, so no tap can navigate outside the selectable range.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -34,10 +41,7 @@ public sealed class OpenHarmonyDatePickerHandler : OpenHarmonyViewHandler<IDateP
             DateTime date = ClampToRange(view, selected.Date);
             if (VirtualView is { } picker)
             {
-                if (picker is Microsoft.Maui.Controls.DatePicker control)
-                {
-                    control.Date = date;
-                }
+                picker.Date = date;
                 // The control's own coercion (MinimumDate/MaximumDate) has the last word.
                 date = ClampToRange(view, (picker.Date ?? date).Date);
                 MapDate(this, picker);

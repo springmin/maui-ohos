@@ -1,4 +1,11 @@
 // Picker handler for OpenHarmony: a field that opens an inline dropdown (no native dialog).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -27,12 +34,7 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
         {
             if (VirtualView is { } picker && index >= 0 && index < picker.Items.Count)
             {
-                switch (picker)
-                {
-                    case Microsoft.Maui.Controls.Picker control:
-                        control.SelectedIndex = index;
-                        break;
-                }
+                picker.SelectedIndex = index;
                 MapSelectedIndex(this, picker);
             }
             ClosePopup(view);
@@ -77,8 +79,7 @@ public sealed class OpenHarmonyPickerHandler : OpenHarmonyViewHandler<IPicker>
         // constraint back as the desired size: the arranged frame then becomes ∞/NaN and the
         // compositor/rasterizer spins. Prefer an explicit WidthRequest (like the BoxView,
         // RefreshView and SwipeView handlers do); otherwise fall back to a finite default.
-        var element = VirtualView as Microsoft.Maui.Controls.VisualElement;
-        double requestedWidth = element?.WidthRequest ?? double.NaN;
+        double requestedWidth = VirtualView?.Width ?? double.NaN;
         double width = requestedWidth > 0 && double.IsFinite(requestedWidth)
             ? requestedWidth
             : (double.IsFinite(widthConstraint) ? widthConstraint : DefaultWidth);

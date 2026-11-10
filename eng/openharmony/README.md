@@ -20,13 +20,13 @@ symbols. The OpenHarmony slice is split by dependency:
 
 - `Microsoft.Maui.Core` compiles the dependency-clean slice: the view/handler base
   (`OpenHarmonyView`, `OpenHarmonyViewHandler`), the Core-interface handlers
-  (ActivityIndicator/CheckBox/IndicatorView/ProgressBar/Switch/Border/GraphicsView/Shape/Slider/Stepper), the service layer
+  (ActivityIndicator/CheckBox/IndicatorView/ProgressBar/Switch/Border/GraphicsView/Shape/Slider/Stepper/DatePicker/TimePicker/Picker/ScrollView), the service layer
   (paths/preferences/file system/keystore/notifications/account/map/push/...), and the
   compositor helpers (motion/scroll physics/scrollbars/focus ring/flow map/status).
 - `Microsoft.Maui.Controls` compiles the Controls-bound handlers/host/shell/window/accessibility
   and the renderer. `OpenHarmonyCoreSlice.props` is the single source of truth for the split.
-- The Core baseline now carries the moved public slice API (28 OpenHarmony public types); the
-  remaining 61 OpenHarmony public types stay in Controls pending the API review.
+- The Core baseline now carries the moved public slice API (32 OpenHarmony public types); the
+  remaining 57 OpenHarmony public types stay in Controls pending the API review.
 
 The Release build also runs `PublicApiAnalyzers` in validate mode against the Core and Controls
 `net-openharmony` baselines.
@@ -36,7 +36,8 @@ the workload Ref pack's `FrameworkList.xml`; no explicit assembly path is needed
 `--slice-tfm` and default test modes still use the standalone net11.0 vehicle, which takes the
 assemblies explicitly (the script discovers them from the workload layout):
 
-> On this OpenHarmony host, run the gate with `OPENSSL_CONF=/etc/openssl.cnf` and
+> On this OpenHarmony host, run the gate with
+> `OPENSSL_CONF=$HOME/.harmonybrew/etc/openssl@3/openssl.cnf` and
 > `DOTNET_SYSTEM_CRYPTOGRAPHY_OPENSSL_NO_LOCKING=1`. The rc3 runtime and `/usr/lib` both carry
 > the OpenSSL 3.0.12 `libssl.so.3`/`libcrypto.so.3` ABI, while `openssl@4` only provides `.so.4`.
 > Do not use `OPENSSL_CONF=/dev/null`: it makes `csc` fail with CS1504 ("Error occurred during a

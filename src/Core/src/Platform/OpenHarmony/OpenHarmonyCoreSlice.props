@@ -61,5 +61,9 @@
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyStepperHandler.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyPaintRenderer.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyShapeView.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyDatePickerHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyPickerHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyScrollViewHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyTimePickerHandler.cs" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,11 @@
 // TimePicker handler for OpenHarmony: the field opens an inline dropdown of half-hour slots.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -33,12 +40,7 @@ public sealed class OpenHarmonyTimePickerHandler : OpenHarmonyViewHandler<ITimeP
             var time = TimeSpan.FromMinutes(index * SlotMinutes);
             if (VirtualView is { } picker)
             {
-                switch (picker)
-                {
-                    case Microsoft.Maui.Controls.TimePicker control:
-                        control.Time = time;
-                        break;
-                }
+                picker.Time = time;
                 MapTime(this, picker);
             }
             HidePopup(view);

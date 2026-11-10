@@ -15,6 +15,13 @@
 // class's command wire are keyed by the managed surface id. Every native call is guarded:
 // off-device (desktop harness) or with an older host library the feature reports unavailable
 // and no call throws.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;

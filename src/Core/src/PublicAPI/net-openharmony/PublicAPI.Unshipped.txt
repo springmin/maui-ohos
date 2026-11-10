@@ -1713,12 +1713,54 @@ Microsoft.Maui.Platform.OpenHarmonyPushToken.Success.get -> bool
 Microsoft.Maui.Platform.OpenHarmonyPushToken.Token.get -> string?
 Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler
 Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.OpenHarmonyScrollViewHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonySecureStorage
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.GetAsync(string! key) -> System.Threading.Tasks.Task<string?>!
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.OpenHarmonySecureStorage(string? path = null) -> void
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.Remove(string! key) -> bool
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.RemoveAll() -> void
+Microsoft.Maui.Platform.OpenHarmonySecureStorage.SetAsync(string! key, string! value) -> System.Threading.Tasks.Task!
 Microsoft.Maui.Platform.OpenHarmonyShapeHandler
 Microsoft.Maui.Platform.OpenHarmonyShapeHandler.OpenHarmonyShapeHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonySliderHandler
 Microsoft.Maui.Platform.OpenHarmonySliderHandler.OpenHarmonySliderHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyStepperHandler
 Microsoft.Maui.Platform.OpenHarmonyStepperHandler.OpenHarmonyStepperHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonySubWindow
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.Bounds.get -> Microsoft.Maui.Graphics.Rect
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.Code.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.CompositionOffset.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.KeyCode.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.KeyEventType.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.Kind.get -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.Message.get -> string?
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.SurfaceId.get -> string!
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.Text.get -> string?
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.WindowId.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Active = 11 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Back = 17 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Closed = 5 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Created = 0 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Failed = 7 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Hidden = 2 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Inactive = 12 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Key = 16 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Moved = 3 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.PageReady = 8 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Resized = 4 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Resumed = 10 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Shown = 1 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Suspended = 9 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.TextComposition = 14 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.TextInput = 13 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.TextSubmitted = 15 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind.Touch = 6 -> Microsoft.Maui.Platform.OpenHarmonySubWindowEventKind
+Microsoft.Maui.Platform.OpenHarmonySubWindowTouchEventArgs
+Microsoft.Maui.Platform.OpenHarmonySubWindowTouchEventArgs.Action.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowTouchEventArgs.PointerCount.get -> int
+Microsoft.Maui.Platform.OpenHarmonySubWindowTouchEventArgs.X.get -> float
+Microsoft.Maui.Platform.OpenHarmonySubWindowTouchEventArgs.Y.get -> float
 Microsoft.Maui.Platform.OpenHarmonySwitchHandler
 Microsoft.Maui.Platform.OpenHarmonySwitchHandler.OpenHarmonySwitchHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyTextToSpeech
@@ -2379,6 +2421,14 @@ abstract Microsoft.Maui.Handlers.ViewHandler<TVirtualView, TPlatformView>.Create
 abstract Microsoft.Maui.HybridWebViewInvoker.InvokeMethodAsync(string! methodName, string![]? paramJsonValues) -> System.Threading.Tasks.Task<string?>!
 abstract Microsoft.Maui.Layouts.LayoutManager.ArrangeChildren(Microsoft.Maui.Graphics.Rect bounds) -> Microsoft.Maui.Graphics.Size
 abstract Microsoft.Maui.Layouts.LayoutManager.Measure(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.CloseCommand = 5 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.CreateCommand = 0 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.HideCommand = 4 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.IdentityCommand = 7 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.MoveCommand = 1 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.ResizeCommand = 2 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.ShowCommand = 3 -> int
+const Microsoft.Maui.Platform.OpenHarmonySubWindow.TextFocusCommand = 6 -> int
 const Microsoft.Maui.Platform.OpenHarmonyView.CalendarHeaderHeight = 52 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.CalendarRowHeight = 46 -> float
 const Microsoft.Maui.Platform.OpenHarmonyView.CalendarWeeks = 6 -> int
@@ -3175,6 +3225,9 @@ static Microsoft.Maui.Platform.OpenHarmonyPushToken.operator ==(Microsoft.Maui.P
 static Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.MapContentSize(Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler! handler, Microsoft.Maui.IScrollView! scrollView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.MapHorizontalOffset(Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler! handler, Microsoft.Maui.IScrollView! scrollView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.MapVerticalOffset(Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler! handler, Microsoft.Maui.IScrollView! scrollView) -> void
+static Microsoft.Maui.Platform.OpenHarmonySecureStorage.FailClosed.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySecureStorage.FailClosed.set -> void
+static Microsoft.Maui.Platform.OpenHarmonySecureStorage.IsHardwareBacked.get -> bool
 static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapFill(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapShape(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapStroke(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
@@ -3186,6 +3239,27 @@ static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapThumbColor(Microsoft.
 static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapValue(Microsoft.Maui.Platform.OpenHarmonySliderHandler! handler, Microsoft.Maui.ISlider! slider) -> void
 static Microsoft.Maui.Platform.OpenHarmonyStepperHandler.MapRange(Microsoft.Maui.Platform.OpenHarmonyStepperHandler! handler, Microsoft.Maui.IStepper! stepper) -> void
 static Microsoft.Maui.Platform.OpenHarmonyStepperHandler.MapValue(Microsoft.Maui.Platform.OpenHarmonyStepperHandler! handler, Microsoft.Maui.IStepper! stepper) -> void
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Bounds.get -> Microsoft.Maui.Graphics.Rect
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Changed -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Close() -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Close(string! windowId) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Create(string! name, int x, int y, int width, int height, string? title = null) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.CreateManagedSurface(string! windowId, string! name, int x, int y, int width, int height, string? title = null) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Hide() -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.IsContentReady.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.IsFocused.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.IsOpen.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.IsSuspended.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.IsVisible.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Move(int x, int y) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Register() -> void
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.RequestTextFocus(string! windowId, bool focused, int caret, string? text = null) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Resize(int width, int height) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Show() -> bool
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.SurfaceId.get -> string!
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.Touched -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonySubWindowTouchEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonySubWindow.WindowId.get -> int
 static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapIsOn(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void
 static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapThumbColor(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void
 static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapTrackColor(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void

@@ -12,6 +12,13 @@
 // carries the "a1:" marker (the value itself lives only in the store), a HUKS-sealed value
 // carries "k1:", and pre-existing file-key values stay readable. Reads consult the backend the
 // index names, so old data (k1: / file fallback entries) parses unchanged.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Text;
 using Microsoft.Maui.Storage;

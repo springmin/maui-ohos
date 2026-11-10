@@ -4,6 +4,13 @@
 // Compass/Barometer/OrientationSensor expose them through the MAUI Essentials interfaces
 // (accelerometer values are converted to G units, compass headings to degrees and barometer
 // pressure to hectopascals).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;

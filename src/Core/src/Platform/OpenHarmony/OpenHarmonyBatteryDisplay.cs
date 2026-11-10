@@ -25,6 +25,13 @@
 // DeviceDisplay.currentImplementation) from a [ModuleInitializer], and every native call is
 // guarded: off-device (no libopenharmonyhost.so) the extra stays at its documented defaults
 // (Unknown/0/empty display) and never throws.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;

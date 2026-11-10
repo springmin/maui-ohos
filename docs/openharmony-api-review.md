@@ -6,19 +6,19 @@ upstream API review of the public feature/handler surface.
 ## Current baseline
 
 - `src/Controls/src/Core/PublicAPI/net-openharmony/PublicAPI.Unshipped.txt`
-  - 8,243 lines total (the full `Microsoft.Maui.Controls` OpenHarmony API).
-  - 57 OpenHarmony public types remain here: the Controls-bound handlers, host, shell/window,
+  - 8,169 lines total (the full `Microsoft.Maui.Controls` OpenHarmony API).
+  - 52 OpenHarmony public types remain here: the Controls-bound handlers, host, shell/window,
     accessibility and renderer surface.
 - `src/Core/src/PublicAPI/net-openharmony/PublicAPI.Unshipped.txt`
-  - 3,440 lines: Core's platform-neutral API plus the dependency-clean OpenHarmony slice.
-  - 32 OpenHarmony public types: `OpenHarmonyView`/`OpenHarmonyViewHandler`, the
+  - 3,514 lines: Core's platform-neutral API plus the dependency-clean OpenHarmony slice.
+  - 37 OpenHarmony public types: `OpenHarmonyView`/`OpenHarmonyViewHandler`, the
     ActivityIndicator/CheckBox/IndicatorView/ProgressBar/Switch/Border/GraphicsView/Shape/
     Slider/Stepper/DatePicker/TimePicker/Picker/ScrollView handlers, and the service/feature
     APIs (Account/Map/Push/LiveView/TextToSpeech/...).
 - `src/Core/src/Platform/OpenHarmony/OpenHarmonyCoreSlice.props` is the single source of truth
   for the Core/Controls split. `OpenHarmonyFileSystem` moved to Core once the host compiler was
   run with the correct OpenSSL configuration.
-- The remaining 57 public types stay in `Microsoft.Maui.Controls` pending the API review.
+- The remaining 52 public types stay in `Microsoft.Maui.Controls` pending the API review.
 
 Before this phase, the slice baseline was 1,734 lines / 156 types under Core, where the slice no
 longer compiles. The baseline now follows the assembly that actually contains the types.
@@ -54,7 +54,7 @@ both Core and Controls.
 The concrete proposal is in [`openharmony-api-proposal.md`](openharmony-api-proposal.md)
 (89 split types: 28 Core + 61 Controls, grouped with member counts and disposition).
 
-1. Submit the public feature/handler surface (32 Core types + 57 Controls types) to the MAUI API
+1. Submit the public feature/handler surface (37 Core types + 52 Controls types) to the MAUI API
    review, with signatures, platform semantics and compatibility notes.
 2. After that review, internalize any feature types the API board classifies as implementation
    detail, and regenerate the baseline.

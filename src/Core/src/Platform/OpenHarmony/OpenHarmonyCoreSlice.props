@@ -65,5 +65,10 @@
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyPickerHandler.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyScrollViewHandler.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyTimePickerHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyBatteryDisplay.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySecureStorage.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySensors.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySubWindow.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySystemFontScale.cs" />
   </ItemGroup>
 </Project>

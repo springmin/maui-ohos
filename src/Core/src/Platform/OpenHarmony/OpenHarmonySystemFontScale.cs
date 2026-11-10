@@ -13,6 +13,13 @@
 //
 // Every native call is guarded: without libopenharmonyhost.so (desktop builds) or with an older
 // host Register is a no-op, the managed default of 1 stays in place and nothing throws.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 

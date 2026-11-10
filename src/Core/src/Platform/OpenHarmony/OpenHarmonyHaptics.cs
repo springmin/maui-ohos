@@ -9,6 +9,12 @@
 //   LongPress -> 300 ms longer vibration.
 // Every native call is guarded: without libopenharmonyhost.so (desktop builds) IsSupported
 // reports false and Perform degrades to a no-op - haptics never throw.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

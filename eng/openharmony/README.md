@@ -16,9 +16,19 @@ eng/openharmony/verify-slice.sh --all      # --tfm + the net11.0 tests
 
 `--tfm` is the primary gate: it builds `Microsoft.Maui.dll` and `Microsoft.Maui.Controls.dll` with
 `TreatWarningsAsErrors=true`, using the workload framework reference and the OpenHarmony platform
-symbols. The slice is linked into `Microsoft.Maui.Controls` for the OpenHarmony TFM because its
-handlers consume Controls types; Core stays platform-neutral. The Release build also runs
-`PublicApiAnalyzers` in validate mode against the Core and Controls `net-openharmony` baselines.
+symbols. The OpenHarmony slice is split by dependency:
+
+- `Microsoft.Maui.Core` compiles the internal platform services that only use Core/workload
+  contracts: `OpenHarmonyPaths`, `OpenHarmonyPreferences`, `OpenHarmonyFlashlight`,
+  `OpenHarmonyHaptics`, `OpenHarmonyKeystore`, `OpenHarmonyNotifications`.
+- `Microsoft.Maui.Controls` compiles the handlers/host and `OpenHarmonyFileSystem`. The
+  file-system raw-resource bridge still triggers a `csc` exit 139 when compiled in Core on the
+  OH host; keep it in Controls until the bridge is split or the compiler issue is fixed.
+- Public handler types remain in Controls pending the API review; the six Core files are
+  internal and add no public API entries.
+
+The Release build also runs `PublicApiAnalyzers` in validate mode against the Core and Controls
+`net-openharmony` baselines.
 
 `--tfm` resolves `Microsoft.OpenHarmony.Hosting` and `Microsoft.OpenHarmony.Maui.Graphics` from
 the workload Ref pack's `FrameworkList.xml`; no explicit assembly path is needed. The
@@ -62,6 +72,9 @@ the tests, so the Core/Controls gate is unaffected.
 
 ## Boundaries
 
+- Core/Controls split: Core owns the dependency-clean internal platform services; Controls owns
+  the public handler/host surface and the file-system bridge until the compiler blocker is
+  resolved.
 - This gate covers the platform slice and the Core/Controls assemblies. Device and HAP packaging
   tests stay in the OpenHarmony workload repository (`test/maui-platform-verify`,
   `test/hello-maui-*`).

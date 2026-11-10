@@ -2,6 +2,12 @@
 // native keystore engine (or, when the device has no libhuks_ndk.z.so, by the ArkTS sink) through
 // ohos_host_keystore_complete. When no answer arrives (tests, headless, older hosts) every call
 // fails fast and callers fall back to the file-based implementation.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Text;
 using Microsoft.OpenHarmony.Hosting;

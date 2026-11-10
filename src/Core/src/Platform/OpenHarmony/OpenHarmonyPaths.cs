@@ -1,4 +1,10 @@
 // Directories the platform slice uses: the ability's files/cache dirs on device, temp outside.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;

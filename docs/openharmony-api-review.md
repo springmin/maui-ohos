@@ -10,6 +10,14 @@ upstream API review of the public feature/handler surface.
   - 782 lines / 90 types belong to the slice (`Microsoft.Maui.Platform.OpenHarmony*`).
 - `src/Core/src/PublicAPI/net-openharmony/PublicAPI.Unshipped.txt`
   - 2,824 lines: Core's platform-neutral API plus `Microsoft.Maui.IPlatformViewHandler`.
+- The internal platform services that only depend on Core/workload contracts now compile into
+  `Microsoft.Maui.Core`: `OpenHarmonyPaths`, `OpenHarmonyPreferences`, `OpenHarmonyFlashlight`,
+  `OpenHarmonyHaptics`, `OpenHarmonyKeystore`, `OpenHarmonyNotifications`. They are internal and
+  add no public API entries.
+- `OpenHarmonyFileSystem` remains in `Microsoft.Maui.Controls` until the compiler issue with its
+  raw-resource bridge is resolved (`csc` exit 139).
+- The public slice surface (90 types) remains in `Microsoft.Maui.Controls` pending the API
+  review.
 
 Before this phase, the slice baseline was 1,734 lines / 156 types under Core, where the slice no
 longer compiles. The baseline now follows the assembly that actually contains the types.

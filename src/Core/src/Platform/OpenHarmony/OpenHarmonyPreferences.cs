@@ -1,5 +1,11 @@
 // File-backed IPreferences for OpenHarmony: values are stored as tagged lines in the app's
 // data directory (the ArkTS ability's files dir, or the temp directory outside an app).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Text;
 using Microsoft.Maui.Storage;

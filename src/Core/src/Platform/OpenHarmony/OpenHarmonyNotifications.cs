@@ -1,6 +1,12 @@
 // Notification Kit for OpenHarmony: the runtime forwards a publish request to the ArkTS shell
 // (which owns the @ohos.notificationManager call); Show returns false instead of throwing when
 // the host library or the shell sink is unavailable.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;

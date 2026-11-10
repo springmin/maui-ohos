@@ -7,6 +7,9 @@ Phase 2/3 internalization. The authoritative signatures are in
 
 - Slice API in Controls baseline: **782 lines / 90 public types**.
 - Core baseline (`src/Core/src/PublicAPI/net-openharmony/`) is separate and platform-neutral.
+- Six internal platform services now compile into Core (`OpenHarmonyPaths`,
+  `OpenHarmonyPreferences`, `OpenHarmonyFlashlight`, `OpenHarmonyHaptics`,
+  `OpenHarmonyKeystore`, `OpenHarmonyNotifications`); they are not part of this public surface.
 - `PublicApiAnalyzers` Validate passes for both assemblies.
 - The baseline contains no shipped API: all entries are in `PublicAPI.Unshipped.txt`.
 

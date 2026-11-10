@@ -35,7 +35,12 @@
   <Import Project="$(MauiSrcDirectory)MultiTargeting.targets" />
 
   <ItemGroup Condition="$(TargetFramework.Contains('-openharmony'))">
+    <!-- Keep this exclusion list in sync with the Core.csproj include list. These files are
+         platform services that compile into Microsoft.Maui.Core; the rest of the slice still
+         consumes Microsoft.Maui.Controls and stays here. OpenHarmonyFileSystem is intentionally
+         not excluded until the compiler issue with its raw-file bridge is resolved. -->
     <Compile Include="..\..\..\Core\src\Platform\OpenHarmony\**\*.cs"
+             Exclude="..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyPaths.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyPreferences.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyFlashlight.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyHaptics.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyKeystore.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyNotifications.cs"
              Link="Platform\OpenHarmony\%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="**/*.Standard.cs" />
     <Compile Include="Platform/Standard/**/*.cs" />

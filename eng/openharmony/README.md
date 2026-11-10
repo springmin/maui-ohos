@@ -35,10 +35,12 @@ the workload Ref pack's `FrameworkList.xml`; no explicit assembly path is needed
 `--slice-tfm` and default test modes still use the standalone net11.0 vehicle, which takes the
 assemblies explicitly (the script discovers them from the workload layout):
 
-> On an OpenHarmony host, a `csc` exit 139 or a `CryptographicException` while creating SHA256
-> usually means the host OpenSSL configuration/locking is incompatible with the compiler. Run the
-> gate with `OPENSSL_CONF=/dev/null DOTNET_SYSTEM_CRYPTOGRAPHY_OPENSSL_NO_LOCKING=1`; this is a
-> host environment workaround, not a MAUI compilation error.
+> On an OpenHarmony host, a `csc` exit 139 or a `CryptographicException` while creating SHA256 is
+> not explained by the `openssl` CLI version alone: the rc3 runtime and `/usr/lib` both carry the
+> OpenSSL 3.0.12 `libssl.so.3`/`libcrypto.so.3` ABI, while `openssl@4` only provides `.so.4`.
+> `OPENSSL_CONF=/dev/null DOTNET_SYSTEM_CRYPTOGRAPHY_OPENSSL_NO_LOCKING=1` can let some runs
+> complete, but it is not a deterministic fix; if the crash persists, use a stable host or capture
+> a `csc` dump before treating it as a MAUI compile error.
 
 ```sh
 OpenHarmonyHostingAssembly=/path/to/Microsoft.OpenHarmony.Hosting.dll \

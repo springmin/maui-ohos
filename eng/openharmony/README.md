@@ -39,8 +39,9 @@ assemblies explicitly (the script discovers them from the workload layout):
 > not explained by the `openssl` CLI version alone: the rc3 runtime and `/usr/lib` both carry the
 > OpenSSL 3.0.12 `libssl.so.3`/`libcrypto.so.3` ABI, while `openssl@4` only provides `.so.4`.
 > `OPENSSL_CONF=/dev/null DOTNET_SYSTEM_CRYPTOGRAPHY_OPENSSL_NO_LOCKING=1` can let some runs
-> complete, but it is not a deterministic fix; if the crash persists, use a stable host or capture
-> a `csc` dump before treating it as a MAUI compile error.
+> complete, but it is not a deterministic fix; if the crash persists, use a stable host before
+> treating it as a MAUI compile error. The OpenHarmony sandbox also blocks `createdump`
+> (`/proc/<pid>/mem` permission denied), so a dump requires a non-sandboxed host.
 
 ```sh
 OpenHarmonyHostingAssembly=/path/to/Microsoft.OpenHarmony.Hosting.dll \

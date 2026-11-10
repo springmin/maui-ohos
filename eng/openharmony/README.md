@@ -23,15 +23,17 @@ symbols. The OpenHarmony slice is split by dependency:
   (ActivityIndicator/CheckBox/IndicatorView/ProgressBar/Switch/Border/GraphicsView/Shape/
   Slider/Stepper/DatePicker/TimePicker/Picker/ScrollView), the service layer
   (paths/preferences/file system/keystore/notifications/account/map/push/secure storage/
-  sensors/battery display/subwindow/system font scale/...), and the compositor helpers
-  (motion/scroll physics/scrollbars/focus ring/flow map/status/paint renderer/shape view).
+  sensors/battery display/subwindow/system font scale/bluetooth/printing/communication/
+  geocoding/media player/web authenticator/launcher-browser-share/...), and the compositor
+  helpers (motion/scroll physics/scrollbars/focus ring/flow map/status/paint renderer/
+  shape view).
 - `Microsoft.Maui.Controls` compiles the Controls-bound handlers/host/shell/window/accessibility
   and the renderer. `OpenHarmonyCoreSlice.props` is the single source of truth for the split.
 - The remaining slice files are Controls-bound by design: they use Controls concrete types or
   Controls-only helpers (`OpenHarmonyHandlerConnector`, `OpenHarmonyWindowRenderer`, ...). Keeping
   them in Controls avoids re-introducing a Core-to-Controls reference.
-- The Core baseline now carries the moved public slice API (37 OpenHarmony public types); the
-  remaining 52 OpenHarmony public types stay in Controls pending the API review.
+- The Core baseline now carries the moved public slice API (48 OpenHarmony public types); the
+  remaining 41 OpenHarmony public types stay in Controls pending the API review.
 
 The Release build also runs `PublicApiAnalyzers` in validate mode against the Core and Controls
 `net-openharmony` baselines.

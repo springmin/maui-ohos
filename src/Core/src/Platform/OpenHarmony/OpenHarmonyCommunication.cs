@@ -20,6 +20,13 @@
 //
 // Phone dialer: "tel:<number>" after MAUI's own validation (null/empty/whitespace throws
 // ArgumentNullException(nameof(number)), matching PhoneDialerImplementation.ValidateOpen).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.ApplicationModel.Communication;
 using Microsoft.OpenHarmony.Hosting;
 

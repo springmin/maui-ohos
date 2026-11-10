@@ -1658,6 +1658,12 @@ Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapComponentOverlay = 2 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapKitImportable = 1 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
 Microsoft.Maui.Platform.OpenHarmonyMapCapability.None = 0 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.OpenAsync(Microsoft.Maui.Devices.Sensors.Placemark! placemark, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.OpenAsync(double latitude, double longitude, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.OpenHarmonyMapLauncher() -> void
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.TryOpenAsync(Microsoft.Maui.Devices.Sensors.Placemark! placemark, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task<bool>!
+Microsoft.Maui.Platform.OpenHarmonyMapLauncher.TryOpenAsync(double latitude, double longitude, Microsoft.Maui.ApplicationModel.MapLaunchOptions! options) -> System.Threading.Tasks.Task<bool>!
 Microsoft.Maui.Platform.OpenHarmonyMapMarker
 Microsoft.Maui.Platform.OpenHarmonyMapMarker.<Clone>$() -> Microsoft.Maui.Platform.OpenHarmonyMapMarker!
 Microsoft.Maui.Platform.OpenHarmonyMapMarker.Deconstruct(out string! Id, out double Latitude, out double Longitude, out string! Title) -> void
@@ -1686,6 +1692,66 @@ Microsoft.Maui.Platform.OpenHarmonyMapRegion.Zoom.get -> double
 Microsoft.Maui.Platform.OpenHarmonyMapRegion.Zoom.init -> void
 Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs
 Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs.Region.get -> Microsoft.Maui.Platform.OpenHarmonyMapRegion
+Microsoft.Maui.Platform.OpenHarmonyMediaDurationChangedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaDurationChangedEventArgs.Duration.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs.Code.get -> int
+Microsoft.Maui.Platform.OpenHarmonyMediaFailedEventArgs.Message.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Completed = 6 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Error = 9 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Idle = 1 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Initialized = 2 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Paused = 5 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Playing = 4 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Prepared = 3 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Released = 8 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Stopped = 7 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState.Unknown = 0 -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaPositionChangedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaPositionChangedEventArgs.Position.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaResult
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Deconstruct(out Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, out string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Equals(Microsoft.Maui.Platform.OpenHarmonyMediaResult other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.IsSuccess.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Message.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Message.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.OpenHarmonyMediaResult() -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.OpenHarmonyMediaResult(Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Status.get -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaResult.Status.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaSource
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.Equals(Microsoft.Maui.Platform.OpenHarmonyMediaSource other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.Kind.get -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.Location.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaSource.OpenHarmonyMediaSource() -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind.File = 2 -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind.RawFile = 1 -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind.Url = 0 -> Microsoft.Maui.Platform.OpenHarmonyMediaSourceKind
+Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs.Reason.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaStateChangedEventArgs.State.get -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus.Failed = -2 -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Deconstruct(out Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, out Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState State, out System.TimeSpan Position, out System.TimeSpan Duration, out string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Duration.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Duration.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Equals(Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.IsSuccess.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Message.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Message.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.OpenHarmonyMediaStatusResult() -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.OpenHarmonyMediaStatusResult(Microsoft.Maui.Platform.OpenHarmonyMediaStatus Status, Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState State, System.TimeSpan Position, System.TimeSpan Duration, string! Message) -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Position.get -> System.TimeSpan
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Position.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.State.get -> Microsoft.Maui.Platform.OpenHarmonyMediaPlaybackState
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.State.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Status.get -> Microsoft.Maui.Platform.OpenHarmonyMediaStatus
+Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Status.init -> void
 Microsoft.Maui.Platform.OpenHarmonyPickerHandler
 Microsoft.Maui.Platform.OpenHarmonyPickerHandler.OpenHarmonyPickerHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler
@@ -2597,6 +2663,9 @@ override Microsoft.Maui.Platform.OpenHarmonyMapMarker.Equals(object? obj) -> boo
 override Microsoft.Maui.Platform.OpenHarmonyMapMarker.GetHashCode() -> int
 override Microsoft.Maui.Platform.OpenHarmonyMapMarker.ToString() -> string!
 override Microsoft.Maui.Platform.OpenHarmonyMapRegion.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyMediaResult.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyMediaSource.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.GetHashCode() -> int
 override Microsoft.Maui.Platform.OpenHarmonyPickerHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyPushToken.GetHashCode() -> int
@@ -3206,10 +3275,21 @@ static Microsoft.Maui.Platform.OpenHarmonyMap.QueryCapabilitiesAsync(System.Thre
 static Microsoft.Maui.Platform.OpenHarmonyMap.Ready -> System.EventHandler?
 static Microsoft.Maui.Platform.OpenHarmonyMap.SetRegionAsync(Microsoft.Maui.Platform.OpenHarmonyMapRegion region, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 static Microsoft.Maui.Platform.OpenHarmonyMap.ShowAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Microsoft.Maui.Platform.OpenHarmonyMapLauncher.InstallDefault() -> void
 static Microsoft.Maui.Platform.OpenHarmonyMapMarker.operator !=(Microsoft.Maui.Platform.OpenHarmonyMapMarker? left, Microsoft.Maui.Platform.OpenHarmonyMapMarker? right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyMapMarker.operator ==(Microsoft.Maui.Platform.OpenHarmonyMapMarker? left, Microsoft.Maui.Platform.OpenHarmonyMapMarker? right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyMapRegion.operator !=(Microsoft.Maui.Platform.OpenHarmonyMapRegion left, Microsoft.Maui.Platform.OpenHarmonyMapRegion right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyMapRegion.operator ==(Microsoft.Maui.Platform.OpenHarmonyMapRegion left, Microsoft.Maui.Platform.OpenHarmonyMapRegion right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaResult.operator !=(Microsoft.Maui.Platform.OpenHarmonyMediaResult left, Microsoft.Maui.Platform.OpenHarmonyMediaResult right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaResult.operator ==(Microsoft.Maui.Platform.OpenHarmonyMediaResult left, Microsoft.Maui.Platform.OpenHarmonyMediaResult right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromFile(string! path) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+static Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromRawFile(string! name) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+static Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromUri(System.Uri! uri) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+static Microsoft.Maui.Platform.OpenHarmonyMediaSource.FromUrl(string! url) -> Microsoft.Maui.Platform.OpenHarmonyMediaSource
+static Microsoft.Maui.Platform.OpenHarmonyMediaSource.operator !=(Microsoft.Maui.Platform.OpenHarmonyMediaSource left, Microsoft.Maui.Platform.OpenHarmonyMediaSource right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaSource.operator ==(Microsoft.Maui.Platform.OpenHarmonyMediaSource left, Microsoft.Maui.Platform.OpenHarmonyMediaSource right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.operator !=(Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult left, Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.operator ==(Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult left, Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult right) -> bool
 static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapIsOpen(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapItems(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
 static Microsoft.Maui.Platform.OpenHarmonyPickerHandler.MapSelectedIndex(Microsoft.Maui.Platform.OpenHarmonyPickerHandler! handler, Microsoft.Maui.IPicker! picker) -> void
@@ -3403,6 +3483,7 @@ static readonly Microsoft.Maui.Platform.OpenHarmonyDatePickerHandler.Mapper -> M
 static readonly Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.CommandMapper -> Microsoft.Maui.CommandMapper<Microsoft.Maui.IGraphicsView!, Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IGraphicsView!, Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IIndicatorView!, Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyMapLauncher.Instance -> Microsoft.Maui.Platform.OpenHarmonyMapLauncher!
 static readonly Microsoft.Maui.Platform.OpenHarmonyPickerHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IPicker!, Microsoft.Maui.Platform.OpenHarmonyPickerHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IProgress!, Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IScrollView!, Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler!>!
@@ -3510,5 +3591,11 @@ virtual Microsoft.Maui.WindowOverlay.RemoveWindowElements() -> void
 ~override Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.ToString() -> string
 ~override Microsoft.Maui.Platform.OpenHarmonyMapRegion.Equals(object obj) -> bool
 ~override Microsoft.Maui.Platform.OpenHarmonyMapRegion.ToString() -> string
+~override Microsoft.Maui.Platform.OpenHarmonyMediaResult.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyMediaResult.ToString() -> string
+~override Microsoft.Maui.Platform.OpenHarmonyMediaSource.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyMediaSource.ToString() -> string
+~override Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyMediaStatusResult.ToString() -> string
 ~override Microsoft.Maui.Platform.OpenHarmonyPushToken.Equals(object obj) -> bool
 ~override Microsoft.Maui.Platform.OpenHarmonyPushToken.ToString() -> string

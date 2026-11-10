@@ -46,6 +46,13 @@
 // - Plain-text sharing through ohos.want.action.sendData has no wantConstant key for the body
 //   in this SDK; the shell sends the text under 'ohos.extra.param.key.content', the key used by
 //   the OpenHarmony ecosystem samples that predate Share Kit.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -228,7 +235,7 @@ internal sealed class OpenHarmonyLauncher : ILauncher
         {
             // The URI is stripped of its query/fragment and truncated (B7) before it reaches
             // dotnet-status.txt; the dispatched payload keeps the full URI.
-            string loggedUri = OpenHarmonyWebViewHandler.SanitizeUrlForLog(uri.AbsoluteUri);
+            string loggedUri = OpenHarmonyLogSanitizer.SanitizeUrl(uri.AbsoluteUri);
             OpenHarmonyBridge.WriteStatus($"[maui] launcher could not dispatch '{loggedUri}'");
         }
         return Task.FromResult(dispatched);
@@ -291,7 +298,7 @@ internal sealed class OpenHarmonyBrowser : IBrowser
         {
             // Same B7 rule as the launcher: the log gets scheme+host+path, capped; the
             // dispatched payload keeps the full URI.
-            string loggedUri = OpenHarmonyWebViewHandler.SanitizeUrlForLog(uri.AbsoluteUri);
+            string loggedUri = OpenHarmonyLogSanitizer.SanitizeUrl(uri.AbsoluteUri);
             OpenHarmonyBridge.WriteStatus($"[maui] browser could not dispatch '{loggedUri}'");
         }
         return Task.FromResult(dispatched);

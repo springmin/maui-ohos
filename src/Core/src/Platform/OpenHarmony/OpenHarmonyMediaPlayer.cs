@@ -38,6 +38,13 @@
 //   error     code, message
 // A malformed event payload is ignored. State names are the AVPlayer state strings the Media
 // Kit documents ('idle'..'released'); the mapping table is <see cref="ParseState"/>.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;

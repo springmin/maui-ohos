@@ -22,6 +22,13 @@
 // names (placeName, administrativeArea, subAdministrativeArea, streetNumber, ...) and the
 // MAUI-style aliases (featureName, adminArea, subAdminArea, subThoroughfare, ...). Anything
 // malformed yields the empty result instead of an exception.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -219,7 +226,7 @@ internal sealed class OpenHarmonyGeocoding : IGeocoding
     /// the shell parses.
     /// </summary>
     internal static string BuildForwardArg(string? address)
-        => "{\"description\":" + JsonSerializer.Serialize(address ?? string.Empty, OpenHarmonySliceJsonContext.Default.String) + "}";
+        => "{\"description\":" + JsonSerializer.Serialize(address ?? string.Empty, OpenHarmonyGeocodingJsonContext.Default.String) + "}";
 
     /// <summary>Parses a reverse-geocode answer into placemarks (malformed items are skipped).</summary>
     internal static IReadOnlyList<Placemark> ParsePlacemarks(string? json)

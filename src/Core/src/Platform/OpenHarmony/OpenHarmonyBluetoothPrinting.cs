@@ -48,6 +48,13 @@
 // per discovery. The adapter state is the decimal access.BluetoothState value as text
 // ("2" = STATE_ON). Print results carry an optional diagnostic message (a shell/print-framework
 // error) that is logged, never thrown.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;

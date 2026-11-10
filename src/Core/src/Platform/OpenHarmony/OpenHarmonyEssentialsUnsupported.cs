@@ -10,6 +10,13 @@
 // answer (PostNotifications) rides its own enablement bridge
 // (notificationManager.isNotificationEnabledSync / requestEnableNotification in the shell)
 // documented in the map below.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.ApplicationModel;

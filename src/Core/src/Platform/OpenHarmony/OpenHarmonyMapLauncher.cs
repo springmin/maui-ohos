@@ -22,6 +22,13 @@
 //     (the same limit OpenHarmonyLauncher.CanOpenAsync documents). Off-device (no host
 //     library, no shell sink) every call answers false and OpenAsync completes without
 //     throwing, exactly like Launcher/Browser.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;

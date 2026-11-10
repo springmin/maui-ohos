@@ -6,6 +6,13 @@
 // ohos.permission.ACCESS_BLUETOOTH (user_grant, requested by the shell at call time). Result
 // codes, the request op/field table and the event wire format are documented in
 // docs/openharmony-slice-notes.md ("Bluetooth GATT").
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;

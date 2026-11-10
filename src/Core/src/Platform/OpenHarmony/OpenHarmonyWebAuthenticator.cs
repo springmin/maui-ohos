@@ -43,6 +43,13 @@
 //    the loopback listener (answered 405) can reach the result.
 //  - PrefersEphemeralWebBrowserSession: startAbility opens the regular external browser and has
 //    no ephemeral-session knob.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Microsoft.Maui.ApplicationModel;
@@ -59,7 +66,7 @@ namespace Microsoft.Maui.Platform;
 /// own one-shot listener (<see cref="OpenHarmonyLoopbackListener"/>); either way the callback
 /// URI is parsed into a <see cref="WebAuthenticatorResult"/> with the MAUI semantics. Installed
 /// as the Essentials <see cref="WebAuthenticator.Default"/> and registered in DI by
-/// <see cref="MauiOpenHarmonyExtensions.UseOpenHarmony"/>.
+/// <c>MauiOpenHarmonyExtensions.UseOpenHarmony</c>.
 /// </summary>
 internal sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
 {

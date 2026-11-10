@@ -46,7 +46,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     private const int MaxCookieLength = 8 * 1024;
 
     /// <summary>Longest URL a status line may carry (B7).</summary>
-    internal const int MaxLoggedUrlLength = 2048;
+    internal const int MaxLoggedUrlLength = OpenHarmonyLogSanitizer.MaxLoggedUrlLength;
 
     /// <summary>
     /// Origin a Blazor WebAssembly site registered through <see cref="RegisterWasmSite"/> is
@@ -1249,44 +1249,10 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
     }
 
     /// <summary>
-    /// Makes a URL safe for the one-line status log (B7): drops the query and the fragment so
-    /// tokens a page put there do not land in dotnet-status.txt, flattens control characters so
-    /// one event cannot forge extra lines, and truncates to
-    /// <see cref="MaxLoggedUrlLength"/> characters.
+    /// Makes a URL safe for the one-line status log (B7); the implementation is shared with the
+    /// launcher/browser through <see cref="OpenHarmonyLogSanitizer"/>.
     /// </summary>
-    internal static string SanitizeUrlForLog(string url)
-    {
-        if (string.IsNullOrEmpty(url))
-        {
-            return string.Empty;
-        }
-        int cut = url.Length;
-        int query = url.IndexOf('?', StringComparison.Ordinal);
-        int fragment = url.IndexOf('#', StringComparison.Ordinal);
-        if (query >= 0 && query < cut)
-        {
-            cut = query;
-        }
-        if (fragment >= 0 && fragment < cut)
-        {
-            cut = fragment;
-        }
-        string trimmed = cut == url.Length ? url : url.Substring(0, cut);
-        if (trimmed.Length > MaxLoggedUrlLength)
-        {
-            trimmed = string.Concat(trimmed.AsSpan(0, MaxLoggedUrlLength - 3), "...");
-        }
-        char[]? flattened = null;
-        for (int i = 0; i < trimmed.Length; i++)
-        {
-            if (char.IsControl(trimmed[i]))
-            {
-                flattened ??= trimmed.ToCharArray();
-                flattened[i] = ' ';
-            }
-        }
-        return flattened is null ? trimmed : new string(flattened);
-    }
+    internal static string SanitizeUrlForLog(string url) => OpenHarmonyLogSanitizer.SanitizeUrl(url);
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void OnEvalResultNative(int requestId, IntPtr resultUtf8, int error)

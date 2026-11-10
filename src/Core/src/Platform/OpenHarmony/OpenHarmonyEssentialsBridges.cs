@@ -17,6 +17,13 @@
 //     3 internet, the NDK path); the shell follows the NetworkKit connection events and pushes
 //     host.notifyNetworkAccess() -> ohos_host_network_access_notify -> the registered
 //     ohos_host_network_access callback (the level is re-read in the host).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.ApplicationModel;

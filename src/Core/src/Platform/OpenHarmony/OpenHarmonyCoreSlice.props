@@ -70,5 +70,17 @@
     <OpenHarmonyCoreSliceFile Include="OpenHarmonySensors.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonySubWindow.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonySystemFontScale.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyAppLauncher.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyBluetoothGatt.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyBluetoothPrinting.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyCommunication.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyEssentialsBridges.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyEssentialsUnsupported.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyGeocoding.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyGeocodingJsonContext.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyMapLauncher.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyMediaPlayer.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyWebAuthenticator.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyLogSanitizer.cs" />
   </ItemGroup>
 </Project>

@@ -578,8 +578,8 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
     private static bool IsSafeAssetLayoutPart(string path)
     {
         if (path.Length == 0 ||
-            path.IndexOf('\0', StringComparison.Ordinal) >= 0 ||
-            path.IndexOf('\\', StringComparison.Ordinal) >= 0 ||
+            path.Contains('\0', StringComparison.Ordinal) ||
+            path.Contains('\\', StringComparison.Ordinal) ||
             path.StartsWith('/', StringComparison.Ordinal))
         {
             return false;
@@ -1091,7 +1091,7 @@ public sealed partial class OpenHarmonyHybridWebViewHandler : OpenHarmonyViewHan
         try
         {
             raw = message.StartsWith(RawMessagePrefix, StringComparison.Ordinal)
-                ? Uri.UnescapeDataString(message.Substring(RawMessagePrefix.Length))
+                ? Uri.UnescapeDataString(message.AsSpan(RawMessagePrefix.Length))
                 : message;
         }
         catch (UriFormatException)

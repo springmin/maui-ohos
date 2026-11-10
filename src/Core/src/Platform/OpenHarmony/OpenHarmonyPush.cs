@@ -96,7 +96,7 @@ public readonly record struct OpenHarmonyPushToken
 /// Push Kit (pushService) token access over the host bridge. All members degrade without
 /// throwing when the host library or the shell's Push Kit sink is absent.
 /// </summary>
-public static partial class OpenHarmonyPush
+public partial class OpenHarmonyPush
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

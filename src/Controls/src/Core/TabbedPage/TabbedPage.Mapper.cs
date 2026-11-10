@@ -28,7 +28,7 @@ namespace Microsoft.Maui.Controls
 
 #endif
 
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 			TabbedViewHandler.PlatformViewFactory = OnCreatePlatformView;
 #endif
 

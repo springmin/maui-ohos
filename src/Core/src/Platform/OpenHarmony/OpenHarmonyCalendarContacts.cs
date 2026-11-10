@@ -41,13 +41,13 @@ using System.Runtime.CompilerServices;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>One contact record as returned by <see cref="OpenHarmonyContacts.FindAsync"/>.</summary>
-public readonly record struct OpenHarmonyContact(string Name, string Phone);
+internal readonly record struct OpenHarmonyContact(string Name, string Phone);
 
 /// <summary>One calendar event as returned by <see cref="OpenHarmonyCalendar.ListUpcomingAsync"/>.</summary>
-public readonly record struct OpenHarmonyCalendarEvent(string Title, DateTimeOffset Start, DateTimeOffset End);
+internal readonly record struct OpenHarmonyCalendarEvent(string Title, DateTimeOffset Start, DateTimeOffset End);
 
 /// <summary>Contact lookup over the OpenHarmony Contacts Kit (platform extra).</summary>
-public static partial class OpenHarmonyContacts
+internal partial class OpenHarmonyContacts
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -199,7 +199,7 @@ public static partial class OpenHarmonyContacts
 }
 
 /// <summary>Calendar list/add over the OpenHarmony Calendar Kit (platform extra).</summary>
-public static partial class OpenHarmonyCalendar
+internal partial class OpenHarmonyCalendar
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

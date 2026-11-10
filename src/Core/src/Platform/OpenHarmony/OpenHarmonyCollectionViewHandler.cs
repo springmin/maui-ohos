@@ -172,7 +172,7 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
     }
 
     /// <summary>A stretched grid with a centred label (the canvas draws strings left-aligned).</summary>
-    private static View CreateCenteredLabel(string text)
+    private static Grid CreateCenteredLabel(string text)
     {
         var label = new Label
         {
@@ -187,10 +187,10 @@ public sealed class OpenHarmonyCollectionViewHandler : OpenHarmonyViewHandler<Co
         return host;
     }
 
-    private View HeaderView(string text)
+    private Label HeaderView(string text)
         => new Label { Text = text, FontSize = 24, TextColor = Colors.Gold };
 
-    private View FooterView(string text)
+    private Label FooterView(string text)
         => new Label { Text = text, FontSize = 22, TextColor = Colors.Gray };
 
     private string HeaderText(object? group)

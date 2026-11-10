@@ -104,7 +104,7 @@ public sealed partial class OpenHarmonyWindowHandler : ElementHandler<IWindow, O
     }
 
     /// <summary>
-    /// Records the title requested through <see cref="IWindow.Title"/> and forwards it to the
+    /// Records the requested window title and forwards it to the
     /// shell's main window when the host exports the chrome bridge.
     /// </summary>
     public static void MapTitle(OpenHarmonyWindowHandler handler, IWindow window)

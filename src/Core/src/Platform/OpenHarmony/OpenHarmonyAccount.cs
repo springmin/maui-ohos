@@ -115,7 +115,7 @@ public readonly record struct OpenHarmonyAccountResult
 /// phone pre-fetch plus the general authorization request). All members degrade without throwing
 /// when the host library or the shell's Account Kit sink is absent.
 /// </summary>
-public static partial class OpenHarmonyAccount
+public partial class OpenHarmonyAccount
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

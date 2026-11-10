@@ -58,10 +58,10 @@ using System.Runtime.CompilerServices;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>One paired Bluetooth device as returned by <see cref="OpenHarmonyBluetooth.GetPairedDevicesAsync"/>.</summary>
-public readonly record struct OpenHarmonyBluetoothDevice(string Name, string Address);
+internal readonly record struct OpenHarmonyBluetoothDevice(string Name, string Address);
 
 /// <summary>Bluetooth adapter state and paired devices over the OpenHarmony Connectivity Kit (platform extra).</summary>
-public static partial class OpenHarmonyBluetooth
+internal partial class OpenHarmonyBluetooth
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;
@@ -401,7 +401,7 @@ public static partial class OpenHarmonyBluetooth
 }
 
 /// <summary>Printing over the OpenHarmony print framework (platform extra).</summary>
-public static partial class OpenHarmonyPrinting
+internal partial class OpenHarmonyPrinting
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;

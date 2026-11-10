@@ -26,7 +26,7 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>MAUI Essentials email on OpenHarmony (mailto: over the startAbility bridge).</summary>
-public sealed class OpenHarmonyEmail : IEmail
+internal sealed class OpenHarmonyEmail : IEmail
 {
     public static readonly OpenHarmonyEmail Instance = new();
 
@@ -95,7 +95,7 @@ public sealed class OpenHarmonyEmail : IEmail
 }
 
 /// <summary>MAUI Essentials SMS on OpenHarmony (sms: over the startAbility bridge).</summary>
-public sealed class OpenHarmonySms : ISms
+internal sealed class OpenHarmonySms : ISms
 {
     public static readonly OpenHarmonySms Instance = new();
 
@@ -135,7 +135,7 @@ public sealed class OpenHarmonySms : ISms
 }
 
 /// <summary>MAUI Essentials phone dialer on OpenHarmony (tel: over the startAbility bridge).</summary>
-public sealed class OpenHarmonyPhoneDialer : IPhoneDialer
+internal sealed class OpenHarmonyPhoneDialer : IPhoneDialer
 {
     public static readonly OpenHarmonyPhoneDialer Instance = new();
 

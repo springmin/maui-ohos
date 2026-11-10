@@ -21,6 +21,9 @@ using ParentView = Microsoft.UI.Xaml.DependencyObject;
 #elif TIZEN
 using PlatformView = Tizen.NUI.BaseComponents.View;
 using ParentView = Tizen.NUI.BaseComponents.View;
+#elif OPENHARMONY
+using PlatformView = System.Object;
+using ParentView = System.Object;
 #else
 using PlatformView = System.Object;
 using ParentView = System.Object;
@@ -54,7 +57,7 @@ namespace Microsoft.Maui.Platform
 		internal static T? GetParentOfType<T>(this ParentView? view)
 #if ANDROID
 			where T : class, ParentView
-#elif PLATFORM
+#elif PLATFORM && !OPENHARMONY
 			where T : ParentView
 #else
 			where T : class
@@ -110,7 +113,7 @@ namespace Microsoft.Maui.Platform
 		internal static T? GetParentOfType<T>(this PlatformView view)
 #if ANDROID
 			where T : class, ParentView
-#elif PLATFORM
+#elif PLATFORM && !OPENHARMONY
 			where T : ParentView
 #else
 			where T : class
@@ -216,7 +219,7 @@ namespace Microsoft.Maui.Platform
 		}
 
 
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 		internal static T? FindDescendantView<T>(this PlatformView view, Func<PlatformView, bool> predicate) where T : PlatformView
 		{
 			var queue = new Queue<PlatformView>();

@@ -12,7 +12,7 @@ using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyFontManager : IFontManager
+internal sealed class OpenHarmonyFontManager : IFontManager
 {
     private static readonly Dictionary<string, string> s_registered = new(StringComparer.OrdinalIgnoreCase);
     private static int s_typefaceGeneration;

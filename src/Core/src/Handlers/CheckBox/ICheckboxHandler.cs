@@ -7,6 +7,8 @@ using PlatformView = AndroidX.AppCompat.Widget.AppCompatCheckBox;
 using PlatformView = Microsoft.UI.Xaml.Controls.CheckBox;
 #elif TIZEN
 using PlatformView = Tizen.UIExtensions.NUI.GraphicsView.CheckBox;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif

@@ -1,3 +1,6 @@
+// The OpenHarmony compatibility handlers implement the obsolete ListView, TableView and Frame
+// controls, matching the other MAUI platform handlers that keep the same deprecated contract.
+#pragma warning disable CS0618 // Type or member is obsolete
 // MauiAppBuilder registration for the OpenHarmony platform services.
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Dispatching;

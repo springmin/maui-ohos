@@ -38,7 +38,7 @@ namespace Microsoft.Maui.Platform;
 /// One battery snapshot as reported by the shell: the charge level (0..1), the charging state,
 /// the power source and the energy-saver state, all mapped to the MAUI Essentials enums.
 /// </summary>
-public readonly record struct OpenHarmonyBatterySnapshot(
+internal readonly record struct OpenHarmonyBatterySnapshot(
     double ChargeLevel,
     BatteryState State,
     BatteryPowerSource PowerSource,
@@ -49,7 +49,7 @@ public readonly record struct OpenHarmonyBatterySnapshot(
 /// (batteryInfo + power, pushed by the ArkTS shell). Properties return the last snapshot
 /// reported by the shell; off-device (no host library) they stay Unknown and never throw.
 /// </summary>
-public sealed partial class OpenHarmonyBattery : IBattery
+internal partial class OpenHarmonyBattery : IBattery
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -224,12 +224,14 @@ public sealed partial class OpenHarmonyBattery : IBattery
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize()
     {
         InstallDefault();
         Register();
     }
+    #pragma warning restore CA2255
 }
 
 /// <summary>
@@ -238,7 +240,7 @@ public sealed partial class OpenHarmonyBattery : IBattery
 /// KeepScreenOn asks the shell for window.setWindowKeepScreenOn; off-device (no host library)
 /// <see cref="MainDisplayInfo"/> stays empty, KeepScreenOn stays false and nothing throws.
 /// </summary>
-public sealed partial class OpenHarmonyDeviceDisplay : IDeviceDisplay
+internal partial class OpenHarmonyDeviceDisplay : IDeviceDisplay
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -426,10 +428,12 @@ public sealed partial class OpenHarmonyDeviceDisplay : IDeviceDisplay
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize()
     {
         InstallDefault();
         Register();
     }
+    #pragma warning restore CA2255
 }

@@ -15,7 +15,7 @@ using Microsoft.Maui.Animations;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyTicker : ITicker
+internal sealed class OpenHarmonyTicker : ITicker
 {
     private Timer? _timer;
     private bool _systemEnabled = true;

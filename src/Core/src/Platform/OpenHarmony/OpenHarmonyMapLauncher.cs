@@ -99,8 +99,10 @@ public sealed class OpenHarmonyMapLauncher : IMap
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefault();
+    #pragma warning restore CA2255
 
     /// <summary>
     /// The Android-shaped geo: URI for a coordinate pair: <c>geo:{lat},{lng}?q={lat},{lng}</c>

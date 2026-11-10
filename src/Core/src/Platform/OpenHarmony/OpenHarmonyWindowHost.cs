@@ -6,6 +6,7 @@
 // resize and receive input independently. See OpenHarmonyMauiAppHost for the owner and the
 // window-id routing entry points (RouteSurface/RouteTouch/RouteFrame).
 using Microsoft.OpenHarmony.Hosting;
+using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 

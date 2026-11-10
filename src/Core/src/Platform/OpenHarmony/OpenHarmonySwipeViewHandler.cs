@@ -182,7 +182,7 @@ public sealed class OpenHarmonySwipeViewHandler : OpenHarmonyViewHandler<SwipeVi
         return created;
     }
 
-    private static View? CreateSwipeItemContent(SwipeItem item)
+    private static VerticalStackLayout? CreateSwipeItemContent(SwipeItem item)
     {
         bool hasIcon = item.IconImageSource is not null;
         bool hasText = !string.IsNullOrEmpty(item.Text);

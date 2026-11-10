@@ -12,7 +12,7 @@ namespace Microsoft.Maui.Platform;
 /// activation) and <see cref="OpenHarmonyView"/> draws and hit-tests them: primary items dock in
 /// the bar, secondary items live in the overflow dropdown behind the "more" affordance.
 /// </summary>
-public sealed class OpenHarmonyToolbarItem
+internal sealed class OpenHarmonyToolbarItem
 {
     /// <summary>Item label (empty for an icon-only item, which still keeps its bar slot).</summary>
     public string Text { get; init; } = string.Empty;
@@ -1291,7 +1291,7 @@ public class OpenHarmonyView
     /// overflow affordance (OpenHarmonyToolbarMirror fills the list). Drawing, hit-testing and
     /// activation all read this list.
     /// </summary>
-    public List<OpenHarmonyToolbarItem> ToolbarItems { get; } = new();
+    internal List<OpenHarmonyToolbarItem> ToolbarItems { get; } = new();
     public float ToolbarItemWidth { get; set; } = 140f;
 
     /// <summary>Width of the overflow ("more") affordance at the bar's trailing edge.</summary>
@@ -1830,7 +1830,7 @@ public class OpenHarmonyView
             else
             {
                 float padding = CornerRadius > 0 ? 24f : 0f;
-                canvas.DrawString(Text, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
+                canvas.DrawString(Text ?? string.Empty, frame.X + padding, frame.Y, frame.Width - padding * 2, frame.Height,
                     FlowRightToLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment.Center);
             }
         }

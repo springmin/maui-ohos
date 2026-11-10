@@ -343,14 +343,14 @@ internal sealed class OpenHarmonyLoopbackListener : IDisposable
     {
         callbackUri = null;
         isGet = false;
-        int lineEnd = head.IndexOf('\n');
+        int lineEnd = head.IndexOf('\n', StringComparison.Ordinal);
         string requestLine = (lineEnd < 0 ? head : head.Substring(0, lineEnd)).TrimEnd('\r');
-        int methodEnd = requestLine.IndexOf(' ');
+        int methodEnd = requestLine.IndexOf(' ', StringComparison.Ordinal);
         if (methodEnd <= 0)
         {
             return false;
         }
-        int targetEnd = requestLine.IndexOf(' ', methodEnd + 1);
+        int targetEnd = requestLine.IndexOf(' ', methodEnd + 1, StringComparison.Ordinal);
         if (targetEnd <= methodEnd + 1)
         {
             return false;
@@ -362,7 +362,7 @@ internal sealed class OpenHarmonyLoopbackListener : IDisposable
             return true;
         }
         isGet = true;
-        if (target.StartsWith('/'))
+        if (target.StartsWith('/', StringComparison.Ordinal))
         {
             return Uri.TryCreate(_baseUri, target, out callbackUri);
         }

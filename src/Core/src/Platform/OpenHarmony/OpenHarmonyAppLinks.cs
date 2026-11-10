@@ -34,7 +34,7 @@ namespace Microsoft.Maui.Platform;
 /// bridge's activation events feed it (cold-start want and onNewWant alike) and
 /// <see cref="Activate(string)"/> is the app-facing entry for an explicit link.
 /// </summary>
-public static class OpenHarmonyAppLinks
+internal static class OpenHarmonyAppLinks
 {
     /// <summary>Most queued activations kept when navigation has not reached a target yet.</summary>
     private const int PendingLimit = 8;
@@ -277,7 +277,7 @@ public static class OpenHarmonyAppLinks
             return;
         }
         string lookup = route.TrimStart('/');
-        int query = lookup.IndexOf('?');
+        int query = lookup.IndexOf('?', StringComparison.Ordinal);
         if (query >= 0)
         {
             lookup = lookup[..query];

@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Microsoft.Maui.Platform;
 
-public static partial class OpenHarmonyNotifications
+internal partial class OpenHarmonyNotifications
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

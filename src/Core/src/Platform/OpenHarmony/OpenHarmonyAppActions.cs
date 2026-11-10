@@ -15,7 +15,7 @@ namespace Microsoft.Maui.Platform;
 /// App actions (runtime shortcuts) for OpenHarmony. The SDK has no dynamic shortcut setter, so
 /// this implementation reports unsupported and answers empty rather than pretending to work.
 /// </summary>
-public sealed class OpenHarmonyAppActions : IAppActions
+internal sealed class OpenHarmonyAppActions : IAppActions
 {
     /// <summary>False: no runtime shortcut API exists in this SDK (see the file header).</summary>
     public bool IsSupported => false;

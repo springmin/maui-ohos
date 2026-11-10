@@ -95,7 +95,7 @@ internal static partial class OpenHarmonyFlashlightBridge
 /// MAUI Essentials flashlight backed by the OpenHarmony Camera Kit torch control (the host
 /// asks the ArkTS shell, which owns getCameraManager/isTorchSupported/setTorchMode).
 /// </summary>
-public sealed class OpenHarmonyFlashlight : IFlashlight
+internal sealed class OpenHarmonyFlashlight : IFlashlight
 {
     /// <summary>The singleton installed as <see cref="Flashlight.Default"/>.</summary>
     public static readonly OpenHarmonyFlashlight Instance = new();
@@ -157,6 +157,8 @@ public sealed class OpenHarmonyFlashlight : IFlashlight
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefault();
+    #pragma warning restore CA2255
 }

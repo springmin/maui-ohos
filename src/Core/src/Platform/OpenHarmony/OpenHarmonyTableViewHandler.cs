@@ -1,3 +1,6 @@
+// The OpenHarmony compatibility handlers implement the obsolete ListView, TableView and Frame
+// controls, matching the other MAUI platform handlers that keep the same deprecated contract.
+#pragma warning disable CS0618 // Type or member is obsolete
 // Legacy TableView handler for OpenHarmony: the tabular control renders on the shared
 // virtualized list pipeline (the same one the ListView and CollectionView use). Rows are read
 // through ITableViewController.Model — the platform contract Controls implements on TableView —

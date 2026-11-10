@@ -227,7 +227,7 @@ internal sealed class OpenHarmonyShellFlyout
     {
         int hash = element.GetType().GetHashCode();
         hash = hash * 31 + RuntimeHelpers.GetHashCode(element);
-        hash = hash * 31 + (ElementText(element)?.GetHashCode() ?? 0);
+        hash = hash * 31 + (ElementText(element)?.GetHashCode(StringComparison.Ordinal) ?? 0);
         hash = hash * 31 + (element is IMenuItemController { IsEnabled: false } ? 0 : 1);
         return hash;
     }

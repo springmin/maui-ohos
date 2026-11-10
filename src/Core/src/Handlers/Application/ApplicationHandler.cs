@@ -10,6 +10,8 @@ using PlatformView = Android.App.Application;
 using PlatformView = Microsoft.UI.Xaml.Application;
 #elif TIZEN
 using PlatformView = Tizen.Applications.CoreApplication;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #endif
 
 namespace Microsoft.Maui.Handlers

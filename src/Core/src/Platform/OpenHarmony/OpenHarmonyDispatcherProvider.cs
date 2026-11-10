@@ -5,7 +5,7 @@ using Microsoft.Maui.Dispatching;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyDispatcherProvider : IDispatcherProvider
+internal sealed class OpenHarmonyDispatcherProvider : IDispatcherProvider
 {
     private readonly IDispatcher _dispatcher;
 

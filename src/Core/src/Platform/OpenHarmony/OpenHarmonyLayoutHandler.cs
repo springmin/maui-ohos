@@ -1,5 +1,6 @@
 // Layout handler for OpenHarmony: keeps the compositor's child list in sync with ILayout.
 using Microsoft.Maui.Handlers;
+using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 
@@ -9,6 +10,9 @@ public sealed class OpenHarmonyLayoutHandler : OpenHarmonyViewHandler<ILayout>, 
         new PropertyMapper<ILayout, OpenHarmonyLayoutHandler>(ViewMapper);
 
     public OpenHarmonyLayoutHandler() : base(Mapper) { }
+
+    // ILayoutHandler redeclares PlatformView as non-nullable in the platform contract.
+    object ILayoutHandler.PlatformView => PlatformView!;
 
     protected override OpenHarmonyView CreatePlatformView() => new();
 

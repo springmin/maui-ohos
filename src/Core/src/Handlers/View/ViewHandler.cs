@@ -8,6 +8,8 @@ using PlatformView = Android.Views.View;
 using PlatformView = Microsoft.UI.Xaml.FrameworkElement;
 #elif TIZEN
 using PlatformView = Tizen.NUI.BaseComponents.View;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif
@@ -337,7 +339,7 @@ namespace Microsoft.Maui.Handlers
 #endif
 
 
-#if !(NETSTANDARD || !PLATFORM)
+#if (!(NETSTANDARD || !PLATFORM)) && !OPENHARMONY
 		private protected abstract void OnConnectHandler(PlatformView platformView);
 
 		partial void ConnectingHandler(PlatformView? platformView);

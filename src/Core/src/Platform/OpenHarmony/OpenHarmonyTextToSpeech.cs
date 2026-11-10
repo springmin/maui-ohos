@@ -55,7 +55,7 @@ internal enum OpenHarmonyTextToSpeechStatus
     Cancelled = -101,
 }
 
-public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
+public partial class OpenHarmonyTextToSpeech : ITextToSpeech
 {
     public static readonly OpenHarmonyTextToSpeech Instance = new();
 
@@ -233,6 +233,8 @@ public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
     /// without throwing. Pending <see cref="SpeakAsync"/> calls complete because the shell
     /// resolves them when the engine stops.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "Public API: Stop pairs with the ITextToSpeech instance members; making it static is a breaking change.")]
     public void Stop()
     {
         if (s_unavailable)
@@ -463,6 +465,8 @@ public sealed partial class OpenHarmonyTextToSpeech : ITextToSpeech
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefault();
+    #pragma warning restore CA2255
 }

@@ -61,7 +61,7 @@ internal static partial class OpenHarmonyHaptics
 }
 
 /// <summary>MAUI Essentials haptic feedback backed by the OpenHarmony vibrator NDK export.</summary>
-public sealed class OpenHarmonyHapticFeedback : IHapticFeedback
+internal sealed class OpenHarmonyHapticFeedback : IHapticFeedback
 {
     public static readonly OpenHarmonyHapticFeedback Instance = new();
 
@@ -106,6 +106,8 @@ public sealed class OpenHarmonyHapticFeedback : IHapticFeedback
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefault();
+    #pragma warning restore CA2255
 }

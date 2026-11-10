@@ -16,6 +16,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Controls;
+using Microsoft.Maui.ApplicationModel;
 
 namespace Microsoft.Maui.Platform;
 
@@ -147,6 +148,8 @@ internal static partial class OpenHarmonyTheme
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 }

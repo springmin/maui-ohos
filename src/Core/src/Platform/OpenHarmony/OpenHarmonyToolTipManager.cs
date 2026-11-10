@@ -190,8 +190,10 @@ internal static class OpenHarmonyToolTipManager
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Install();
+    #pragma warning restore CA2255
 
     /// <summary>Mapper entry: records/removes the element's tooltip, then runs the previous
     /// mapping (the rc.1 default is platform-specific and kept for behaviour parity).</summary>
@@ -426,6 +428,10 @@ internal static class OpenHarmonyToolTipManager
     private static bool RefreshText(Registration registration)
     {
         if (!TryGetElement(registration, out View? element))
+        {
+            return false;
+        }
+        if (element is null)
         {
             return false;
         }

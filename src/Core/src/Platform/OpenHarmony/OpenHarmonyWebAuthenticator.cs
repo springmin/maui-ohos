@@ -61,7 +61,7 @@ namespace Microsoft.Maui.Platform;
 /// as the Essentials <see cref="WebAuthenticator.Default"/> and registered in DI by
 /// <see cref="MauiOpenHarmonyExtensions.UseOpenHarmony"/>.
 /// </summary>
-public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
+internal sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
 {
     /// <summary>The singleton installed as <see cref="WebAuthenticator.Default"/> and in DI.</summary>
     public static readonly OpenHarmonyWebAuthenticator Instance = new();
@@ -398,8 +398,10 @@ public sealed class OpenHarmonyWebAuthenticator : IWebAuthenticator
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefault();
+    #pragma warning restore CA2255
 
     /// <summary>One in-flight authentication request (the single process-wide active one).</summary>
     private sealed class Request

@@ -11,6 +11,8 @@ using PlatformView = Android.Views.View;
 using PlatformView = Microsoft.UI.Xaml.FrameworkElement;
 #elif TIZEN
 using PlatformView = Tizen.NUI.BaseComponents.View;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif

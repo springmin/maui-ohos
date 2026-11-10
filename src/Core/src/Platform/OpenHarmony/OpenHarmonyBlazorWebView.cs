@@ -27,7 +27,7 @@ namespace Microsoft.Maui.Platform;
 /// serves. Milestone 1 of the BlazorWebView port: no Blazor package types are referenced, so the
 /// helpers can be used (and tested) before the slice project takes the package reference.
 /// </summary>
-public static class OpenHarmonyBlazorWebView
+internal static class OpenHarmonyBlazorWebView
 {
     /// <summary>Origin the BlazorWebView loads app content from (BlazorWebViewHandler.AppOrigin).</summary>
     public const string AppOrigin = "https://0.0.0.0/";
@@ -110,7 +110,7 @@ public static class OpenHarmonyBlazorWebView
         {
             return null;
         }
-        string prefix = root.EndsWith("/", StringComparison.Ordinal) ? root : root + "/";
+        string prefix = root.EndsWith('/', StringComparison.Ordinal) ? root : root + "/";
         return resolved.StartsWith(prefix, StringComparison.Ordinal) ? resolved : null;
     }
 
@@ -163,8 +163,8 @@ public static class OpenHarmonyBlazorWebView
     /// </summary>
     private static bool IsSafeRelativePath(string path)
     {
-        if (path.Length == 0 || path.IndexOf('\0', StringComparison.Ordinal) >= 0 ||
-            path.IndexOf('\\', StringComparison.Ordinal) >= 0 || Path.IsPathRooted(path))
+        if (path.Length == 0 || path.Contains('\0', StringComparison.Ordinal) ||
+            path.Contains('\\', StringComparison.Ordinal) || Path.IsPathRooted(path))
         {
             return false;
         }

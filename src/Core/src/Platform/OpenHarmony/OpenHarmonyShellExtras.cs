@@ -28,6 +28,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Maui.Dispatching;
 using Microsoft.OpenHarmony.Hosting;
 using System.Runtime.CompilerServices;
+using Microsoft.Maui.Controls;
 
 namespace Microsoft.Maui.Platform;
 
@@ -35,7 +36,7 @@ namespace Microsoft.Maui.Platform;
 /// The search state published to the shell search bridge: visible when the current page (or the
 /// shell) carries a <see cref="SearchHandler"/>, plus its query text.
 /// </summary>
-public sealed record OpenHarmonyShellSearchState(
+internal sealed record OpenHarmonyShellSearchState(
     bool IsVisible,
     bool IsEnabled,
     string? Query,
@@ -43,7 +44,7 @@ public sealed record OpenHarmonyShellSearchState(
     string? PageTitle);
 
 /// <summary>Managed snapshot of the shell extras and the host bridge that publishes them.</summary>
-public static partial class OpenHarmonyShellExtras
+internal partial class OpenHarmonyShellExtras
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const string SearchSetEntryPoint = "ohos_host_shell_search_set";

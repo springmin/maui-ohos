@@ -207,7 +207,7 @@ internal static class OpenHarmonyAbilityLog
 }
 
 /// <summary>MAUI Essentials launcher on OpenHarmony (implicit viewData Want).</summary>
-public sealed class OpenHarmonyLauncher : ILauncher
+internal sealed class OpenHarmonyLauncher : ILauncher
 {
     public static readonly OpenHarmonyLauncher Instance = new();
 
@@ -267,7 +267,7 @@ public sealed class OpenHarmonyLauncher : ILauncher
 }
 
 /// <summary>MAUI Essentials browser on OpenHarmony (implicit viewData Want).</summary>
-public sealed class OpenHarmonyBrowser : IBrowser
+internal sealed class OpenHarmonyBrowser : IBrowser
 {
     public static readonly OpenHarmonyBrowser Instance = new();
 
@@ -312,7 +312,7 @@ public sealed class OpenHarmonyBrowser : IBrowser
 }
 
 /// <summary>MAUI Essentials share on OpenHarmony (implicit sendData Want: text or one file).</summary>
-public sealed class OpenHarmonyShare : IShare
+internal sealed class OpenHarmonyShare : IShare
 {
     public static readonly OpenHarmonyShare Instance = new();
 
@@ -407,7 +407,7 @@ public sealed class OpenHarmonyShare : IShare
         {
             return path;
         }
-        return path.StartsWith("/", StringComparison.Ordinal) ? "file://" + path : "file:///" + path;
+        return path.StartsWith('/', StringComparison.Ordinal) ? "file://" + path : "file:///" + path;
     }
 
     /// <summary>
@@ -504,6 +504,8 @@ internal static class OpenHarmonyAppLauncher
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefaults();
+    #pragma warning restore CA2255
 }

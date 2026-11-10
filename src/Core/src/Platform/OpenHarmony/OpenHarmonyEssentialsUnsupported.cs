@@ -17,10 +17,12 @@ using Microsoft.Maui.Devices;
 using Microsoft.Maui.Media;
 using Microsoft.Maui.Networking;
 using Microsoft.OpenHarmony.Hosting;
+using Microsoft.Maui.Devices.Sensors;
+using Microsoft.Maui.ApplicationModel.DataTransfer;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyVibration : IVibration
+internal sealed class OpenHarmonyVibration : IVibration
 {
     /// <summary>Vibration goes through the platform NDK (OH_Vibrator_PlayVibration).</summary>
     public bool IsSupported => OpenHarmonyBridge.CheckSelfPermission("ohos.permission.VIBRATE");
@@ -44,7 +46,7 @@ public sealed class OpenHarmonyVibration : IVibration
     }
 }
 
-public sealed class OpenHarmonyPermissions : IPermissions
+internal sealed class OpenHarmonyPermissions : IPermissions
 {
     /// <summary>
     /// MAUI permission types mapped to the OpenHarmony permission names that gate the same
@@ -200,16 +202,6 @@ public sealed class OpenHarmonyPermissions : IPermissions
     public bool ShouldShowRationale<TPermission>() where TPermission : Permissions.BasePermission, new()
         => false;
 
-    /// <summary>
-    /// No-op by design: permissions are declared once in the HAP's module.json5
-    /// requestPermissions, and the SDK reads them back with
-    /// bundleManager.getBundleInfoForSelf(GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION) - an ArkTS
-    /// API with no export on the host bridge, so the managed side cannot inspect declarations.
-    /// Requesting a permission that was not declared still fails through the normal Denied path.
-    /// </summary>
-    public void EnsureDeclared<TPermission>() where TPermission : Permissions.BasePermission, new()
-    {
-    }
 }
 
 /// <summary>
@@ -249,8 +241,10 @@ internal static partial class OpenHarmonyNotificationPermissionBridge
     private static bool s_unavailable;
     private static int s_nextRequestId;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 
     /// <summary>Registers the native result callback; a guarded no-op off-device.</summary>
     internal static void Register()
@@ -335,7 +329,7 @@ internal static partial class OpenHarmonyNotificationPermissionBridge
     }
 }
 
-public sealed class OpenHarmonyGeolocation : IGeolocation
+internal sealed class OpenHarmonyGeolocation : IGeolocation
 {
     private static bool s_listening;
 

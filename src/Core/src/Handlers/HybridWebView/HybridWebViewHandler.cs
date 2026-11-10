@@ -274,7 +274,7 @@ namespace Microsoft.Maui.Handlers
 
 
 
-#if PLATFORM && !TIZEN
+#if PLATFORM && !TIZEN && !OPENHARMONY
 		public static async void MapEvaluateJavaScriptAsync(IHybridWebViewHandler handler, IHybridWebView hybridWebView, object? arg)
 		{
 			if (arg is not EvaluateJavaScriptAsyncRequest request ||

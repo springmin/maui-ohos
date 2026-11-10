@@ -29,7 +29,7 @@ internal sealed class SliceHandlerRegistration
     public Func<IElementHandler> Create { get; }
 }
 
-public static class OpenHarmonyHandlerConnector
+internal static class OpenHarmonyHandlerConnector
 {
     /// <summary>Maui context of the running application (set by the app host).</summary>
     public static IMauiContext? Context { get; set; }

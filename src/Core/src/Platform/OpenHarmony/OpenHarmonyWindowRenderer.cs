@@ -4,12 +4,13 @@ using System.Text;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
+using Microsoft.Maui.Controls;
 using HostCanvas = Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas;
 using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyWindowRenderer
+internal sealed class OpenHarmonyWindowRenderer
 {
     /// <summary>Canvas factory: tests substitute a managed rasterizer for pixel assertions.</summary>
     public static Func<MauiCanvas>? CanvasFactory { get; set; }
@@ -1102,6 +1103,8 @@ public sealed class OpenHarmonyWindowRenderer
     private bool _dropCapableSeen;
 
     /// <summary>True while any view wants continuous redraws (activity indicators).</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "Public renderer API: callers hold the renderer instance; making it static is a breaking change.")]
     public bool HasAnimations(IView? root)
     {
         // Idle frames are the common case: with no spinner registered anywhere the tree cannot
@@ -1535,7 +1538,7 @@ public sealed class OpenHarmonyWindowRenderer
                 OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(titleBar.View));
             if (down && !rowHandled && titleBar.InDragRegion(x, y))
             {
-                titleBar.StartWindowDrag();
+                OpenHarmonyTitleBarRow.StartWindowDrag();
             }
             // A press on the row never leaks into the page underneath.
             return rowHandled || down || up;
@@ -2141,7 +2144,7 @@ public sealed class OpenHarmonyWindowRenderer
     /// resolve like the recursive originals: the last child that produced a match wins, and the
     /// view itself only matches when no child did.
     /// </summary>
-    private void CollectTouchTargets(IView view, float x, float y, bool positioned, TouchTargets wanted, ref TouchWalk walk,
+    private static void CollectTouchTargets(IView view, float x, float y, bool positioned, TouchTargets wanted, ref TouchWalk walk,
         in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
@@ -2275,12 +2278,14 @@ public sealed class OpenHarmonyWindowRenderer
     /// rectangle compare); a running scale outside the documented bounds is clamped by
     /// <see cref="OpenHarmonyPinch.TryNormalize"/> at the dispatch gate.
     /// </remarks>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "Public renderer API: callers hold the renderer instance; making it static is a breaking change.")]
     public bool HandlePinch(IView root, int phase, double scale, float x, float y)
         => OpenHarmonyPinch.TryNormalize(phase, scale, x, y, out _)
             && FindPinchTarget(root, x, y, OpenHarmonyFlowMap.Identity, OpenHarmonyFlowDirection.IsRightToLeftRoot(root)) is { } target
             && OpenHarmonyPinch.Dispatch(target, phase, scale, x, y);
 
-    private IView? FindPinchTarget(IView view, float x, float y,
+    private static IView? FindPinchTarget(IView view, float x, float y,
         in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
@@ -2307,7 +2312,7 @@ public sealed class OpenHarmonyWindowRenderer
     }
 
     /// <summary>Deepest view containing the point that owns a pointer recognizer.</summary>
-    private IView? FindPointerTarget(IView view, float x, float y,
+    private static IView? FindPointerTarget(IView view, float x, float y,
         in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
@@ -2341,7 +2346,7 @@ public sealed class OpenHarmonyWindowRenderer
     }
 
     /// <summary>Deepest view containing the point that owns a usable drop recognizer.</summary>
-    private IView? FindDropTarget(IView view, float x, float y,
+    private static IView? FindDropTarget(IView view, float x, float y,
         in OpenHarmonyFlowMap map, bool parentRightToLeft)
     {
         if (BlocksInput(view))
@@ -2375,6 +2380,8 @@ public sealed class OpenHarmonyWindowRenderer
     }
 
     /// <summary>Human-readable tree for logs/tests: type, text and arranged frame.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "Public renderer API: callers hold the renderer instance; making it static is a breaking change.")]
     public string Describe(IView view, int depth = 0)
     {
         var sb = new StringBuilder();

@@ -7,7 +7,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyPreferences : IPreferences
+internal sealed class OpenHarmonyPreferences : IPreferences
 {
     private readonly string _path;
     private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);

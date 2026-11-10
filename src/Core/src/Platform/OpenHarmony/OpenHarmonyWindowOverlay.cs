@@ -64,7 +64,7 @@ namespace Microsoft.Maui.Platform;
 /// <see cref="OpenHarmonyWindowOverlayHost"/> on the compositor frame, with the same
 /// add/remove/visibility/density surface the other MAUI platforms expose.
 /// </summary>
-public class OpenHarmonyWindowOverlay : IWindowOverlay
+internal class OpenHarmonyWindowOverlay : IWindowOverlay
 {
     private readonly object _sync = new();
     private readonly List<IWindowOverlayElement> _elements = new();

@@ -10,7 +10,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyDispatcher : IDispatcher
+internal sealed class OpenHarmonyDispatcher : IDispatcher
 {
     private readonly ConcurrentQueue<Action> _queue = new();
     private readonly Timer _safetyNet;

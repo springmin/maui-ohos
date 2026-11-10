@@ -65,8 +65,10 @@ internal static partial class OpenHarmonyGeocodingBridge
     private static bool s_unavailable;
     private static int s_nextRequestId;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 
     /// <summary>Registers the native result callback; a guarded no-op off-device.</summary>
     internal static void Register()

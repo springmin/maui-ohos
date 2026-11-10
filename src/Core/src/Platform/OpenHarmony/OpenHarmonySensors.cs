@@ -127,7 +127,7 @@ internal static partial class OpenHarmonySensors
 }
 
 /// <summary>MAUI Essentials accelerometer backed by the OpenHarmony sensor service (G units).</summary>
-public sealed class OpenHarmonyAccelerometer : Microsoft.Maui.Devices.Sensors.IAccelerometer
+internal sealed class OpenHarmonyAccelerometer : Microsoft.Maui.Devices.Sensors.IAccelerometer
 {
     public static readonly OpenHarmonyAccelerometer Instance = new();
     private const float Gravity = 9.80665f;
@@ -180,7 +180,7 @@ public sealed class OpenHarmonyAccelerometer : Microsoft.Maui.Devices.Sensors.IA
 }
 
 /// <summary>MAUI Essentials gyroscope backed by the OpenHarmony sensor service (rad/s).</summary>
-public sealed class OpenHarmonyGyroscope : Microsoft.Maui.Devices.Sensors.IGyroscope
+internal sealed class OpenHarmonyGyroscope : Microsoft.Maui.Devices.Sensors.IGyroscope
 {
     public static readonly OpenHarmonyGyroscope Instance = new();
     private bool _monitoring;
@@ -209,7 +209,7 @@ public sealed class OpenHarmonyGyroscope : Microsoft.Maui.Devices.Sensors.IGyros
 }
 
 /// <summary>MAUI Essentials magnetometer backed by the OpenHarmony sensor service (microtesla).</summary>
-public sealed class OpenHarmonyMagnetometer : Microsoft.Maui.Devices.Sensors.IMagnetometer
+internal sealed class OpenHarmonyMagnetometer : Microsoft.Maui.Devices.Sensors.IMagnetometer
 {
     public static readonly OpenHarmonyMagnetometer Instance = new();
     private bool _monitoring;
@@ -238,7 +238,7 @@ public sealed class OpenHarmonyMagnetometer : Microsoft.Maui.Devices.Sensors.IMa
 }
 
 /// <summary>MAUI Essentials compass backed by the OpenHarmony magnetic field sensor (heading in degrees).</summary>
-public sealed class OpenHarmonyCompass : Microsoft.Maui.Devices.Sensors.ICompass
+internal sealed class OpenHarmonyCompass : Microsoft.Maui.Devices.Sensors.ICompass
 {
     public static readonly OpenHarmonyCompass Instance = new();
     private bool _monitoring;
@@ -276,7 +276,7 @@ public sealed class OpenHarmonyCompass : Microsoft.Maui.Devices.Sensors.ICompass
 }
 
 /// <summary>MAUI Essentials barometer backed by the OpenHarmony sensor service (hectopascals).</summary>
-public sealed class OpenHarmonyBarometer : Microsoft.Maui.Devices.Sensors.IBarometer
+internal sealed class OpenHarmonyBarometer : Microsoft.Maui.Devices.Sensors.IBarometer
 {
     public static readonly OpenHarmonyBarometer Instance = new();
     private const double PascalPerHectopascal = 100.0;
@@ -307,7 +307,7 @@ public sealed class OpenHarmonyBarometer : Microsoft.Maui.Devices.Sensors.IBarom
 }
 
 /// <summary>MAUI Essentials orientation sensor backed by the OpenHarmony sensor service.</summary>
-public sealed class OpenHarmonyOrientationSensor : Microsoft.Maui.Devices.Sensors.IOrientationSensor
+internal sealed class OpenHarmonyOrientationSensor : Microsoft.Maui.Devices.Sensors.IOrientationSensor
 {
     public static readonly OpenHarmonyOrientationSensor Instance = new();
     private bool _monitoring;

@@ -18,7 +18,7 @@ namespace Microsoft.Maui.Platform;
 /// The OpenHarmony platform application: the object behind <see cref="IPlatformApplication"/>
 /// while a MauiApp built with <see cref="MauiOpenHarmonyExtensions.UseOpenHarmony"/> is running.
 /// </summary>
-public sealed class OpenHarmonyMauiApplication : IPlatformApplication
+internal sealed class OpenHarmonyMauiApplication : IPlatformApplication
 {
     private readonly IServiceProvider _services;
     private IApplication? _application;

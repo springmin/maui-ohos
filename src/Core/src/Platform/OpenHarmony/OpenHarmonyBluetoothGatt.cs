@@ -15,7 +15,7 @@ using System.Runtime.CompilerServices;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Outcome class of one GATT request (see the file header for the code mapping).</summary>
-public enum OpenHarmonyGattStatus
+internal enum OpenHarmonyGattStatus
 {
     /// <summary>The request completed; an empty payload is a valid answer.</summary>
     Success = 0,
@@ -35,7 +35,7 @@ public enum OpenHarmonyGattStatus
 /// Result of a GATT request that carries no value: a <see cref="OpenHarmonyGattStatus"/> and an
 /// optional diagnostic <see cref="Message"/> (the shell/kit error text, empty on success).
 /// </summary>
-public readonly record struct OpenHarmonyGattResult(OpenHarmonyGattStatus Status, string Message)
+internal readonly record struct OpenHarmonyGattResult(OpenHarmonyGattStatus Status, string Message)
 {
     /// <summary>True when <see cref="Status"/> is <see cref="OpenHarmonyGattStatus.Success"/>.</summary>
     public bool IsSuccess => Status == OpenHarmonyGattStatus.Success;
@@ -45,7 +45,7 @@ public readonly record struct OpenHarmonyGattResult(OpenHarmonyGattStatus Status
 /// Result of a GATT read: the decoded value bytes (empty on failure) plus the status and the
 /// optional diagnostic message.
 /// </summary>
-public readonly record struct OpenHarmonyGattValue(OpenHarmonyGattStatus Status, byte[] Value, string Message)
+internal readonly record struct OpenHarmonyGattValue(OpenHarmonyGattStatus Status, byte[] Value, string Message)
 {
     /// <summary>True when <see cref="Status"/> is <see cref="OpenHarmonyGattStatus.Success"/>.</summary>
     public bool IsSuccess => Status == OpenHarmonyGattStatus.Success;
@@ -55,7 +55,7 @@ public readonly record struct OpenHarmonyGattValue(OpenHarmonyGattStatus Status,
 /// Result of an MTU request: the negotiated MTU when the platform reported one, otherwise the
 /// requested value with a message saying so.
 /// </summary>
-public readonly record struct OpenHarmonyGattMtuResult(OpenHarmonyGattStatus Status, int Mtu, string Message)
+internal readonly record struct OpenHarmonyGattMtuResult(OpenHarmonyGattStatus Status, int Mtu, string Message)
 {
     /// <summary>True when <see cref="Status"/> is <see cref="OpenHarmonyGattStatus.Success"/>.</summary>
     public bool IsSuccess => Status == OpenHarmonyGattStatus.Success;
@@ -63,7 +63,7 @@ public readonly record struct OpenHarmonyGattMtuResult(OpenHarmonyGattStatus Sta
 
 /// <summary>Characteristic property flags as reported by the platform (GattProperties).</summary>
 [Flags]
-public enum OpenHarmonyGattProperty
+internal enum OpenHarmonyGattProperty
 {
     /// <summary>No property was reported.</summary>
     None = 0,
@@ -94,13 +94,13 @@ public enum OpenHarmonyGattProperty
 }
 
 /// <summary>One characteristic as reported by service discovery.</summary>
-public readonly record struct OpenHarmonyGattCharacteristic(
+internal readonly record struct OpenHarmonyGattCharacteristic(
     string ServiceUuid,
     string CharacteristicUuid,
     OpenHarmonyGattProperty Properties);
 
 /// <summary>One GATT service with its characteristics, as reported by service discovery.</summary>
-public sealed class OpenHarmonyGattService
+internal sealed class OpenHarmonyGattService
 {
     internal OpenHarmonyGattService(string uuid, bool isPrimary, IReadOnlyList<OpenHarmonyGattCharacteristic> characteristics)
     {
@@ -120,7 +120,7 @@ public sealed class OpenHarmonyGattService
 }
 
 /// <summary>Connection state as reported by the BLEConnectionStateChange push.</summary>
-public enum OpenHarmonyGattConnectionState
+internal enum OpenHarmonyGattConnectionState
 {
     /// <summary>The device is disconnected (access.ProfileConnectionState.STATE_DISCONNECTED).</summary>
     Disconnected = 0,
@@ -136,7 +136,7 @@ public enum OpenHarmonyGattConnectionState
 }
 
 /// <summary>Payload of <see cref="OpenHarmonyBluetoothGatt.ValueChanged"/>.</summary>
-public sealed class OpenHarmonyGattValueChangedEventArgs : EventArgs
+internal sealed class OpenHarmonyGattValueChangedEventArgs : EventArgs
 {
     internal OpenHarmonyGattValueChangedEventArgs(string deviceAddress, string serviceUuid, string characteristicUuid, byte[] value)
     {
@@ -160,7 +160,7 @@ public sealed class OpenHarmonyGattValueChangedEventArgs : EventArgs
 }
 
 /// <summary>Payload of <see cref="OpenHarmonyBluetoothGatt.ConnectionStateChanged"/>.</summary>
-public sealed class OpenHarmonyGattConnectionChangedEventArgs : EventArgs
+internal sealed class OpenHarmonyGattConnectionChangedEventArgs : EventArgs
 {
     internal OpenHarmonyGattConnectionChangedEventArgs(string deviceAddress, OpenHarmonyGattConnectionState state, int reason)
     {
@@ -180,7 +180,7 @@ public sealed class OpenHarmonyGattConnectionChangedEventArgs : EventArgs
 }
 
 /// <summary>Payload of <see cref="OpenHarmonyBluetoothGatt.MtuChanged"/>.</summary>
-public sealed class OpenHarmonyGattMtuChangedEventArgs : EventArgs
+internal sealed class OpenHarmonyGattMtuChangedEventArgs : EventArgs
 {
     internal OpenHarmonyGattMtuChangedEventArgs(string deviceAddress, int mtu)
     {
@@ -201,7 +201,7 @@ public sealed class OpenHarmonyGattMtuChangedEventArgs : EventArgs
 /// library) they answer <see cref="OpenHarmonyGattStatus.Unavailable"/> / empty results and
 /// never throw; <see cref="IsSupported"/> reports whether the platform path is available.
 /// </summary>
-public static partial class OpenHarmonyBluetoothGatt
+internal partial class OpenHarmonyBluetoothGatt
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;

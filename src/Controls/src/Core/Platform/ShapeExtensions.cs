@@ -1,4 +1,5 @@
 ﻿using Microsoft.Maui.Controls.Shapes;
+using Path = Microsoft.Maui.Controls.Shapes.Path;
 using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Controls.Platform

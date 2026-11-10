@@ -38,7 +38,7 @@ using Microsoft.OpenHarmony.Hosting;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>Kind of a published menu row (the shell renders each kind differently).</summary>
-public enum OpenHarmonyMenuEntryKind
+internal enum OpenHarmonyMenuEntryKind
 {
     /// <summary>A leaf row: activating it runs its MenuItem (a disabled submenu stays a leaf).</summary>
     Item = 0,
@@ -58,10 +58,10 @@ public enum OpenHarmonyMenuEntryKind
 /// <param name="Item">The MAUI item activated when a leaf is tapped (null for bar/submenu rows).</param>
 /// <param name="Kind">Item/submenu header/bar title (see <see cref="OpenHarmonyMenuEntryKind"/>).</param>
 /// <param name="BarTitle">Text of the MenuBarItem the row belongs to.</param>
-public sealed record OpenHarmonyMenuEntry(int Index, string Text, bool IsEnabled, int Level, MenuItem? Item,
+internal sealed record OpenHarmonyMenuEntry(int Index, string Text, bool IsEnabled, int Level, MenuItem? Item,
     OpenHarmonyMenuEntryKind Kind = OpenHarmonyMenuEntryKind.Item, string? BarTitle = null);
 
-public static partial class OpenHarmonyMenus
+internal partial class OpenHarmonyMenus
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 
@@ -299,14 +299,23 @@ public static partial class OpenHarmonyMenus
     private static void PublishExtended()
     {
         EnsureListener();
-        MenuBegin(s_published.Count);
+        if (MenuBegin(s_published.Count) != 0)
+        {
+            s_available = false;
+            return;
+        }
         foreach (OpenHarmonyMenuEntry entry in s_published)
         {
             MenuItemExNative(entry.Index, entry.Text, entry.IsEnabled ? 1 : 0, (int)entry.Kind, entry.Level,
                 entry.BarTitle ?? string.Empty);
         }
-        MenuCommit();
-        LastPublishedCount = s_published.Count;
+        int published = MenuCommit();
+        if (published < 0)
+        {
+            s_available = false;
+            return;
+        }
+        LastPublishedCount = published;
     }
 
     /// <summary>
@@ -316,13 +325,22 @@ public static partial class OpenHarmonyMenus
     private static void PublishLegacy()
     {
         EnsureListener();
-        MenuBegin(s_published.Count);
+        if (MenuBegin(s_published.Count) != 0)
+        {
+            s_available = false;
+            return;
+        }
         foreach (OpenHarmonyMenuEntry entry in s_published)
         {
             MenuItemNative(entry.Index, entry.Text, entry.IsEnabled ? 1 : 0);
         }
-        MenuCommit();
-        LastPublishedCount = s_published.Count;
+        int published = MenuCommit();
+        if (published < 0)
+        {
+            s_available = false;
+            return;
+        }
+        LastPublishedCount = published;
     }
 
     private static void EnsureListener()
@@ -465,6 +483,7 @@ public static partial class OpenHarmonyMenus
     /// Self-wiring: every platform redraw (page changes raise one) and every frame tick checks
     /// whether the window's current page changed and republishes its menu table.
     /// </summary>
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize()
     {
@@ -478,4 +497,5 @@ public static partial class OpenHarmonyMenus
             // No platform events available: menus can still be published explicitly.
         }
     }
+    #pragma warning restore CA2255
 }

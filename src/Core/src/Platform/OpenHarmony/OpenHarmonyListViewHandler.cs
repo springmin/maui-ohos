@@ -1,3 +1,6 @@
+// The OpenHarmony compatibility handlers implement the obsolete ListView, TableView and Frame
+// controls, matching the other MAUI platform handlers that keep the same deprecated contract.
+#pragma warning disable CS0618 // Type or member is obsolete
 // Legacy ListView handler for OpenHarmony: shares the virtualized list pipeline. Cells are
 // rendered through their inner view (ViewCell) or as text (TextCell/ImageCell); the cell
 // materialisation lives in OpenHarmonyCellFactory so the legacy TableView handler renders the
@@ -155,7 +158,7 @@ internal static class OpenHarmonyCellFactory
     }
 
     /// <summary>Materialises an ImageCell as a thumbnail + text/detail row.</summary>
-    private static View CreateImageCell(ImageCell cell)
+    private static Grid CreateImageCell(ImageCell cell)
     {
         var image = new Image
         {
@@ -197,7 +200,7 @@ internal static class OpenHarmonyCellFactory
     }
 
     /// <summary>Materialises a SwitchCell as a label + Switch row.</summary>
-    private static View CreateSwitchCell(SwitchCell cell)
+    private static Grid CreateSwitchCell(SwitchCell cell)
     {
         var label = new Label { Text = cell.Text ?? string.Empty, FontSize = 26, VerticalOptions = LayoutOptions.Center };
         var toggle = new Switch { IsToggled = cell.On, HorizontalOptions = LayoutOptions.End };
@@ -222,7 +225,7 @@ internal static class OpenHarmonyCellFactory
     }
 
     /// <summary>Materialises an EntryCell as a label + Entry row.</summary>
-    private static View CreateEntryCell(EntryCell cell)
+    private static Grid CreateEntryCell(EntryCell cell)
     {
         var label = new Label { Text = cell.Label ?? string.Empty, FontSize = 26, VerticalOptions = LayoutOptions.Center };
         if (cell.LabelColor is { } labelColor)
@@ -264,7 +267,7 @@ internal static class OpenHarmonyCellFactory
     }
 
     /// <summary>Shared cell row: content left, interactive control right.</summary>
-    private static View CreateCellRow(View content, View trailing)
+    private static Grid CreateCellRow(View content, View trailing)
     {
         var row = new Grid
         {

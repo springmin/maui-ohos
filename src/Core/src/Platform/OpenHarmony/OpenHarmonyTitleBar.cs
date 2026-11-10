@@ -109,7 +109,7 @@ internal sealed class OpenHarmonyTitleBarRow
     /// row draws the system caption buttons; off-device and on a fullscreen phone window this is
     /// false and the app title bar keeps the whole band for its own content.
     /// </summary>
-    internal bool ShowsSystemButtons => OpenHarmonyWindowDecoration.Available;
+    internal static bool ShowsSystemButtons => OpenHarmonyWindowDecoration.Available;
 
     /// <summary>
     /// The caption button at the point, or null outside them. The buttons claim the trailing edge
@@ -162,7 +162,7 @@ internal sealed class OpenHarmonyTitleBarRow
         => Contains(x, y) && !(ShowsBack && InBackButton(x, y)) && HitSystemButton(x, y) is null;
 
     /// <summary>Starts the window move through the shell (op 3; drag continues until the release).</summary>
-    internal bool StartWindowDrag()
+    internal static bool StartWindowDrag()
         => OpenHarmonyWindowDecoration.Execute(OpenHarmonyWindowDecorCommand.StartMoving);
 
     /// <summary>The caption button rectangle in canvas space (trailing edge; see HitSystemButton).</summary>

@@ -92,7 +92,7 @@ internal static partial class OpenHarmonySettingsBridge
     }
 }
 
-public sealed class OpenHarmonyAppInfo : IAppInfo
+internal sealed class OpenHarmonyAppInfo : IAppInfo
 {
     /// <summary>The documented package-name fallback when the host has none (desktop builds).</summary>
     internal const string FallbackPackageName = "com.example.app";
@@ -171,7 +171,7 @@ public sealed class OpenHarmonyAppInfo : IAppInfo
     }
 }
 
-public sealed class OpenHarmonyDeviceInfo : IDeviceInfo
+internal sealed class OpenHarmonyDeviceInfo : IDeviceInfo
 {
     // Model/Manufacturer/Name: the host bridge exposes no product/device builder API, so these
     // keep the runtime's values (the machine name on desktop; on device the kernel host name).
@@ -218,7 +218,7 @@ public sealed class OpenHarmonyDeviceInfo : IDeviceInfo
     public DeviceType DeviceType => DeviceType.Physical;
 }
 
-public sealed class OpenHarmonyVersionTracking : IVersionTracking
+internal sealed class OpenHarmonyVersionTracking : IVersionTracking
 {
     private const string LastVersionKey = "versionTracking.last";
     private const string LaunchesKey = "versionTracking.launches";

@@ -6,8 +6,10 @@
 // colours, spacing, decorations and backgrounds. Everything the canvas cannot render per run
 // (a span font family against the process-wide typeface, span gestures) is reported once through
 // the status channel instead of being silently dropped.
+using System.Globalization;
 using Microsoft.Maui;
 using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Controls;
 
 namespace Microsoft.Maui.Platform;
 
@@ -112,8 +114,8 @@ internal static class OpenHarmonyFormattedText
     /// <summary>Applies the MAUI text transform (the Controls layer leaves span text untransformed).</summary>
     public static string ApplyTextTransform(string text, TextTransform transform) => transform switch
     {
-        TextTransform.Uppercase => text.ToUpper(),
-        TextTransform.Lowercase => text.ToLower(),
+        TextTransform.Uppercase => text.ToUpper(CultureInfo.CurrentCulture),
+        TextTransform.Lowercase => text.ToLower(CultureInfo.CurrentCulture),
         _ => text,
     };
 }
@@ -261,7 +263,7 @@ internal sealed class OpenHarmonyFormattedTextLayout
         int start = 0;
         while (true)
         {
-            int newline = _text.IndexOf('\n', start);
+            int newline = _text.IndexOf('\n', start, StringComparison.Ordinal);
             int end = newline < 0 ? _text.Length : newline;
             AddParagraph(lines, start, end);
             if (newline < 0)
@@ -563,7 +565,7 @@ internal sealed class OpenHarmonyFormattedTextLayout
         return result;
     }
 
-    private float EllipsisWidth(OpenHarmonyTextRun run)
+    private static float EllipsisWidth(OpenHarmonyTextRun run)
         => OpenHarmonyLabelHandler.MeasureText(Ellipsis, run.FontSize).Width;
 
     private static float MeasureSegment(OpenHarmonyTextRun run, string text)

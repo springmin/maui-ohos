@@ -7,7 +7,7 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyAlertManager : IAlertManager
+internal sealed class OpenHarmonyAlertManager : IAlertManager
 {
     public void Subscribe()
     {

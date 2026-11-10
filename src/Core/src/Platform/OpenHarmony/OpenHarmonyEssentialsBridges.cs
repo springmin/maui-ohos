@@ -53,8 +53,10 @@ internal static partial class OpenHarmonyPermissionBridge
     private static bool s_unavailable;
     private static int s_nextRequestId;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 
     /// <summary>Registers the native result callback; a guarded no-op off-device.</summary>
     internal static void Register()
@@ -181,8 +183,10 @@ internal static partial class OpenHarmonyClipboardBridge
     /// <summary>Raised for every pasteboard 'update' the shell reports.</summary>
     internal static event Action? Changed;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 
     /// <summary>Registers the native result and change callbacks; a guarded no-op off-device.</summary>
     internal static void Register()
@@ -313,8 +317,10 @@ internal static partial class OpenHarmonyConnectivityBridge
     /// <summary>Raised with the level the host re-read when the shell reported a change.</summary>
     internal static event Action<int>? Changed;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 
     /// <summary>Registers the native change callback; a guarded no-op off-device.</summary>
     internal static void Register()

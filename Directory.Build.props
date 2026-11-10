@@ -5,6 +5,10 @@
        checkout eng/ exists and both imports run exactly as before. -->
   <Import Condition="Exists('$(MSBuildThisFileDirectory)eng\Environment.Build.props')" Project="Sdk.props" Sdk="Microsoft.DotNet.Arcade.Sdk" />
   <Import Condition="'$(EnvironmentBuildPropsImported)' != 'True' and Exists('$(MSBuildThisFileDirectory)eng\Environment.Build.props')" Project="$(MSBuildThisFileDirectory)eng\Environment.Build.props" />
+  <!-- Shared AOT-supported probe (also used by the SDK/aspnetcore platform gates). It is
+       imported before the per-platform block below so a platform can opt out; the file only
+       assigns NativeAotSupported when it is still unset. -->
+  <Import Condition="Exists('$(MSBuildThisFileDirectory)eng\common\native\NativeAotSupported.props')" Project="$(MSBuildThisFileDirectory)eng\common\native\NativeAotSupported.props" />
 
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -91,6 +95,12 @@
     <_MauiTargetPlatformIsTizen Condition="'$(_MauiTargetPlatformIdentifier)' == 'tizen'">True</_MauiTargetPlatformIsTizen>
     <_MauiTargetPlatformIsOpenHarmony>false</_MauiTargetPlatformIsOpenHarmony>
     <_MauiTargetPlatformIsOpenHarmony Condition="'$(_MauiTargetPlatformIdentifier)' == 'openharmony'">True</_MauiTargetPlatformIsOpenHarmony>
+    <!-- OpenHarmony is not a NativeAOT target. Gate PublishAot through NativeAotSupported
+         (same pattern as dotnet/aspnetcore#69952) instead of attempting an AOT publish that the
+         platform cannot support. Other platforms keep their existing _UseNativeAot behaviour:
+         the shared probe may set the property to true, and the host-app condition only treats an
+         explicit false as the opt-out. -->
+    <NativeAotSupported Condition="'$(_MauiTargetPlatformIsOpenHarmony)' == 'True'">false</NativeAotSupported>
   </PropertyGroup>
 
   <!-- Try determine which .NET workloads are installed -->
@@ -193,8 +203,9 @@
     <TizenTargetFrameworkVersion>7.0</TizenTargetFrameworkVersion>
     <!-- OpenHarmony TFM version = the API level of the SDK used to build (iOS/Xcode model).
          The platform workload (microsoft.net.sdk.openharmony) accepts 20.0 (public SDK) and
-         26.0 (device SDK); CI can override with -p:OpenHarmonyTargetFrameworkVersion=20.0. -->
-    <OpenHarmonyTargetFrameworkVersion>26.0</OpenHarmonyTargetFrameworkVersion>
+         26.0 (device SDK). Default to the public SDK; device builds override with
+         -p:OpenHarmonyTargetFrameworkVersion=26.0. -->
+    <OpenHarmonyTargetFrameworkVersion>20.0</OpenHarmonyTargetFrameworkVersion>
     <!-- Previous .NET -->
     <IosPreviousTargetFrameworkVersion>18.0</IosPreviousTargetFrameworkVersion>
     <TvosPreviousTargetFrameworkVersion>18.0</TvosPreviousTargetFrameworkVersion>
@@ -204,8 +215,6 @@
     <WindowsPreviousTargetFrameworkVersion>10.0.19041.0</WindowsPreviousTargetFrameworkVersion>
     <Windows2PreviousTargetFrameworkVersion>10.0.20348.0</Windows2PreviousTargetFrameworkVersion>
     <TizenPreviousTargetFrameworkVersion>7.0</TizenPreviousTargetFrameworkVersion>
-    <!-- No previous .NET release shipped OpenHarmony support yet; keep it in sync. -->
-    <OpenHarmonyPreviousTargetFrameworkVersion>26.0</OpenHarmonyPreviousTargetFrameworkVersion>
     <!-- Minimums -->
     <MinimumWindowsTargetFrameworkVersion>10.0.17763.0</MinimumWindowsTargetFrameworkVersion>
   </PropertyGroup>
@@ -228,7 +237,6 @@
     <!-- Library: Previous .NET -->
     <WindowsMauiPreviousPlatforms Condition="'$(WindowsMauiPreviousPlatforms)' == ''">net$(_MauiPreviousDotNetVersion)-windows$(WindowsPreviousTargetFrameworkVersion);net$(_MauiPreviousDotNetVersion)-windows$(Windows2PreviousTargetFrameworkVersion)</WindowsMauiPreviousPlatforms>
     <MauiPreviousPlatforms Condition="'$(IncludeTizenTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-tizen$(TizenPreviousTargetFrameworkVersion);$(MauiPreviousPlatforms)</MauiPreviousPlatforms>
-    <MauiPreviousPlatforms Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-openharmony$(OpenHarmonyPreviousTargetFrameworkVersion);$(MauiPreviousPlatforms)</MauiPreviousPlatforms>
     <MauiPreviousPlatforms Condition="'$(IncludeWindowsTargetFrameworks)' == 'true'">$(WindowsMauiPreviousPlatforms);$(MauiPreviousPlatforms)</MauiPreviousPlatforms>
     <MauiPreviousPlatforms Condition="'$(IncludeAndroidTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-android$(AndroidPreviousTargetFrameworkVersion);$(MauiPreviousPlatforms)</MauiPreviousPlatforms>
     <MauiPreviousPlatforms Condition="'$(IncludeMacCatalystTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-maccatalyst$(MacCatalystPreviousTargetFrameworkVersion);$(MauiPreviousPlatforms)</MauiPreviousPlatforms>
@@ -242,7 +250,6 @@
     <MauiSamplePlatforms Condition="'$(IncludeMacCatalystTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-maccatalyst;$(MauiSamplePlatforms)</MauiSamplePlatforms>
     <MauiSamplePlatforms Condition="'$(IncludeIosTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-ios;$(MauiSamplePlatforms)</MauiSamplePlatforms>
     <MauiSamplePreviousPlatforms Condition="'$(IncludeTizenTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-tizen;$(MauiSamplePreviousPlatforms)</MauiSamplePreviousPlatforms>
-    <MauiSamplePreviousPlatforms Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-openharmony;$(MauiSamplePreviousPlatforms)</MauiSamplePreviousPlatforms>
     <MauiSamplePreviousPlatforms Condition="'$(IncludeWindowsTargetFrameworks)' == 'true'">$(WindowsMauiPreviousPlatforms);$(MauiSamplePreviousPlatforms)</MauiSamplePreviousPlatforms>
     <MauiSamplePreviousPlatforms Condition="'$(IncludeAndroidTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-android;$(MauiSamplePreviousPlatforms)</MauiSamplePreviousPlatforms>
     <MauiSamplePreviousPlatforms Condition="'$(IncludeMacCatalystTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-maccatalyst;$(MauiSamplePreviousPlatforms)</MauiSamplePreviousPlatforms>
@@ -266,7 +273,6 @@
     <MauiManualTestsPlatforms Condition="'$(IncludeMacCatalystTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-maccatalyst;$(MauiManualTestsPlatforms)</MauiManualTestsPlatforms>
     <MauiManualTestsPlatforms Condition="'$(IncludeIosTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-ios;$(MauiManualTestsPlatforms)</MauiManualTestsPlatforms>
     <MauiManualTestsPreviousPlatforms Condition="'$(IncludeTizenTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-tizen;$(MauiManualTestsPreviousPlatforms)</MauiManualTestsPreviousPlatforms>
-    <MauiManualTestsPreviousPlatforms Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-openharmony;$(MauiManualTestsPreviousPlatforms)</MauiManualTestsPreviousPlatforms>
     <MauiManualTestsPreviousPlatforms Condition="'$(IncludeWindowsTargetFrameworks)' == 'true'">$(WindowsMauiPreviousPlatforms);$(MauiManualTestsPreviousPlatforms)</MauiManualTestsPreviousPlatforms>
     <MauiManualTestsPreviousPlatforms Condition="'$(IncludeAndroidTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-android;$(MauiManualTestsPreviousPlatforms)</MauiManualTestsPreviousPlatforms>
     <MauiManualTestsPreviousPlatforms Condition="'$(IncludeMacCatalystTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-maccatalyst;$(MauiManualTestsPreviousPlatforms)</MauiManualTestsPreviousPlatforms>

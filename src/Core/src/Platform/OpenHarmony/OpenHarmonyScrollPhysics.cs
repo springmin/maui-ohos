@@ -17,6 +17,7 @@
 // offset properties keep their plain assignment behaviour) and disables the loop's ticker.
 using System.Runtime.CompilerServices;
 using Microsoft.OpenHarmony.Hosting;
+using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 
@@ -248,8 +249,10 @@ internal static class OpenHarmonyScrollPhysics
     /// Subscribes to the platform touch stream when the assembly loads, so the pointer state is
     /// known from the very first press even though the physics is only touched during a scroll.
     /// </summary>
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Attach() => HookTouch();
+    #pragma warning restore CA2255
 
     /// <summary>Number of in-flight flings (tests/diagnostics).</summary>
     internal static int ActiveFlings

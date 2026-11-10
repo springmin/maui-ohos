@@ -1,0 +1,78 @@
+name: OpenHarmony slice TFM
+
+# The OpenHarmony .NET SDK/workload is an external platform band. This job is manual (or called
+# from the OpenHarmony workload CI) and uses the validated `--tfm` gate:
+#   Microsoft.Maui.Core + Microsoft.Maui.Controls for net11.0-openharmony<api>
+# with PublicApiAnalyzers validation.
+#
+# Inputs:
+#   sdk_url        URL of a .NET SDK tarball with the OpenHarmony host (linux-x64 or linux-arm64).
+#   workload_feed  Optional NuGet feed containing microsoft.net.sdk.openharmony packs; when set,
+#                  the job installs the workload before building.
+#   api_level      OpenHarmony API band (default 20.0).
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_url:
+        description: ".NET SDK tarball URL (OpenHarmony host)"
+        required: true
+        type: string
+      workload_feed:
+        description: "Optional workload pack feed (dotnet workload install openharmony --source ...)"
+        required: false
+        type: string
+      api_level:
+        description: "OpenHarmony API band"
+        required: false
+        default: "20.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tfm:
+    name: net11.0-openharmony${{ inputs.api_level }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the OpenHarmony .NET SDK
+        shell: bash
+        env:
+          SDK_URL: ${{ inputs.sdk_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SDK_URL}" ]; then
+            echo "sdk_url is required (an OpenHarmony-hosted .NET SDK tarball)" >&2
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/ohos-sdk"
+          curl -fsSL --retry 3 "${SDK_URL}" -o "${RUNNER_TEMP}/ohos-sdk.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/ohos-sdk.tar.gz" -C "${RUNNER_TEMP}/ohos-sdk"
+          DOTNET="$(find "${RUNNER_TEMP}/ohos-sdk" -type f -name dotnet -perm -u+x | head -1)"
+          [ -n "${DOTNET}" ] || { echo "the SDK tarball does not contain a dotnet host" >&2; exit 1; }
+          echo "DOTNET_ROOT=$(dirname "${DOTNET}")" >> "${GITHUB_ENV}"
+
+      - name: Install the OpenHarmony workload (optional feed)
+        if: ${{ inputs.workload_feed != '' }}
+        shell: bash
+        env:
+          WORKLOAD_FEED: ${{ inputs.workload_feed }}
+        run: |
+          set -euo pipefail
+          export PATH="${DOTNET_ROOT}:${PATH}"
+          "${DOTNET_ROOT}/dotnet" workload install openharmony --source "${WORKLOAD_FEED}"
+
+      - name: Verify the real TFM (Core + Controls)
+        shell: bash
+        env:
+          OpenHarmonyTargetFrameworkVersion: ${{ inputs.api_level }}
+        run: |
+          set -euo pipefail
+          export PATH="${DOTNET_ROOT}:${PATH}"
+          eng/openharmony/verify-slice.sh --tfm

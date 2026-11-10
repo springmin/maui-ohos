@@ -96,6 +96,8 @@ internal static partial class OpenHarmonySystemFontScale
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 }

@@ -23,6 +23,7 @@ internal static partial class OpenHarmonyBuildBanner
 
     private static int s_logged;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize()
     {
@@ -37,6 +38,7 @@ internal static partial class OpenHarmonyBuildBanner
             // The hosting assembly (or the host library) is absent: nothing to log into.
         }
     }
+    #pragma warning restore CA2255
 
     /// <summary>Writes the banner once per process; safe to call again and never throws.</summary>
     internal static void LogOnce()

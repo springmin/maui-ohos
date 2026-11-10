@@ -23,7 +23,7 @@ using System.Runtime.CompilerServices;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyFileSystem : IFileSystem
+internal sealed class OpenHarmonyFileSystem : IFileSystem
 {
     public string AppDataDirectory => OpenHarmonyPaths.DataDirectory;
 

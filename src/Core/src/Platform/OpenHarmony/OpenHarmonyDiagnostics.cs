@@ -3,7 +3,7 @@
 // OpenHarmonyDiagnostics.Enabled flag; the same pass counts the outlines for tests.
 namespace Microsoft.Maui.Platform;
 
-public static class OpenHarmonyDiagnostics
+internal static class OpenHarmonyDiagnostics
 {
     /// <summary>When true the compositor outlines every view after drawing it.</summary>
     public static bool Enabled { get; set; }

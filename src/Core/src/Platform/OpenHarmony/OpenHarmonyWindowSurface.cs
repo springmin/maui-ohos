@@ -18,7 +18,7 @@ using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
 
 namespace Microsoft.Maui.Platform;
 
-public sealed class OpenHarmonyWindowSurface
+internal sealed class OpenHarmonyWindowSurface
 {
     /// <summary>Window id the first XComponent claims; the primary MAUI window (M1 registry).</summary>
     public const string PrimaryWindowId = "main";

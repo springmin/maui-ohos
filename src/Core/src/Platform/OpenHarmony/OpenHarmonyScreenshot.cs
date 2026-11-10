@@ -142,7 +142,7 @@ internal static partial class OpenHarmonyScreenshotBridge
 }
 
 /// <summary>MAUI Essentials screenshot on OpenHarmony (host PNG capture, in-memory result).</summary>
-public sealed class OpenHarmonyScreenshot : IScreenshot
+internal sealed class OpenHarmonyScreenshot : IScreenshot
 {
     public static readonly OpenHarmonyScreenshot Instance = new();
 
@@ -372,7 +372,7 @@ public sealed class OpenHarmonyScreenshot : IScreenshot
 /// format export or the JPEG write fails, the PNG bytes are returned instead and the fallback is
 /// noted once through the status channel (quality is then not applied).
 /// </summary>
-public sealed class OpenHarmonyScreenshotResult : IScreenshotResult
+internal sealed class OpenHarmonyScreenshotResult : IScreenshotResult
 {
     private static bool s_jpegFallbackLogged;
 

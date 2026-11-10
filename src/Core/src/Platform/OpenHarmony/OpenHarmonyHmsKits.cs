@@ -71,7 +71,7 @@ internal static partial class OpenHarmonyShareKitBridge
 /// the sink; <see cref="ScanAsync"/> opens the system scan UI and completes with the decoded
 /// value, null on cancel/unavailable. All members degrade without throwing off-device.
 /// </summary>
-public static partial class OpenHarmonyScan
+internal partial class OpenHarmonyScan
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

@@ -96,7 +96,7 @@ public sealed class OpenHarmonyMapRegionEventArgs : EventArgs
 /// Overlay methods first run the capability probe (unless <see cref="QueryCapabilitiesAsync"/>
 /// already did) and are no-ops that answer <c>false</c> when the overlay bit is not set.
 /// </summary>
-public static partial class OpenHarmonyMap
+public partial class OpenHarmonyMap
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

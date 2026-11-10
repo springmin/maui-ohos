@@ -7,6 +7,8 @@ using PlatformView = Microsoft.Maui.Platform.ContentViewGroup;
 using PlatformView = Microsoft.Maui.Platform.ContentPanel;
 #elif TIZEN
 using PlatformView = Microsoft.Maui.Platform.ContentViewGroup;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif

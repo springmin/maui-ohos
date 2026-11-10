@@ -3,6 +3,7 @@
 using Microsoft.Maui;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
+using Microsoft.Maui.Controls;
 using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
 
 namespace Microsoft.Maui.Platform;

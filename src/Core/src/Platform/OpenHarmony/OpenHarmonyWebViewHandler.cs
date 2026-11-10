@@ -12,6 +12,7 @@ using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
 using System.Runtime.CompilerServices;
+using Microsoft.Maui.Controls;
 
 namespace Microsoft.Maui.Platform;
 
@@ -793,7 +794,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         foreach (string rawPair in header.Split(';'))
         {
             string pair = rawPair.Trim();
-            int separator = pair.IndexOf('=');
+            int separator = pair.IndexOf('=', StringComparison.Ordinal);
             if (separator <= 0)
             {
                 continue;
@@ -1273,7 +1274,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
         string trimmed = cut == url.Length ? url : url.Substring(0, cut);
         if (trimmed.Length > MaxLoggedUrlLength)
         {
-            trimmed = trimmed.Substring(0, MaxLoggedUrlLength - 3) + "...";
+            trimmed = string.Concat(trimmed.AsSpan(0, MaxLoggedUrlLength - 3), "...");
         }
         char[]? flattened = null;
         for (int i = 0; i < trimmed.Length; i++)
@@ -1491,7 +1492,7 @@ public sealed partial class OpenHarmonyWebViewHandler : OpenHarmonyViewHandler<I
                 // The subwindow page declared its ArkWeb pool; the managed child pool flushes
                 // the commands queued before the page loaded (a lost advertisement only delays
                 // the flush; the queue is bounded).
-                if (int.TryParse(effectiveState.Substring("capacity|".Length), out int childCapacity))
+                if (int.TryParse(effectiveState.AsSpan("capacity|".Length), out int childCapacity))
                 {
                     OpenHarmonyChildWeb.SetCapacity(childWindow, childCapacity);
                     OpenHarmonyBridge.WriteStatus($"[maui] child web capacity: {childWindow} {childCapacity}");

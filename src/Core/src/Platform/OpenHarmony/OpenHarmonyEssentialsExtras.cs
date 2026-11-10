@@ -8,6 +8,7 @@ using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Networking;
 using Microsoft.OpenHarmony.Hosting;
 using System.Runtime.InteropServices;
+using Microsoft.Maui.Controls;
 
 namespace Microsoft.Maui.Platform;
 
@@ -22,7 +23,7 @@ namespace Microsoft.Maui.Platform;
 /// is raised for every push (false until the first successful get/set/refresh). Off-device (no
 /// host library) the cache stays empty and every call degrades to false/null/"" without throwing.
 /// </summary>
-public sealed class OpenHarmonyClipboard : IClipboard
+internal sealed class OpenHarmonyClipboard : IClipboard
 {
     private readonly object _sync = new();
     private bool _hasText;
@@ -208,7 +209,7 @@ public sealed class OpenHarmonyClipboard : IClipboard
 /// host library, VPN-only) answers an empty set instead of guessing. Off-device the read fails
 /// and stays <see cref="NetworkAccess.Unknown"/> with no profiles.
 /// </summary>
-public sealed partial class OpenHarmonyConnectivity : IConnectivity
+internal partial class OpenHarmonyConnectivity : IConnectivity
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

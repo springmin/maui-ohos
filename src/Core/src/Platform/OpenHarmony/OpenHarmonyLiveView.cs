@@ -129,7 +129,7 @@ public readonly record struct OpenHarmonyLiveViewUpdate(
 /// Live View Kit (liveViewManager) bridge over the host sink. All members degrade without
 /// throwing when the host library or the shell's Live View sink is absent.
 /// </summary>
-public static partial class OpenHarmonyLiveView
+public partial class OpenHarmonyLiveView
 {
     private const string HostLibrary = "libopenharmonyhost.so";
 

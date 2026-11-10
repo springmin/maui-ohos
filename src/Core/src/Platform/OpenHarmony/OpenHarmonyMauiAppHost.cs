@@ -12,6 +12,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Hosting;
 using Microsoft.OpenHarmony.Hosting;
+using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;
 

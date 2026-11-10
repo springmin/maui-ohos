@@ -249,7 +249,7 @@ internal static class OpenHarmonyTextMapping
 /// spacing, line height, max lines, padding). A mapped background paint replaces the solid
 /// background colour. The layout is cached per text/width/font, so steady-state frames only draw.
 /// </summary>
-public class OpenHarmonyTextView : OpenHarmonyView
+internal class OpenHarmonyTextView : OpenHarmonyView
 {
     private readonly Dictionary<TextLayoutKey, string[]> _layouts = new();
 
@@ -597,7 +597,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
         return glyph;
     }
 
-    private void DrawDecorations(MauiCanvas canvas, TextDecorations decorations, Color color, float lineWidth,
+    private static void DrawDecorations(MauiCanvas canvas, TextDecorations decorations, Color color, float lineWidth,
         float x, float y, float lineHeight, float fontSize)
     {
         if (decorations == TextDecorations.None)
@@ -812,11 +812,11 @@ public class OpenHarmonyTextView : OpenHarmonyView
             case LineBreakMode.HeadTruncation:
             {
                 int start = 0;
-                while (start < text.Length && !Fits(Ellipsis + text.Substring(start + 1), fontSize, maxWidth))
+                while (start < text.Length && !Fits(string.Concat(Ellipsis.AsSpan(), text.AsSpan(start + 1)), fontSize, maxWidth))
                 {
                     start++;
                 }
-                return Ellipsis + text.Substring(Math.Min(start + 1, text.Length));
+                return string.Concat(Ellipsis.AsSpan(), text.AsSpan(Math.Min(start + 1, text.Length)));
             }
             case LineBreakMode.MiddleTruncation:
             {
@@ -828,7 +828,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
                     int nextHead = head + (growHead ? 1 : 0);
                     int nextTail = tail + (growHead ? 0 : 1);
                     if (nextHead + nextTail > text.Length - 1
-                        || !Fits(text.Substring(0, nextHead) + Ellipsis + text.Substring(text.Length - nextTail),
+                        || !Fits(string.Concat(text.AsSpan(0, nextHead), Ellipsis.AsSpan(), text.AsSpan(text.Length - nextTail)),
                             fontSize, maxWidth))
                     {
                         break;
@@ -836,16 +836,16 @@ public class OpenHarmonyTextView : OpenHarmonyView
                     head = nextHead;
                     tail = nextTail;
                 }
-                return text.Substring(0, head) + Ellipsis + text.Substring(text.Length - tail);
+                return string.Concat(text.AsSpan(0, head), Ellipsis.AsSpan(), text.AsSpan(text.Length - tail));
             }
             default:
             {
                 int count = text.Length;
-                while (count > 0 && !Fits(text.Substring(0, count) + Ellipsis, fontSize, maxWidth))
+                while (count > 0 && !Fits(string.Concat(text.AsSpan(0, count), Ellipsis.AsSpan()), fontSize, maxWidth))
                 {
                     count--;
                 }
-                return count <= 0 ? Ellipsis : text.Substring(0, count) + Ellipsis;
+                return count <= 0 ? Ellipsis : string.Concat(text.AsSpan(0, count), Ellipsis.AsSpan());
             }
         }
     }
@@ -900,7 +900,7 @@ public class OpenHarmonyTextView : OpenHarmonyView
 /// fills/strokes them through the canvas paint facilities, so gradient/image fills render instead of
 /// being dropped by the solid-only base path.
 /// </summary>
-public sealed class OpenHarmonyShapeView : OpenHarmonyView
+internal sealed class OpenHarmonyShapeView : OpenHarmonyView
 {
     /// <summary>Stroke paint (solid, gradient or image) mapped by the shape/border handlers.</summary>
     public Paint? ShapeStrokePaint { get; set; }

@@ -42,14 +42,14 @@ namespace Microsoft.Maui.Handlers
 
 		protected override void ConnectHandler(PlatformView platformView)
 		{
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 			platformView.Connect(VirtualView);
 #endif
 			base.ConnectHandler(platformView);
 		}
 		protected override void DisconnectHandler(PlatformView platformView)
 		{
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 			platformView.Disconnect();
 #endif
 			base.DisconnectHandler(platformView);

@@ -88,7 +88,7 @@ namespace Microsoft.Maui
 		/// </remarks>
 		public static Task<IScreenshotResult?> CaptureAsync(this IView view)
 		{
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 			if (view?.ToPlatform() is not PlatformView platformView)
 				return Task.FromResult<IScreenshotResult?>(null);
 
@@ -108,7 +108,7 @@ namespace Microsoft.Maui
 		}
 
 
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 		async static Task<IScreenshotResult?> CaptureAsync(PlatformView window) =>
 			await Screenshot.Default.CaptureAsync(window);
 #endif

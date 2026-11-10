@@ -12,7 +12,7 @@ using PlatformView = System.Object;
 #endif
 
 
-#if !(NETSTANDARD || !PLATFORM)
+#if !(NETSTANDARD || !PLATFORM) && !OPENHARMONY
 namespace Microsoft.Maui.Controls.Platform
 {
 	public static class PlatformConfigurationExtensions

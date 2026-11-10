@@ -72,6 +72,14 @@
     <Compile Include="**\*.tizen.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
     <Compile Include="**\*.tizen.*.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
   </ItemGroup>
+  <ItemGroup Condition=" '$(TargetPlatformIdentifier)' == 'openharmony' ">
+    <!-- Essentials has no per-type OpenHarmony partials: the slice installs the real
+         implementations from Microsoft.Maui.Platform (module initializers / DI). The netstandard
+         fallbacks supply the partial members those types must still declare (and the documented
+         not-supported behavior if the slice is not linked in). -->
+    <Compile Include="**\*.netstandard.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
+    <Compile Include="**\*.netstandard.*.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
+  </ItemGroup>
   <!-- <ItemGroup Condition=" '$(TargetPlatformIdentifier)' == 'macos' ">
     <Compile Include="**\*.macos.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
     <Compile Include="**\*.macos.*.cs" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />

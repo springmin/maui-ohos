@@ -440,7 +440,7 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
                     location = FileUrlToPath(location);
                     return IsSafeFilePath(location, out reason);
                 }
-                if (location.StartsWith('/'))
+                if (location.StartsWith('/', StringComparison.Ordinal))
                 {
                     kind = OpenHarmonyMediaSourceKind.File;
                     return IsSafeFilePath(location, out reason);
@@ -478,7 +478,7 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
     internal static bool IsSafeRawFileName(string name, out string reason)
     {
         reason = string.Empty;
-        if (name.Length == 0 || name.StartsWith('/') || name.IndexOf('\\') >= 0)
+        if (name.Length == 0 || name.StartsWith('/', StringComparison.Ordinal) || name.Contains('\\', StringComparison.Ordinal))
         {
             reason = "a rawfile name must be a relative path";
             return false;
@@ -501,7 +501,7 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
     internal static bool IsSafeFilePath(string path, out string reason)
     {
         reason = string.Empty;
-        if (!path.StartsWith('/') || path.IndexOf("..", StringComparison.Ordinal) >= 0 || path.IndexOf('\\') >= 0)
+        if (!path.StartsWith('/', StringComparison.Ordinal) || path.Contains("..", StringComparison.Ordinal) || path.Contains('\\', StringComparison.Ordinal))
         {
             reason = "a file source must be an absolute sandbox path without '..' or '\\'";
             return false;
@@ -539,7 +539,7 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         string slotTag = body.Substring(0, separator);
         int eventSlot = -1;
         if (slotTag.Length >= 2 && slotTag[0] == OpenHarmonyOverlays.SlotPrefix &&
-            int.TryParse(slotTag.Substring(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+            int.TryParse(slotTag.AsSpan(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
         {
             eventSlot = parsed;
         }
@@ -1036,7 +1036,7 @@ public sealed class OpenHarmonyMediaElementSurface : IOpenHarmonyOverlaySlotOwne
         {
             return location;
         }
-        return location.Substring(0, 93) + "...";
+        return string.Concat(location.AsSpan(0, 93), "...");
     }
 
     private static readonly char[] s_fieldSeparators = { '\t', '\n', '\r' };

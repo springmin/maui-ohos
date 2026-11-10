@@ -29,7 +29,7 @@ namespace Microsoft.Maui.Platform;
 /// The slice's <see cref="ISemanticScreenReader"/>: every announcement is routed through the
 /// accessibility provider's event path (<see cref="OpenHarmonyAccessibility.Announce"/>).
 /// </summary>
-public sealed class OpenHarmonySemanticScreenReader : ISemanticScreenReader
+internal sealed class OpenHarmonySemanticScreenReader : ISemanticScreenReader
 {
     /// <summary>The singleton installed as <see cref="SemanticScreenReader.Default"/>.</summary>
     public static readonly OpenHarmonySemanticScreenReader Instance = new();
@@ -87,6 +87,8 @@ public sealed class OpenHarmonySemanticScreenReader : ISemanticScreenReader
         }
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => InstallDefault();
+    #pragma warning restore CA2255
 }

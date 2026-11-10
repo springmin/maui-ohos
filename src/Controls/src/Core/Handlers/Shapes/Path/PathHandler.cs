@@ -1,5 +1,6 @@
 ﻿#nullable disable
 using Microsoft.Maui.Controls.Shapes;
+using Path = Microsoft.Maui.Controls.Shapes.Path;
 
 namespace Microsoft.Maui.Controls.Handlers
 {

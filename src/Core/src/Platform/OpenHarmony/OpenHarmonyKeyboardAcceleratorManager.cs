@@ -95,8 +95,10 @@ internal static class OpenHarmonyKeyboardAcceleratorManager
         OpenHarmonyKeyListener.Install();
     }
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Install();
+    #pragma warning restore CA2255
 
     /// <summary>Registers an rc.1 accelerator (Key/Modifiers) for an element.</summary>
     internal static bool Register(BindableObject element, IKeyboardAccelerator accelerator, Action? invoked = null)

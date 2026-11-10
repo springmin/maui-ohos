@@ -235,7 +235,7 @@ public sealed class OpenHarmonyMediaFailedEventArgs : EventArgs
 /// One process-wide player is owned by the shell sink, so this surface is static: a later
 /// multi-player extension would add a player id to the request payloads.
 /// </summary>
-public static partial class OpenHarmonyMediaPlayer
+internal partial class OpenHarmonyMediaPlayer
 {
     private const string HostLibrary = "libopenharmonyhost.so";
     private const int UnavailableCode = -1;

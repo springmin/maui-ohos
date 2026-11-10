@@ -34,6 +34,17 @@
 
   <Import Project="$(MauiSrcDirectory)MultiTargeting.targets" />
 
+  <ItemGroup Condition="$(TargetFramework.Contains('-openharmony'))">
+    <Compile Include="..\..\..\Core\src\Platform\OpenHarmony\**\*.cs"
+             Link="Platform\OpenHarmony\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="**/*.Standard.cs" />
+    <Compile Include="Platform/Standard/**/*.cs" />
+    <!-- Keep the platform load/unload implementation; Standard would duplicate it. -->
+    <Compile Remove="VisualElement/VisualElement.Standard.cs" />
+    <!-- The host-runnable unit tests exercise the slice's internal pure helpers. -->
+    <InternalsVisibleTo Include="Microsoft.Maui.Core.OpenHarmony.UnitTests" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Remove="Internals\Legacy\**" />
     <EmbeddedResource Remove="Internals\Legacy\**" />
@@ -60,11 +71,13 @@
     <ProjectReference
       Include="..\..\..\Controls\src\BindingSourceGen\Controls.BindingSourceGen.csproj"
       OutputItemType="Analyzer"
-      ReferenceOutputAssembly="false" />
+      ReferenceOutputAssembly="false"
+      GlobalPropertiesToRemove="TargetFramework;TargetFrameworks" />
     <ProjectReference
       Include="..\..\..\Core\src\HybridWebViewSourceGen\Core.HybridWebViewSourceGen.csproj"
       OutputItemType="Analyzer"
-      ReferenceOutputAssembly="false" />
+      ReferenceOutputAssembly="false"
+      GlobalPropertiesToRemove="TargetFramework;TargetFrameworks" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
+    <!-- The normal compile vehicle targets plain net11.0 (package-based, runs on any host).
+         eng/openharmony/verify-slice.sh -tfm sets this to net11.0-openharmony20.0 to exercise
+         the real platform TFM with the installed workload. -->
+    <OpenHarmonySliceTargetFramework Condition=" '$(OpenHarmonySliceTargetFramework)' == '' ">net11.0</OpenHarmonySliceTargetFramework>
+    <TargetFramework>$(OpenHarmonySliceTargetFramework)</TargetFramework>
     <AssemblyName>Microsoft.Maui.Platform.OpenHarmony</AssemblyName>
     <RootNamespace>Microsoft.Maui.Platform</RootNamespace>
     <Nullable>enable</Nullable>
@@ -9,13 +13,12 @@
          the string-marshalling helpers as unsafe code, so the compile vehicle must allow it
          (the full-tree build already sets AllowUnsafeBlocks on the net*-openharmony TFM). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- The platform bridge (Microsoft.OpenHarmony.Hosting) ships in the OpenHarmony platform
-         workload packs; point this at a built or installed copy when building outside the
-         workload repo. -->
-    <OpenHarmonyHostingAssembly Condition=" '$(OpenHarmonyHostingAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Hosting/bin/Release/net11.0/Microsoft.OpenHarmony.Hosting.dll</OpenHarmonyHostingAssembly>
-    <!-- The slice's graphics backend (Microsoft.OpenHarmony.Maui.Graphics) is built from the
-         workload repo alongside the hosting assembly; same override story as above. -->
-    <OpenHarmonyGraphicsAssembly Condition=" '$(OpenHarmonyGraphicsAssembly)' == '' ">$(MSBuildThisFileDirectory)../../../../../../ohos-workload/src/Microsoft.OpenHarmony.Maui.Graphics/bin/Release/net11.0/Microsoft.OpenHarmony.Maui.Graphics.dll</OpenHarmonyGraphicsAssembly>
+    <!-- The platform bridge (Microsoft.OpenHarmony.Hosting) and the slice's graphics backend
+         (Microsoft.OpenHarmony.Maui.Graphics) ship in the OpenHarmony platform workload packs.
+         This compile vehicle deliberately has no hard-coded sibling-checkout path: pass the
+         assemblies from the workload layout (or the workload's build output). -->
+    <OpenHarmonyHostingAssembly Condition=" '$(OpenHarmonyHostingAssembly)' == '' "></OpenHarmonyHostingAssembly>
+    <OpenHarmonyGraphicsAssembly Condition=" '$(OpenHarmonyGraphicsAssembly)' == '' "></OpenHarmonyGraphicsAssembly>
     <!-- The BlazorWebView handler skeleton takes the BlazorWebView package types. The switch
          lets compile vehicles that build the slice sources without restoring the package (a
          partial checkout, the ohos-workload verifier harness) skip the file instead of
@@ -29,16 +32,11 @@
          fork's full solve is unchanged). -->
     <_MauiDirectoryBuildTargetsPath>$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), 'Directory.Build.targets'))</_MauiDirectoryBuildTargetsPath>
     <ImportDirectoryBuildTargets Condition=" '$(_MauiDirectoryBuildTargetsPath)' != '' and !Exists('$(_MauiDirectoryBuildTargetsPath)/eng/AndroidX.targets') ">false</ImportDirectoryBuildTargets>
-    <!-- Directory.Build.props turns warnings into errors for the shipping MAUI build. Keep that
-         policy here and leave only the diagnostics this compile vehicle knowingly produces and
-         cannot fix without editing the slice sources (owned by the slice work, not this
-         project): CS0618 (the slice deliberately implements the obsolete ListView/Frame
-         handlers), CA2255 (the Essentials entry points are [ModuleInitializer]s), and the
-         CS8604/CS8766/CS8613 nullability mismatches against the platform-less interfaces. -->
+    <!-- Directory.Build.props turns warnings into errors for the shipping MAUI build. The slice
+         carries no warning whitelist: obsolete-control and module-initializer diagnostics are
+         suppressed at their exact source sites with a reason, and the nullability mismatches are
+         fixed against the real interfaces. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Fork-only compile vehicle: this whitelist is a local concession for this partial
-         checkout and must never travel upstream with the slice. -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618;CA2255;CS8604;CS8766;CS8613</WarningsNotAsErrors>
     <!-- FIX-INTEROP #10: the slice is AOT/trim-analyzed on every build. The full MAUI tree's
          targets force the trim analyzer off when PublishAot != true, which can hide IL2026/
          IL3050 in the slice; this standalone vehicle sets the switches explicitly and CI
@@ -58,16 +56,11 @@
          theme/sensor/... callback probes); managed invocation of an UnmanagedCallersOnly
          method is invalid. The switch becomes available once the callbacks no longer need
          managed invocation. -->
-    <!-- The darc feeds only serve the vulnerability audit when the network is up; the standalone
-         vehicle must also restore/build in partial, offline checkouts. The shipping build keeps
-         the audit (NU1900 would otherwise be promoted by TreatWarningsAsErrors). -->
-    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
   <ItemGroup>
-    <!-- CA1418: OpenHarmony is not in the platform-compatibility analyzer's known-platform list
-         (this vehicle targets plain net11.0, not net*-openharmony); declare the platform
-         explicitly instead of suppressing the rule, mirroring the runtime's sdk-ohos projects. -->
-    <SupportedPlatform Include="openharmony" />
+    <!-- The host-runnable unit tests exercise internal pure helpers (path validation, text
+         transforms) without loading the native host. -->
+    <InternalsVisibleTo Include="Microsoft.Maui.Core.OpenHarmony.UnitTests" />
   </ItemGroup>
   <ItemGroup>
     <!-- Microsoft.Maui.Controls also carries the MAUI implicit global usings
@@ -85,7 +78,7 @@
          crossed the ArkTS/NAPI boundary and are baked into published app bundles and shells,
          so they are the frozen compatibility surface even though everything user-visible uses
          the OpenHarmony name; renaming them would break already-shipped apps. -->
-    <Reference Include="Microsoft.OpenHarmony.Hosting">
+    <Reference Include="Microsoft.OpenHarmony.Hosting" Condition=" !$(TargetFramework.Contains('-openharmony')) ">
       <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
       <Private>false</Private>
     </Reference>
@@ -94,4 +87,9 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+  <Target Name="_OpenHarmonyValidateSliceAssemblies"
+          BeforeTargets="ResolveReferences"
+          Condition="'$(OpenHarmonyGraphicsAssembly)' == '' or ('$(OpenHarmonyHostingAssembly)' == '' and !$(TargetFramework.Contains('-openharmony')))">
+    <Error Text="This standalone slice build requires the workload assemblies. Pass -p:OpenHarmonyGraphicsAssembly=&lt;path&gt; (and -p:OpenHarmonyHostingAssembly=&lt;path&gt; for the plain net11.0 vehicle)." />
+  </Target>
 </Project>

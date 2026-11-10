@@ -129,8 +129,10 @@ internal static partial class OpenHarmonyAssetStore
     public static async Task<int> RemoveAsync(string alias, int timeoutMs = 1500)
         => (await ExecuteAsync(RemoveOp, alias, string.Empty, timeoutMs).ConfigureAwait(false)).Rc;
 
+    #pragma warning disable CA2255 // The platform installs its Essentials entry points from module initializers.
     [ModuleInitializer]
     internal static void Initialize() => Register();
+    #pragma warning restore CA2255
 
     /// <summary>Registers the native result callback; a guarded no-op off-device.</summary>
     internal static void Register()

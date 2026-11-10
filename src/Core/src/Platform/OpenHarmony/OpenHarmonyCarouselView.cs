@@ -16,7 +16,7 @@ using Microsoft.Maui.Controls;
 
 namespace Microsoft.Maui.Platform;
 
-public static class OpenHarmonyCarouselView
+internal static class OpenHarmonyCarouselView
 {
     /// <summary>Attached template for a group header slide (null = no header slides).</summary>
     public static readonly BindableProperty GroupHeaderTemplateProperty = BindableProperty.CreateAttached(

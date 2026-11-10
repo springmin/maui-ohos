@@ -245,25 +245,27 @@ internal static partial class OpenHarmonyPickerClient
     }
 }
 
-public sealed class OpenHarmonyFilePicker : IFilePicker
+internal sealed class OpenHarmonyFilePicker : IFilePicker
 {
     public async Task<FileResult?> PickAsync(PickOptions? options = null)
         => (await OpenHarmonyPickerClient.PickFilesAsync(OpenHarmonyPickerClient.ModeDocument, 1, "picked-file")).FirstOrDefault();
 
     /// <summary>Picks documents with the picker's maximum selection (MAUI's PickOptions carries
     /// no selection count to forward).</summary>
-    public async Task<IEnumerable<FileResult>> PickMultipleAsync(PickOptions? options = null)
+    public async Task<IEnumerable<FileResult>?> PickMultipleAsync(PickOptions? options = null)
         => await OpenHarmonyPickerClient.PickFilesAsync(OpenHarmonyPickerClient.ModeDocument, 0, "picked-file");
 
     /// <summary>OpenHarmony-only overload: multi-select documents with an explicit limit
     /// (0 = the picker maximum, 500). IFilePicker cannot carry this because MAUI's PickOptions
     /// has no count; the instance registered for IFilePicker is this type, so a caller can cast
     /// to <see cref="OpenHarmonyFilePicker"/> when it needs the count.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "Public picker API: kept instance to pair with IFilePicker.PickMultipleAsync; making it static is a breaking change.")]
     public async Task<IReadOnlyList<FileResult>> PickMultipleAsync(PickOptions? options, int maxSelectNumber)
         => await OpenHarmonyPickerClient.PickFilesAsync(OpenHarmonyPickerClient.ModeDocument, maxSelectNumber, "picked-file");
 }
 
-public sealed class OpenHarmonyMediaPicker : IMediaPicker
+internal sealed class OpenHarmonyMediaPicker : IMediaPicker
 {
     public bool IsCaptureSupported => OpenHarmonyPickerClient.IsDeviceAvailable;
 

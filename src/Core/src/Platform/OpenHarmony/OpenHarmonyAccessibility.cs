@@ -615,6 +615,20 @@ public static partial class OpenHarmonyAccessibility
         }
     }
 
+    private static bool s_eventDeliveryLogged;
+
+    /// <summary>Records the first frame whose events had no attached provider (once per process).</summary>
+    private static void LogEventDeliveryOnce(int sent)
+    {
+        if (sent != 0 || s_eventDeliveryLogged)
+        {
+            return;
+        }
+        s_eventDeliveryLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] accessibility events dropped: no provider is attached");
+    }
+
     /// <summary>Pushes the pending frame changes as accessibility events.</summary>
     public static void FlushEvents()
     {
@@ -624,8 +638,11 @@ public static partial class OpenHarmonyAccessibility
         }
         try
         {
-            SendEvent(PendingEventCount);
+            // A zero result means no provider is attached; the event is dropped, but publishing
+            // stays enabled so a provider attached later receives the next frame.
+            int sent = SendEvent(PendingEventCount);
             PendingEventCount = 0;
+            LogEventDeliveryOnce(sent);
         }
         catch (Exception)
         {
@@ -990,7 +1007,12 @@ public static partial class OpenHarmonyAccessibility
         }
         try
         {
-            AccessibilityBegin(nodes.Length);
+            if (AccessibilityBegin(nodes.Length) != 0)
+            {
+                _available = false;
+                LastPublishedCount = 0;
+                return;
+            }
             foreach (OpenHarmonyAccessibilityNode node in nodes)
             {
                 int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
@@ -1000,8 +1022,7 @@ public static partial class OpenHarmonyAccessibility
                     ActionMask(node.Role, modal),
                     node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
             }
-            AccessibilityCommit();
-            LastPublishedCount = nodes.Length;
+            LastPublishedCount = AccessibilityCommit();
             FlushEvents();
             LogProviderStatusOnce();
         }

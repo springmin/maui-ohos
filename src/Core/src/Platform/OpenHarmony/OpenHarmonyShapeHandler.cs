@@ -3,6 +3,13 @@
 // works through this one handler. Fills and strokes keep their MAUI Paint, so gradient and image
 // brushes render through the canvas paint facilities instead of being dropped by the solid-only
 // path; the platform view reports paints the canvas cannot stroke.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 
@@ -27,9 +34,12 @@ public sealed class OpenHarmonyShapeHandler : OpenHarmonyViewHandler<IShapeView>
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
     {
-        var element = VirtualView as Microsoft.Maui.Controls.VisualElement;
-        double width = element?.WidthRequest > 0 ? element.WidthRequest : 40;
-        double height = element?.HeightRequest > 0 ? element.HeightRequest : 40;
+        double width = VirtualView?.Width is double requestedWidth && requestedWidth > 0
+            ? requestedWidth
+            : 40;
+        double height = VirtualView?.Height is double requestedHeight && requestedHeight > 0
+            ? requestedHeight
+            : 40;
         return new Size(Math.Min(width, widthConstraint), Math.Min(height, heightConstraint));
     }
 

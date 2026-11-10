@@ -1,4 +1,11 @@
 // Stepper handler for OpenHarmony: a drawn -/+ control (tap a half to step the value).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -36,12 +43,7 @@ public sealed class OpenHarmonyStepperHandler : OpenHarmonyViewHandler<IStepper>
         }
         double interval = stepper.Interval > 0 ? Math.Max(stepper.Interval, 0.1) : 1;
         double value = Math.Clamp(stepper.Value + (increment ? interval : -interval), stepper.Minimum, stepper.Maximum);
-        switch (stepper)
-        {
-            case Microsoft.Maui.Controls.Stepper control:
-                control.Value = value;
-                break;
-        }
+        stepper.Value = value;
         PlatformView.StepperValue = value;
         OpenHarmonyBridge.RequestRedraw();
     }

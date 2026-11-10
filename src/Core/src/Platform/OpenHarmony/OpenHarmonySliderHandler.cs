@@ -1,4 +1,11 @@
 // Slider handler for OpenHarmony: drag updates IRange.Value; the track/thumb are drawn.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 
@@ -43,12 +50,7 @@ public sealed class OpenHarmonySliderHandler : OpenHarmonyViewHandler<ISlider>
             slider.DragStarted();
         }
         double value = slider.Minimum + fraction * (slider.Maximum - slider.Minimum);
-        switch (slider)
-        {
-            case Microsoft.Maui.Controls.Slider control:
-                control.Value = value;
-                break;
-        }
+        slider.Value = value;
         PlatformView.SliderValue = value;
         if (completed)
         {

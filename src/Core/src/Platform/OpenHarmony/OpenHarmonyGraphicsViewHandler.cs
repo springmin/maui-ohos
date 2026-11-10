@@ -2,6 +2,13 @@
 // the compositor routes press/drag/hover/cancel into the IGraphicsView interaction contract
 // (Controls' GraphicsView raises StartInteraction / DragInteraction / EndInteraction /
 // CancelInteraction / *HoverInteraction from these calls).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;
@@ -52,9 +59,12 @@ public sealed class OpenHarmonyGraphicsViewHandler : OpenHarmonyViewHandler<IGra
 
     public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
     {
-        var element = VirtualView as Microsoft.Maui.Controls.VisualElement;
-        double width = element?.WidthRequest > 0 ? element.WidthRequest : Math.Min(200, widthConstraint);
-        double height = element?.HeightRequest > 0 ? element.HeightRequest : Math.Min(200, heightConstraint);
+        double width = VirtualView?.Width is double requestedWidth && requestedWidth > 0
+            ? requestedWidth
+            : Math.Min(200, widthConstraint);
+        double height = VirtualView?.Height is double requestedHeight && requestedHeight > 0
+            ? requestedHeight
+            : Math.Min(200, heightConstraint);
         return new Size(Math.Min(width, widthConstraint), Math.Min(height, heightConstraint));
     }
 }

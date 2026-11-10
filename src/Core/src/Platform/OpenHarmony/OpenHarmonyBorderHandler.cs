@@ -2,6 +2,13 @@
 // border padding. The stroke and background keep their MAUI Paint so gradient/image brushes render
 // through the canvas paint facilities (strokes are approximated to their first stop colour and
 // reported once - the canvas strokes solid colours only).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
@@ -55,7 +62,7 @@ public sealed class OpenHarmonyBorderHandler : OpenHarmonyViewHandler<IBorderVie
 
     // Border.PresentedContent reports the border itself in MAUI, which would recurse here; the
     // concrete Content property is what the border wraps.
-    private IView? Content => (VirtualView as Microsoft.Maui.Controls.Border)?.Content as IView;
+    private IView? Content => VirtualView?.Content as IView;
 
     public static void MapBorder(OpenHarmonyBorderHandler handler, IBorderView border)
     {

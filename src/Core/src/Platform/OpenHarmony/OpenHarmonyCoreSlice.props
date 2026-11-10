@@ -54,5 +54,12 @@
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyWindowDecoration.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyWindowSurface.cs" />
     <OpenHarmonyCoreSliceFile Include="OpenHarmonyFocusRing.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyBorderHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyGraphicsViewHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyShapeHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySliderHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyStepperHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyPaintRenderer.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyShapeView.cs" />
   </ItemGroup>
 </Project>

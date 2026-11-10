@@ -6,9 +6,9 @@ Phase 2/3 internalization. The authoritative signatures are in
 ## Surface summary
 
 - The slice is split by `src/Core/src/Platform/OpenHarmony/OpenHarmonyCoreSlice.props`:
-  **66 OpenHarmony public types in Controls**, **23 in Core**.
-- Controls baseline: 8,312 lines; Core baseline: 3,371 lines.
-- The Core types are the view/handler base, the five Core-interface handlers and the
+  **61 OpenHarmony public types in Controls**, **28 in Core**.
+- Controls baseline: 8,275 lines; Core baseline: 3,408 lines.
+- The Core types are the view/handler base, the ten Core-interface handlers and the
   service/feature APIs; the remaining types need Controls concrete types.
 - `PublicApiAnalyzers` Validate passes for both assemblies.
 - The baseline contains no shipped API: all entries are in `PublicAPI.Unshipped.txt`.

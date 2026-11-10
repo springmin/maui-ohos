@@ -4861,8 +4861,6 @@ Microsoft.Maui.Platform.OpenHarmonyApplicationHandler
 Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.LastOpenWindowResult.get -> Microsoft.Maui.Platform.OpenHarmonyOpenWindowResult
 Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.OpenHarmonyApplicationHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.PlatformApplication.get -> Microsoft.Maui.Platform.OpenHarmonyPlatformApplication?
-Microsoft.Maui.Platform.OpenHarmonyBorderHandler
-Microsoft.Maui.Platform.OpenHarmonyBorderHandler.OpenHarmonyBorderHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler
 Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler.OpenHarmonyBoxViewHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyButtonHandler
@@ -4884,8 +4882,6 @@ Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler
 Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.OpenHarmonyFlyoutPageHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyFrameHandler
 Microsoft.Maui.Platform.OpenHarmonyFrameHandler.OpenHarmonyFrameHandler() -> void
-Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler
-Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.OpenHarmonyGraphicsViewHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler
 Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.EvaluateJavaScriptAsync(string! script) -> System.Threading.Tasks.Task<string?>!
 Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.OpenHarmonyHybridWebViewHandler() -> void
@@ -5065,14 +5061,8 @@ Microsoft.Maui.Platform.OpenHarmonySecureStorage.OpenHarmonySecureStorage(string
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.Remove(string! key) -> bool
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.RemoveAll() -> void
 Microsoft.Maui.Platform.OpenHarmonySecureStorage.SetAsync(string! key, string! value) -> System.Threading.Tasks.Task!
-Microsoft.Maui.Platform.OpenHarmonyShapeHandler
-Microsoft.Maui.Platform.OpenHarmonyShapeHandler.OpenHarmonyShapeHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonyShellHandler
 Microsoft.Maui.Platform.OpenHarmonyShellHandler.OpenHarmonyShellHandler() -> void
-Microsoft.Maui.Platform.OpenHarmonySliderHandler
-Microsoft.Maui.Platform.OpenHarmonySliderHandler.OpenHarmonySliderHandler() -> void
-Microsoft.Maui.Platform.OpenHarmonyStepperHandler
-Microsoft.Maui.Platform.OpenHarmonyStepperHandler.OpenHarmonyStepperHandler() -> void
 Microsoft.Maui.Platform.OpenHarmonySubWindow
 Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs
 Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs.Bounds.get -> Microsoft.Maui.Graphics.Rect
@@ -5673,8 +5663,6 @@ override Microsoft.Maui.Controls.Window.OnPropertyChanged(string? propertyName =
 override Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.Equals(object? obj) -> bool
 override Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.GetHashCode() -> int
 override Microsoft.Maui.Platform.OpenHarmonyAccessibilityNode.ToString() -> string!
-override Microsoft.Maui.Platform.OpenHarmonyBorderHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
-override Microsoft.Maui.Platform.OpenHarmonyBorderHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
 override Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyButtonHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
@@ -5692,7 +5680,6 @@ override Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.GetDesiredSize(dou
 override Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
 override Microsoft.Maui.Platform.OpenHarmonyFrameHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyFrameHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
-override Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.Invoke(string! command, object? args) -> void
 override Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
@@ -5726,11 +5713,8 @@ override Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.GetDesiredSize(dou
 override Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
 override Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.Invoke(string! command, object? args) -> void
-override Microsoft.Maui.Platform.OpenHarmonyShapeHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyShellHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonyShellHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
-override Microsoft.Maui.Platform.OpenHarmonySliderHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
-override Microsoft.Maui.Platform.OpenHarmonyStepperHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonySwipeViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Platform.OpenHarmonySwipeViewHandler.PlatformArrange(Microsoft.Maui.Graphics.Rect frame) -> void
 override Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
@@ -6932,8 +6916,6 @@ static Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.MapActivateWindow(M
 static Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.MapCloseWindow(Microsoft.Maui.Platform.OpenHarmonyApplicationHandler! handler, Microsoft.Maui.IApplication! application, object? args) -> void
 static Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.MapOpenWindow(Microsoft.Maui.Platform.OpenHarmonyApplicationHandler! handler, Microsoft.Maui.IApplication! application, object? args) -> void
 static Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.MapTerminate(Microsoft.Maui.Platform.OpenHarmonyApplicationHandler! handler, Microsoft.Maui.IApplication! application, object? args) -> void
-static Microsoft.Maui.Platform.OpenHarmonyBorderHandler.MapBackground(Microsoft.Maui.Platform.OpenHarmonyBorderHandler! handler, Microsoft.Maui.IBorderView! border) -> void
-static Microsoft.Maui.Platform.OpenHarmonyBorderHandler.MapBorder(Microsoft.Maui.Platform.OpenHarmonyBorderHandler! handler, Microsoft.Maui.IBorderView! border) -> void
 static Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler.MapColor(Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler! handler, Microsoft.Maui.Controls.BoxView! box) -> void
 static Microsoft.Maui.Platform.OpenHarmonyButtonHandler.MapBackground(Microsoft.Maui.Platform.OpenHarmonyButtonHandler! handler, Microsoft.Maui.IButton! button) -> void
 static Microsoft.Maui.Platform.OpenHarmonyButtonHandler.MapBorderColor(Microsoft.Maui.Platform.OpenHarmonyButtonHandler! handler, Microsoft.Maui.IButton! button) -> void
@@ -6994,8 +6976,6 @@ static Microsoft.Maui.Platform.OpenHarmonyEntryHandler.MapTextColor(Microsoft.Ma
 static Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.MapContent(Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler! handler, Microsoft.Maui.Controls.FlyoutPage! flyoutPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.MapIsPresented(Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler! handler, Microsoft.Maui.Controls.FlyoutPage! flyoutPage) -> void
 static Microsoft.Maui.Platform.OpenHarmonyFrameHandler.MapBorder(Microsoft.Maui.Platform.OpenHarmonyFrameHandler! handler, Microsoft.Maui.Controls.Frame! frame) -> void
-static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapDrawable(Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView) -> void
-static Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.MapInvalidate(Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler! handler, Microsoft.Maui.IGraphicsView! graphicsView, object? arg) -> void
 static Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.MapHybridAssets(Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler! handler, Microsoft.Maui.IHybridWebView! webView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyImageButtonHandler.MapAspect(Microsoft.Maui.Platform.OpenHarmonyImageButtonHandler! handler, Microsoft.Maui.IImageButton! imageButton) -> void
 static Microsoft.Maui.Platform.OpenHarmonyImageButtonHandler.MapBackground(Microsoft.Maui.Platform.OpenHarmonyImageButtonHandler! handler, Microsoft.Maui.IImageButton! imageButton) -> void
@@ -7063,22 +7043,11 @@ static Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.MapTextColor(Microsof
 static Microsoft.Maui.Platform.OpenHarmonySecureStorage.FailClosed.get -> bool
 static Microsoft.Maui.Platform.OpenHarmonySecureStorage.FailClosed.set -> void
 static Microsoft.Maui.Platform.OpenHarmonySecureStorage.IsHardwareBacked.get -> bool
-static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapFill(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
-static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapShape(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
-static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapStroke(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
-static Microsoft.Maui.Platform.OpenHarmonyShapeHandler.MapStrokeThickness(Microsoft.Maui.Platform.OpenHarmonyShapeHandler! handler, Microsoft.Maui.IShapeView! shapeView) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShellHandler.MapFlyoutBehavior(Microsoft.Maui.Platform.OpenHarmonyShellHandler! handler, Microsoft.Maui.Controls.Shell! shell) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShellHandler.MapFlyoutSections(Microsoft.Maui.Platform.OpenHarmonyShellHandler! handler, Microsoft.Maui.Controls.Shell! shell) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShellHandler.MapSearch(Microsoft.Maui.Platform.OpenHarmonyShellHandler! handler, Microsoft.Maui.Controls.Shell! shell) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShellHandler.MapShell(Microsoft.Maui.Platform.OpenHarmonyShellHandler! handler, Microsoft.Maui.Controls.Shell! shell) -> void
 static Microsoft.Maui.Platform.OpenHarmonyShellHandler.MapTabBar(Microsoft.Maui.Platform.OpenHarmonyShellHandler! handler, Microsoft.Maui.Controls.Shell! shell) -> void
-static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapMaximumTrackColor(Microsoft.Maui.Platform.OpenHarmonySliderHandler! handler, Microsoft.Maui.ISlider! slider) -> void
-static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapMinimumTrackColor(Microsoft.Maui.Platform.OpenHarmonySliderHandler! handler, Microsoft.Maui.ISlider! slider) -> void
-static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapRange(Microsoft.Maui.Platform.OpenHarmonySliderHandler! handler, Microsoft.Maui.ISlider! slider) -> void
-static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapThumbColor(Microsoft.Maui.Platform.OpenHarmonySliderHandler! handler, Microsoft.Maui.ISlider! slider) -> void
-static Microsoft.Maui.Platform.OpenHarmonySliderHandler.MapValue(Microsoft.Maui.Platform.OpenHarmonySliderHandler! handler, Microsoft.Maui.ISlider! slider) -> void
-static Microsoft.Maui.Platform.OpenHarmonyStepperHandler.MapRange(Microsoft.Maui.Platform.OpenHarmonyStepperHandler! handler, Microsoft.Maui.IStepper! stepper) -> void
-static Microsoft.Maui.Platform.OpenHarmonyStepperHandler.MapValue(Microsoft.Maui.Platform.OpenHarmonyStepperHandler! handler, Microsoft.Maui.IStepper! stepper) -> void
 static Microsoft.Maui.Platform.OpenHarmonySubWindow.Bounds.get -> Microsoft.Maui.Graphics.Rect
 static Microsoft.Maui.Platform.OpenHarmonySubWindow.Changed -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonySubWindowEventArgs!>?
 static Microsoft.Maui.Platform.OpenHarmonySubWindow.Close() -> bool
@@ -8103,7 +8072,6 @@ static readonly Microsoft.Maui.Controls.Window.XProperty -> Microsoft.Maui.Contr
 static readonly Microsoft.Maui.Controls.Window.YProperty -> Microsoft.Maui.Controls.BindableProperty!
 static readonly Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.CommandMapper -> Microsoft.Maui.CommandMapper<Microsoft.Maui.IApplication!, Microsoft.Maui.Platform.OpenHarmonyApplicationHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyApplicationHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IApplication!, Microsoft.Maui.Platform.OpenHarmonyApplicationHandler!>!
-static readonly Microsoft.Maui.Platform.OpenHarmonyBorderHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IBorderView!, Microsoft.Maui.Platform.OpenHarmonyBorderHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.BoxView!, Microsoft.Maui.Platform.OpenHarmonyBoxViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyButtonHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IButton!, Microsoft.Maui.Platform.OpenHarmonyButtonHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.CarouselView!, Microsoft.Maui.Platform.OpenHarmonyCarouselViewHandler!>!
@@ -8114,8 +8082,6 @@ static readonly Microsoft.Maui.Platform.OpenHarmonyEditorHandler.Mapper -> Micro
 static readonly Microsoft.Maui.Platform.OpenHarmonyEntryHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IEntry!, Microsoft.Maui.Platform.OpenHarmonyEntryHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.FlyoutPage!, Microsoft.Maui.Platform.OpenHarmonyFlyoutPageHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyFrameHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.Frame!, Microsoft.Maui.Platform.OpenHarmonyFrameHandler!>!
-static readonly Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.CommandMapper -> Microsoft.Maui.CommandMapper<Microsoft.Maui.IGraphicsView!, Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler!>!
-static readonly Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IGraphicsView!, Microsoft.Maui.Platform.OpenHarmonyGraphicsViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IHybridWebView!, Microsoft.Maui.Platform.OpenHarmonyHybridWebViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyImageButtonHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IImageButton!, Microsoft.Maui.Platform.OpenHarmonyImageButtonHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyImageHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IImage!, Microsoft.Maui.Platform.OpenHarmonyImageHandler!>!
@@ -8131,10 +8097,7 @@ static readonly Microsoft.Maui.Platform.OpenHarmonyRadioButtonHandler.Mapper -> 
 static readonly Microsoft.Maui.Platform.OpenHarmonyRefreshViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.RefreshView!, Microsoft.Maui.Platform.OpenHarmonyRefreshViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IScrollView!, Microsoft.Maui.Platform.OpenHarmonyScrollViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonySearchBarHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.ISearchBar!, Microsoft.Maui.Platform.OpenHarmonySearchBarHandler!>!
-static readonly Microsoft.Maui.Platform.OpenHarmonyShapeHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IShapeView!, Microsoft.Maui.Platform.OpenHarmonyShapeHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyShellHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.Shell!, Microsoft.Maui.Platform.OpenHarmonyShellHandler!>!
-static readonly Microsoft.Maui.Platform.OpenHarmonySliderHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.ISlider!, Microsoft.Maui.Platform.OpenHarmonySliderHandler!>!
-static readonly Microsoft.Maui.Platform.OpenHarmonyStepperHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IStepper!, Microsoft.Maui.Platform.OpenHarmonyStepperHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonySwipeViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.SwipeView!, Microsoft.Maui.Platform.OpenHarmonySwipeViewHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.TabbedPage!, Microsoft.Maui.Platform.OpenHarmonyTabbedPageHandler!>!
 static readonly Microsoft.Maui.Platform.OpenHarmonyTableViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.Controls.TableView!, Microsoft.Maui.Platform.OpenHarmonyTableViewHandler!>!

@@ -32,6 +32,9 @@ symbols. The OpenHarmony slice is split by dependency:
 - The remaining slice files are Controls-bound by design: they use Controls concrete types or
   Controls-only helpers (`OpenHarmonyHandlerConnector`, `OpenHarmonyWindowRenderer`, ...). Keeping
   them in Controls avoids re-introducing a Core-to-Controls reference.
+  [`docs/openharmony-split-boundary.md`](../../docs/openharmony-split-boundary.md) lists every
+  remaining file with the Controls type/helper that keeps it there, plus the documented seam
+  candidates for future work.
 - The Core baseline now carries the moved public slice API (48 OpenHarmony public types); the
   remaining 41 OpenHarmony public types stay in Controls pending the API review.
 

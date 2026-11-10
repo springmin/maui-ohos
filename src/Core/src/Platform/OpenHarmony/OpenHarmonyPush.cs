@@ -19,6 +19,13 @@
 // push entitlement is not enabled, ...) stay distinguishable from the local -1/-2/-3 outcomes.
 // Only Unavailable flips the bridge off for the rest of the process: an AGC/entitlement error is
 // a configuration problem the caller may retry after fixing it.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;

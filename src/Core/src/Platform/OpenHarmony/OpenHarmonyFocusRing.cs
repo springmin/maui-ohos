@@ -11,6 +11,13 @@
 // future theming can adjust the style without touching the drawing call sites.
 //
 // Opt-out: OpenHarmonyFocusRing.Enabled = false keeps the previous (ring-less) draw output.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;

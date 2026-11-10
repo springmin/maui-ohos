@@ -1,0 +1,58 @@
+<Project>
+  <!--
+    OpenHarmony slice files that compile into Microsoft.Maui.Core. This list is the single
+    source of truth for the Core/Controls split: Core.csproj includes it, Controls.Core.csproj
+    removes the same files from its slice glob. The remaining slice files consume
+    Microsoft.Maui.Controls concrete types and stay in Microsoft.Maui.Controls.
+  -->
+  <ItemGroup>
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyAccount.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyActivityIndicatorHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyAlertHost.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyAnimationLoop.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyAppActions.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyAssetStore.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyBlazorWebView.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyBuildBanner.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyCalendarContacts.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyCheckBoxHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyDiagnostics.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyDispatcher.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyDispatcherProvider.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyFileSystem.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyFlashlight.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyFlowMap.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyFontManager.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyHaptics.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyHmsKits.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyIndicatorViewHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyKeyListener.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyKeystore.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyLayoutInvalidation.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyLiveView.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyMap.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyMotion.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyNotifications.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyPaths.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyPicker.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyPreferences.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyProgressBarHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyPush.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySafeArea.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyScreenshot.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyScrollAnimation.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyScrollPhysics.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyScrollbars.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyShellRowTypes.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyStatus.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonySwitchHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyTextToSpeech.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyTicker.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyView.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyViewHandler.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyWebAuthenticatorLoopback.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyWindowDecoration.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyWindowSurface.cs" />
+    <OpenHarmonyCoreSliceFile Include="OpenHarmonyFocusRing.cs" />
+  </ItemGroup>
+</Project>

@@ -4,6 +4,13 @@
 // threads and is driven by the XComponent frame callback (OpenHarmonyBridge.Frame). Work
 // posted through this dispatcher is therefore queued and drained on frame ticks, with a
 // safety-net timer so nothing starves when no frame is being produced.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using Microsoft.Maui.Dispatching;
 using Microsoft.OpenHarmony.Hosting;

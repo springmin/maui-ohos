@@ -7,6 +7,13 @@
 // applied to every text size the canvas measures or draws. MAUI font values stay logical (a
 // Label.FontSize of 20 is still 20); the text pipeline multiplies by the scale at the platform
 // boundary, exactly like an sp-sized TextView does on Android.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui;
 using Microsoft.Maui.Graphics;
 

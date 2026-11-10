@@ -34,6 +34,7 @@
   </PropertyGroup>
 
   <Import Project="$(MauiSrcDirectory)MultiTargeting.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)Platform/OpenHarmony/OpenHarmonyCoreSlice.props" />
 
   <ItemGroup>
     <PackageReference Include="MemoryAnalyzers" />
@@ -77,20 +78,13 @@
     <ProjectReference Include="..\..\Graphics\src\Graphics.Skia\Graphics.Skia.csproj" />
   </ItemGroup>
   <ItemGroup Condition="$(TargetFramework.Contains('-openharmony'))">
-    <!-- The OpenHarmony slice is split by dependency: the files listed here are platform services
-         that only depend on Core/workload contracts and compile into Microsoft.Maui.Core. The
-         remaining handlers/host files still consume Microsoft.Maui.Controls and compile into
-         Microsoft.Maui.Controls (see Controls.Core.csproj). OpenHarmonyFileSystem deliberately
-         stays in Controls until the compiler issue with its raw-file bridge is resolved
-         (csc exit 139). Keep the two lists in sync. MultiTargeting.targets still removes the
-         folder for every non-OpenHarmony TFM. -->
+    <!-- The OpenHarmony slice is split by dependency. OpenHarmonyCoreSlice.props lists the files
+         that only depend on Core/workload contracts and compile into Microsoft.Maui.Core; the
+         remaining handlers/host files consume Microsoft.Maui.Controls concrete types and stay in
+         Microsoft.Maui.Controls (see Controls.Core.csproj). MultiTargeting.targets still removes
+         the folder for every non-OpenHarmony TFM. -->
     <Compile Remove="Platform/OpenHarmony/**/*.cs" />
-    <Compile Include="Platform/OpenHarmony/OpenHarmonyPaths.cs" />
-    <Compile Include="Platform/OpenHarmony/OpenHarmonyPreferences.cs" />
-    <Compile Include="Platform/OpenHarmony/OpenHarmonyFlashlight.cs" />
-    <Compile Include="Platform/OpenHarmony/OpenHarmonyHaptics.cs" />
-    <Compile Include="Platform/OpenHarmony/OpenHarmonyKeystore.cs" />
-    <Compile Include="Platform/OpenHarmony/OpenHarmonyNotifications.cs" />
+    <Compile Include="@(OpenHarmonyCoreSliceFile->'Platform/OpenHarmony/%(Identity)')" />
     <!-- Element handlers whose CreatePlatformElement/interface members live only in the Standard
          fallback. The OpenHarmony slice supplies the real handlers; these keep the shared handler
          types complete for the OpenHarmony TFM. -->

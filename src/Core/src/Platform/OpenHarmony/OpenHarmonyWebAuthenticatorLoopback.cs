@@ -28,6 +28,13 @@
 //    the redirect never reaches the listener; providers must allow the http loopback URL.
 //  - The default port is rejected: an app cannot bind privileged ports, and the callback URL
 //    must name the explicit port the provider redirects to.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -35,7 +42,7 @@ using System.Text;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>
-/// The loopback redirect support of <see cref="OpenHarmonyWebAuthenticator"/>: recognises the
+/// The loopback redirect support of <c>OpenHarmonyWebAuthenticator</c>: recognises the
 /// http(s) callback routes the platform can serve locally, validates them, and provides the
 /// one-shot listener that receives the browser's redirect.
 /// </summary>

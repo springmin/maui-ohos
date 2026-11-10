@@ -31,6 +31,13 @@
 // "requestPermissions": ohos.permission.READ_CONTACTS for contacts;
 // ohos.permission.READ_CALENDAR and ohos.permission.WRITE_CALENDAR for calendar) - without the
 // declaration the shell answers unavailable instead of guessing.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;

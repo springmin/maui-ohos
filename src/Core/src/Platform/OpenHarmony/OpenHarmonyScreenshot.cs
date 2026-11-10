@@ -30,6 +30,13 @@
 // until the file is complete - PNG signature/IHDR/IEND or the JPEG SOI/EOI markers - or
 // CaptureTimeout elapses. The polling is async (Task.Delay), so a UI-thread caller is not
 // blocked.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.InteropServices;

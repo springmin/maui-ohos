@@ -4,6 +4,13 @@
 // written once through the host status channel ([maui] lines in <filesDir>/dotnet-status.txt)
 // after OpenHarmonyBridge.Attach has read the app context, and stays silent off-device, where
 // there is no context and WriteStatus is a no-op.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

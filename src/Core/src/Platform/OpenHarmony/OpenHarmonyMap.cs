@@ -30,6 +30,13 @@
 // OpenHarmony-shell build registers nothing: QueryCapabilitiesAsync answers null, IsSupported and
 // IsOverlayAvailable are false, every overlay call returns false and the events never fire. Never
 // throws off-device.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;

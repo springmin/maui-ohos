@@ -8,6 +8,13 @@
 // a working store, a missing store, and a store that accepts reads but rejects writes. Off is
 // the real host path; the other modes answer every request in memory and never touch the
 // native code.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

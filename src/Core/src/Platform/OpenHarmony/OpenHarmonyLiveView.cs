@@ -19,6 +19,13 @@
 // unchanged, so the documented ones (see OpenHarmonyLiveViewStatus) stay distinguishable from
 // the local -1..-4 outcomes; only Unavailable/Disabled flip the bridge off for the rest of the
 // process (both are configuration states a retry cannot fix in-process).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.CompilerServices;

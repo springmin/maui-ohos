@@ -1,4 +1,11 @@
 // IndicatorView handler for OpenHarmony: a row of dots driven by IIindicatorView.Count/Position.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using Microsoft.OpenHarmony.Hosting;

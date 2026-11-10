@@ -17,6 +17,13 @@
 // videos (default 1, 0 = no limit), while PickOptions (IFilePicker) carries no count at all - so
 // IFilePicker.PickMultipleAsync uses the picker maximum and the platform-only overload
 // OpenHarmonyFilePicker.PickMultipleAsync(PickOptions?, int) exposes an explicit limit.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using Microsoft.Maui.Media;
 using Microsoft.Maui.Storage;

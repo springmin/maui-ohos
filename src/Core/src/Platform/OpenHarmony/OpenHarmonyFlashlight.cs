@@ -27,6 +27,7 @@
 // FeatureNotSupportedException from TurnOn/TurnOffAsync. Unverifiable off-device: whether the
 // camera service accepts setTorchMode from the host callback thread and whether the LED
 // actually lights - a true result means the kit accepted the request.
+using System.Net.Http;
 using System;
 using System.Collections.Generic;
 using System.IO;

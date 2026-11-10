@@ -9,6 +9,13 @@
 // One animation per platform view (starting a new one cancels the previous), cancelled by a new
 // press, a data change or a direct ScrollTo. The device "reduce animations" setting snaps to the
 // target synchronously instead of animating.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using Microsoft.OpenHarmony.Hosting;
 

@@ -14,6 +14,13 @@
 // it and each Step runs outside it, so an effect that starts/cancels another one (the scroll
 // physics on a press/fling) can never deadlock against the frame thread; the redraw request is
 // made after the lock is released.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.OpenHarmony.Hosting;
 using System.Buffers;
 

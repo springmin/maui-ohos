@@ -1,5 +1,12 @@
 // Shared base for OpenHarmony view handlers: keeps the platform view pointed at its virtual
 // view so the compositor can read arranged frames and route taps.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Handlers;
 
 namespace Microsoft.Maui.Platform;

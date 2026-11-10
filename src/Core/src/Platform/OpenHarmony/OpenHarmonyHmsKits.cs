@@ -21,6 +21,13 @@
 // Scan result codes (host protocol, mirrored from the shell): 0 the value was scanned
 // (Result = result.originalValue), -1 unavailable/failed (the caller flips IsSupported off),
 // -2 the user cancelled the scan (Scan Kit error 1000500002; not a failure).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
@@ -31,7 +38,7 @@ namespace Microsoft.Maui.Platform;
 /// <summary>
 /// Multi-file share through the Share Kit (systemShare) host bridge. False whenever the shell's
 /// Share Kit sink is not registered (the OpenHarmony SDK shell, or an HMS runtime without the
-/// kit); <see cref="OpenHarmonyShare"/> then keeps its documented degradation.
+/// kit); <c>OpenHarmonyShare</c> then keeps its documented degradation.
 /// </summary>
 internal static partial class OpenHarmonyShareKitBridge
 {

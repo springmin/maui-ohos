@@ -28,6 +28,13 @@
 //      focus/unfocus must return focus to it.
 // Until those exist this file is the documented internal hook: it registers the callback and lets
 // a future surface (or a slice handler) subscribe without native code changes.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
 using System.Runtime.CompilerServices;

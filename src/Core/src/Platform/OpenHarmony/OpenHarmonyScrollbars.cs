@@ -16,6 +16,13 @@
 // hold expires) and keeps the same geometry.
 //
 // Opt-out: OpenHarmonyScrollbars.Enabled = false keeps the previous draw output (no bar).
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;

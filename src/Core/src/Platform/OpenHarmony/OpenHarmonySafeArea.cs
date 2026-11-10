@@ -24,6 +24,13 @@
 // the keyboard inset instead of the system bottom bar, and All consumes whichever of the two
 // reaches deeper (no double padding). Container/Default keep the system-bar behaviour only. The
 // system avoid area itself (GetWindowInsets) is unchanged.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;

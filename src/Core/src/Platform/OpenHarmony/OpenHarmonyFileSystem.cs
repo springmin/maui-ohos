@@ -15,6 +15,13 @@
 // descriptor the same way, and both callbacks length-check again, so the transient copies stay
 // bounded. The helper below degrades quietly off-device (no host library) and never throws from
 // the native boundary.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.Maui.Storage;

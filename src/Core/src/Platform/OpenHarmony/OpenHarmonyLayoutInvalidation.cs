@@ -7,6 +7,12 @@
 // version on exactly those commands, so OpenHarmonyWindowRenderer can skip the per-frame layout
 // pass while still re-arranging on the next frame after any change. A plain counter (not a
 // flag) matters: a mark raised while a pass is running must survive that pass.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 using System.Threading;
 
 namespace Microsoft.Maui.Platform;

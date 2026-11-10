@@ -21,6 +21,13 @@
 // device's speech capability and answers its BusinessError codes (1002300001 text out of range,
 // 1002300002 language not supported, 1002300003 person not supported, 401 argument error; plus
 // 1002300005 engine creation failed), which are reported through the bridge status log.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;

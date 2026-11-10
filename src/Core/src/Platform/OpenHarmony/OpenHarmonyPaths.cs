@@ -1,4 +1,5 @@
 // Directories the platform slice uses: the ability's files/cache dirs on device, temp outside.
+using System.Net.Http;
 using System;
 using System.Collections.Generic;
 using System.IO;

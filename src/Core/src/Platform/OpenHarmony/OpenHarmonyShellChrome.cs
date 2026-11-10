@@ -24,20 +24,6 @@ using Microsoft.OpenHarmony.Hosting;
 
 namespace Microsoft.Maui.Platform;
 
-/// <summary>
-/// Materialized rich Shell.TitleView row (T15): the resolved non-Label view and the canvas-space
-/// band the chrome arranged it into. The renderer draws the row over the title bar and routes
-/// touches in the band into the view. Null while the bar keeps the text title path.
-/// </summary>
-internal sealed class OpenHarmonyShellTitleViewRow
-{
-    /// <summary>The app's TitleView (handlers are connected by the chrome's sync).</summary>
-    public required View View { get; init; }
-
-    /// <summary>Canvas-space band the row was arranged into (empty before the first sync).</summary>
-    public RectF Frame { get; set; }
-}
-
 internal sealed class OpenHarmonyShellChrome
 {
     /// <summary>

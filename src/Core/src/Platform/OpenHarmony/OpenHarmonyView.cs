@@ -1,5 +1,12 @@
 // Platform view for the OpenHarmony compositor: a lightweight drawing element. Handlers set
 // its properties from the virtual view; OpenHarmonyWindowRenderer draws and hit-tests it.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.Maui.Handlers;
 using MauiCanvas = Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas;
@@ -3077,7 +3084,7 @@ public class OpenHarmonyView
 /// <summary>
 /// MAUI maps <see cref="IView.Shadow"/> through the shared ViewMapper; the slice has no other
 /// sink for it. This replaces the entry once so a shadow change requests a frame. The drawing
-/// itself happens in <see cref="OpenHarmonyWindowRenderer"/> through
+/// itself happens in <c>OpenHarmonyWindowRenderer</c> through
 /// <see cref="OpenHarmonyView.DrawShadow"/>, which reads the virtual view's shadow directly.
 /// </summary>
 internal static class OpenHarmonyShadow

@@ -21,6 +21,13 @@
 //     starts the window move through the shell's startMoving.
 //   * Off-device (no host library, no shell sink) everything degrades: the probe answers false, no
 //     buttons draw, and the request/command calls are no-ops that never throw.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;
 

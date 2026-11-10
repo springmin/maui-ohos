@@ -18,14 +18,15 @@ eng/openharmony/verify-slice.sh --all      # --tfm + the net11.0 tests
 `TreatWarningsAsErrors=true`, using the workload framework reference and the OpenHarmony platform
 symbols. The OpenHarmony slice is split by dependency:
 
-- `Microsoft.Maui.Core` compiles the internal platform services that only use Core/workload
-  contracts: `OpenHarmonyPaths`, `OpenHarmonyPreferences`, `OpenHarmonyFlashlight`,
-  `OpenHarmonyHaptics`, `OpenHarmonyKeystore`, `OpenHarmonyNotifications`.
-- `Microsoft.Maui.Controls` compiles the handlers/host and `OpenHarmonyFileSystem`. The
-  file-system raw-resource bridge still triggers a `csc` exit 139 when compiled in Core on the
-  OH host; keep it in Controls until the bridge is split or the compiler issue is fixed.
-- Public handler types remain in Controls pending the API review; the six Core files are
-  internal and add no public API entries.
+- `Microsoft.Maui.Core` compiles the dependency-clean slice: the view/handler base
+  (`OpenHarmonyView`, `OpenHarmonyViewHandler`), the Core-interface handlers
+  (ActivityIndicator/CheckBox/IndicatorView/ProgressBar/Switch), the service layer
+  (paths/preferences/file system/keystore/notifications/account/map/push/...), and the
+  compositor helpers (motion/scroll physics/scrollbars/focus ring/flow map/status).
+- `Microsoft.Maui.Controls` compiles the Controls-bound handlers/host/shell/window/accessibility
+  and the renderer. `OpenHarmonyCoreSlice.props` is the single source of truth for the split.
+- The Core baseline now carries the moved public slice API (23 OpenHarmony public types); the
+  remaining 66 OpenHarmony public types stay in Controls pending the API review.
 
 The Release build also runs `PublicApiAnalyzers` in validate mode against the Core and Controls
 `net-openharmony` baselines.
@@ -35,12 +36,11 @@ the workload Ref pack's `FrameworkList.xml`; no explicit assembly path is needed
 `--slice-tfm` and default test modes still use the standalone net11.0 vehicle, which takes the
 assemblies explicitly (the script discovers them from the workload layout):
 
-> On an OpenHarmony host, a `csc` exit 139 or a `CryptographicException` while creating SHA256 is
-> not explained by the `openssl` CLI version alone: the rc3 runtime and `/usr/lib` both carry the
-> OpenSSL 3.0.12 `libssl.so.3`/`libcrypto.so.3` ABI, while `openssl@4` only provides `.so.4`.
-> `OPENSSL_CONF=/dev/null DOTNET_SYSTEM_CRYPTOGRAPHY_OPENSSL_NO_LOCKING=1` can let some runs
-> complete, but it is not a deterministic fix; if the crash persists, use a stable host before
-> treating it as a MAUI compile error. The OpenHarmony sandbox also blocks `createdump`
+> On this OpenHarmony host, run the gate with `OPENSSL_CONF=/etc/openssl.cnf` and
+> `DOTNET_SYSTEM_CRYPTOGRAPHY_OPENSSL_NO_LOCKING=1`. The rc3 runtime and `/usr/lib` both carry
+> the OpenSSL 3.0.12 `libssl.so.3`/`libcrypto.so.3` ABI, while `openssl@4` only provides `.so.4`.
+> Do not use `OPENSSL_CONF=/dev/null`: it makes `csc` fail with CS1504 ("Error occurred during a
+> cryptographic operation") while reading source files. The sandbox also blocks `createdump`
 > (`/proc/<pid>/mem` permission denied), so a dump requires a non-sandboxed host.
 
 ```sh

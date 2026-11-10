@@ -15,6 +15,13 @@
 //
 // Everything is opt-out: OpenHarmonyScrollPhysics.Enabled = false makes the module inert (the
 // offset properties keep their plain assignment behaviour) and disables the loop's ticker.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Runtime.CompilerServices;
 using Microsoft.OpenHarmony.Hosting;
 using Microsoft.Maui.Graphics;

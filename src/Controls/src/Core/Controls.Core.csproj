@@ -33,15 +33,15 @@
   </PropertyGroup>
 
   <Import Project="$(MauiSrcDirectory)MultiTargeting.targets" />
+  <Import Project="..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyCoreSlice.props" />
 
   <ItemGroup Condition="$(TargetFramework.Contains('-openharmony'))">
-    <!-- Keep this exclusion list in sync with the Core.csproj include list. These files are
-         platform services that compile into Microsoft.Maui.Core; the rest of the slice still
-         consumes Microsoft.Maui.Controls and stays here. OpenHarmonyFileSystem is intentionally
-         not excluded until the compiler issue with its raw-file bridge is resolved. -->
+    <!-- OpenHarmonyCoreSlice.props is the single source of truth for the Core/Controls split:
+         the files it lists compile into Microsoft.Maui.Core, so remove them from this slice
+         glob. The remaining files consume Microsoft.Maui.Controls concrete types and stay here. -->
     <Compile Include="..\..\..\Core\src\Platform\OpenHarmony\**\*.cs"
-             Exclude="..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyPaths.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyPreferences.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyFlashlight.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyHaptics.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyKeystore.cs;..\..\..\Core\src\Platform\OpenHarmony\OpenHarmonyNotifications.cs"
              Link="Platform\OpenHarmony\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Remove="@(OpenHarmonyCoreSliceFile->'..\..\..\Core\src\Platform\OpenHarmony\%(Identity)')" />
     <Compile Include="**/*.Standard.cs" />
     <Compile Include="Platform/Standard/**/*.cs" />
     <!-- Keep the platform load/unload implementation; Standard would duplicate it. -->

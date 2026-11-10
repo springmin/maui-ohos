@@ -30,6 +30,13 @@
 //   1001502005 network error, 1001502009 internal error.
 // Only Unavailable flips the bridge off for the rest of the process: AGC/scope problems are
 // configuration issues the caller may retry after fixing them.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.OpenHarmony.Hosting;

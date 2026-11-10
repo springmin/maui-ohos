@@ -11,6 +11,13 @@
 // untagged until the host's per-window dispatch lands (M2-ow). Begin/Present are the draw
 // target seam: the default is the shared host canvas (single-surface behaviour), and
 // BeginHook/PresentHook let off-device tests bind a window's own frame target.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 using Microsoft.OpenHarmony.Hosting;
 using HostCanvas = Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas;

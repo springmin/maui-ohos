@@ -20,6 +20,13 @@
 // provider over these paths and the window.external init script) starts by adding the package
 // reference to the slice project; handler registration is intentionally not stubbed here because
 // the Blazor types are not referenceable from this file yet.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 namespace Microsoft.Maui.Platform;
 
 /// <summary>

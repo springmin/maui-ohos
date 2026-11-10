@@ -1576,6 +1576,466 @@ Microsoft.Maui.Platform.ImageSourcePartLoader.ImageSourcePartLoader(Microsoft.Ma
 Microsoft.Maui.Platform.ImageSourcePartLoader.ImageSourcePartLoader(Microsoft.Maui.Platform.IImageSourcePartSetter! setter) -> void
 Microsoft.Maui.Platform.ImageSourcePartLoader.Reset() -> void
 Microsoft.Maui.Platform.ImageSourcePartLoader.UpdateImageSourceAsync() -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyAccount
+Microsoft.Maui.Platform.OpenHarmonyAccount.OpenHarmonyAccount() -> void
+Microsoft.Maui.Platform.OpenHarmonyAccountResult
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Equals(Microsoft.Maui.Platform.OpenHarmonyAccountResult other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.OpenHarmonyAccountResult() -> void
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Payload.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Status.get -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountResult.Success.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.Cancelled = -3 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.FingerprintMismatch = 1001500001 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.InternalError = 1001502009 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.InvalidParameter = 1001502003 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.NetworkError = 1001502005 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.NotLoggedIn = 1001502001 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.RepeatedRequest = 1001500002 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.ScopeNotApproved = 1001502014 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.ScopeUnsupported = 1001500003 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.TimedOut = -2 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyAccountStatus.UserCancelled = 1001502012 -> Microsoft.Maui.Platform.OpenHarmonyAccountStatus
+Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler
+Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler.OpenHarmonyActivityIndicatorHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler
+Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.OpenHarmonyCheckBoxHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler
+Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler.OpenHarmonyIndicatorViewHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveView
+Microsoft.Maui.Platform.OpenHarmonyLiveView.OpenHarmonyLiveView() -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.AlertTimeTooFar = 1003500014 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.AlreadyExists = 1003500006 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.AlreadyFinished = 1003500010 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.CallFailed = -2 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Cancelled = -101 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Disabled = -3 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.InvalidArgument = 401 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.InvalidEvent = 1003500013 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.NetworkUnreachable = 1003500007 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.NoActiveView = -4 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.NotFound = 1003500009 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.RateLimited = 1003500008 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.RightsNotEnabled = 1003500005 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SequenceIncorrect = 1003500011 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SerializationFailed = 1003500002 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.ServiceConnectionFailed = 1003500003 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SubscriptionFailed = 1003500015 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SubscriptionLimitExceeded = 1003500012 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SubscriptionRateLimited = 1003500016 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SwitchOff = 1003500004 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.SystemError = 1003500001 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.TimedOut = -100 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Deconstruct(out int Id, out string! Title, out string! Text, out double Progress, out long TimeMilliseconds) -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Equals(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Id.get -> int
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Id.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.OpenHarmonyLiveViewUpdate() -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.OpenHarmonyLiveViewUpdate(int Id, string! Title, string! Text, double Progress = 0, long TimeMilliseconds = 0) -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Progress.get -> double
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Progress.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Text.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Text.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.TimeMilliseconds.get -> long
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.TimeMilliseconds.init -> void
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Title.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Title.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMap
+Microsoft.Maui.Platform.OpenHarmonyMap.OpenHarmonyMap() -> void
+Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapComponentOverlay = 2 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapCapability.MapKitImportable = 1 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapCapability.None = 0 -> Microsoft.Maui.Platform.OpenHarmonyMapCapability
+Microsoft.Maui.Platform.OpenHarmonyMapMarker
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.<Clone>$() -> Microsoft.Maui.Platform.OpenHarmonyMapMarker!
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Deconstruct(out string! Id, out double Latitude, out double Longitude, out string! Title) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Equals(Microsoft.Maui.Platform.OpenHarmonyMapMarker? other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Id.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Id.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Latitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Latitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Longitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Longitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.OpenHarmonyMapMarker(string! Id, double Latitude, double Longitude, string! Title) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Title.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMapMarker.Title.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapMarkerClickEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMapMarkerClickEventArgs.MarkerId.get -> string!
+Microsoft.Maui.Platform.OpenHarmonyMapRegion
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Deconstruct(out double Latitude, out double Longitude, out double Zoom) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Equals(Microsoft.Maui.Platform.OpenHarmonyMapRegion other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Latitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Latitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Longitude.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Longitude.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.OpenHarmonyMapRegion() -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.OpenHarmonyMapRegion(double Latitude, double Longitude, double Zoom) -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Zoom.get -> double
+Microsoft.Maui.Platform.OpenHarmonyMapRegion.Zoom.init -> void
+Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs
+Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs.Region.get -> Microsoft.Maui.Platform.OpenHarmonyMapRegion
+Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler
+Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.OpenHarmonyProgressBarHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyPush
+Microsoft.Maui.Platform.OpenHarmonyPush.OpenHarmonyPush() -> void
+Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.AppAuthFailed = 1000900010 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.Cancelled = -3 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.DeviceUnsupported = 1000900014 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.InternalError = 1000900001 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.NetworkUnavailable = 1000900011 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.PushServiceError = 1000900009 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.RegionMismatch = 1000900013 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.ServiceConnectionFailed = 1000900008 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.ServiceNotEnabled = 1000900012 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.Success = 0 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.TimedOut = -2 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushStatus.Unavailable = -1 -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushToken
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Equals(Microsoft.Maui.Platform.OpenHarmonyPushToken other) -> bool
+Microsoft.Maui.Platform.OpenHarmonyPushToken.OpenHarmonyPushToken() -> void
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Status.get -> Microsoft.Maui.Platform.OpenHarmonyPushStatus
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Success.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyPushToken.Token.get -> string?
+Microsoft.Maui.Platform.OpenHarmonySwitchHandler
+Microsoft.Maui.Platform.OpenHarmonySwitchHandler.OpenHarmonySwitchHandler() -> void
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.GetLocalesAsync() -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Microsoft.Maui.Media.Locale!>!>!
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.OpenHarmonyTextToSpeech() -> void
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.SpeakAsync(string! text, Microsoft.Maui.Media.SpeechOptions? options = null, System.Threading.CancellationToken cancelToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.Stop() -> void
+Microsoft.Maui.Platform.OpenHarmonyView
+Microsoft.Maui.Platform.OpenHarmonyView.ActivateToolbarItem(int index) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ActivateToolbarOverflow(int row) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.BackTapped.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.BackTapped.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Background.get -> Microsoft.Maui.Graphics.Color?
+Microsoft.Maui.Platform.OpenHarmonyView.Background.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.BorderStroke.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.BorderStroke.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.BorderStrokeThickness.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.BorderStrokeThickness.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarHit(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMaximum.get -> System.DateTime
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMaximum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMinimum.get -> System.DateTime
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMinimum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMonth.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarMonth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarNextMonth.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarNextMonth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarPreviousMonth.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarPreviousMonth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarSelectDay.get -> System.Action<System.DateTime>?
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarSelectDay.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarSelectedDay.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarSelectedDay.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarYear.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CalendarYear.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CanGoBack.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.CanGoBack.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CheckBoxColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.CheckBoxColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Children.get -> System.Collections.Generic.List<Microsoft.Maui.Platform.OpenHarmonyView!>!
+Microsoft.Maui.Platform.OpenHarmonyView.ChromeRefresh.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.ChromeRefresh.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ClearButtonVisibility.get -> Microsoft.Maui.ClearButtonVisibility
+Microsoft.Maui.Platform.OpenHarmonyView.ClearButtonVisibility.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ClearButtonVisible.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ClearText.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.ClearText.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CornerRadius.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.CornerRadius.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.CursorIndexFromX(float x) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CursorPosition.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.CursorPosition.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Dimmed.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.Dimmed.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DotsColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.DotsColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DotsSize.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.DotsSize.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawCalendar(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawFlyoutPanel(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawPopup(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawShadow(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.DrawToolbarOverflow(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutDismiss.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutDismiss.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutItemAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutItems.get -> System.Collections.Generic.List<string!>!
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutOpen.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutOpen.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutPresented.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutPresented.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutRequested.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutRequested.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutSelect.get -> System.Action<int>?
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutSelect.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutWidth.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.FlyoutWidth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.FontSize.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.FontSize.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Frame.get -> Microsoft.Maui.Graphics.RectF
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsCancelInteraction.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsCancelInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsDragInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[]!>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsDragInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsEndInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[]!, bool>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsEndInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverEnd.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverEnd.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverMove.get -> System.Action<Microsoft.Maui.Graphics.PointF[]!>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverMove.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverStart.get -> System.Action<Microsoft.Maui.Graphics.PointF[]!>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsHoverStart.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsStartInteraction.get -> System.Action<Microsoft.Maui.Graphics.PointF[]!>?
+Microsoft.Maui.Platform.OpenHarmonyView.GraphicsStartInteraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.HasToolbarOverflow.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.HitTest(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.get -> Microsoft.Maui.TextAlignment
+Microsoft.Maui.Platform.OpenHarmonyView.HorizontalTextAlignment.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ImageAspect.get -> Microsoft.Maui.Aspect
+Microsoft.Maui.Platform.OpenHarmonyView.ImageAspect.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ImageBytes.get -> byte[]?
+Microsoft.Maui.Platform.OpenHarmonyView.ImageBytes.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.InBackButton(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InBackRegion(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InClearButton(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InFlyoutPanel(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InHamburger(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.InToolbarMore(float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IndicatorColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.IndicatorColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IndicatorCount.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.IndicatorCount.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IndicatorPosition.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.IndicatorPosition.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsActivityIndicator.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsActivityIndicator.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsBorder.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsBorder.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsCalendar.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsCalendar.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsCheckBox.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsCheckBox.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsChecked.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsChecked.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsFlyoutPage.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsFlyoutPage.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsFocused.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsFocused.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsGraphicsView.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsGraphicsView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsIndicatorView.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsIndicatorView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsNavigationPage.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsNavigationPage.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsOn.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsOn.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsPassword.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsPassword.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsPicker.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsPicker.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsProgressBar.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsProgressBar.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsRadioButton.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsRadioButton.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsReadOnly.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsReadOnly.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsRefreshView.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsRefreshView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsRefreshing.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsRefreshing.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsRunning.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsRunning.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsScrollView.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsScrollView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsShape.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsShape.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsSlider.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsSlider.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsStepper.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsStepper.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsSwipeOpen.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsSwipeView.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsSwipeView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsSwitch.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsSwitch.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsTabbedPage.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsTabbedPage.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsTextEntry.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsTextEntry.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.IsWebView.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.IsWebView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Keyboard.get -> Microsoft.Maui.Keyboard?
+Microsoft.Maui.Platform.OpenHarmonyView.Keyboard.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.MaxLength.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.MaxLength.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.NavBarColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.NavBarColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.NavBarHeight.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.NavBarHeight.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.NavBarTextColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.NavBarTextColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.NavTitle.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyView.NavTitle.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.NeedsAnimation.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.OnTouch(bool down, bool up, float x, float y) -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.OpenFlyout.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.OpenFlyout.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.OpenHarmonyView() -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Placeholder.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyView.Placeholder.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PlaceholderColor.get -> Microsoft.Maui.Graphics.Color?
+Microsoft.Maui.Platform.OpenHarmonyView.PlaceholderColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PopupClosed.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.PopupClosed.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PopupIndexAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.PopupItems.get -> System.Collections.Generic.List<string!>!
+Microsoft.Maui.Platform.OpenHarmonyView.PopupSelect.get -> System.Action<int>?
+Microsoft.Maui.Platform.OpenHarmonyView.PopupSelect.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PopupSelectedIndex.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.PopupSelectedIndex.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PopupTitle.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyView.PopupTitle.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.PopupVisible.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.PopupVisible.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Pressed.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.Pressed.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Progress.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.Progress.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ProgressColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.ProgressColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.RadioChecked.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.RadioChecked.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.RadioColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.RadioColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.RefreshChanged.get -> System.Action<bool>?
+Microsoft.Maui.Platform.OpenHarmonyView.RefreshChanged.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.RefreshColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.RefreshColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.RefreshDrag(float dx, float dy) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ReturnType.get -> Microsoft.Maui.ReturnType
+Microsoft.Maui.Platform.OpenHarmonyView.ReturnType.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentHeight.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentHeight.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentWidth.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollContentWidth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollOffsetChanged.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollOffsetChanged.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollOffsetX.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollOffsetX.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollOffsetY.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ScrollOffsetY.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SelectedDotsColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.SelectedDotsColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SelectedTab.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.SelectedTab.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SelectionLength.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.SelectionLength.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SetSwipeOpen(bool open, bool notify = true) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SetToolbarOverflow(bool open) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Shape.get -> Microsoft.Maui.Graphics.IShape?
+Microsoft.Maui.Platform.OpenHarmonyView.Shape.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShapeFill.get -> Microsoft.Maui.Graphics.Paint?
+Microsoft.Maui.Platform.OpenHarmonyView.ShapeFill.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShapeStroke.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.ShapeStroke.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShapeStrokeThickness.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ShapeStrokeThickness.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsBack.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsBack.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsHamburger.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsHamburger.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsTitleBar.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsTitleBar.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ShowsToolbar.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.SliderDrag.get -> System.Action<float, bool>?
+Microsoft.Maui.Platform.OpenHarmonyView.SliderDrag.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderFraction.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.SliderFraction.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMaximum.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMaximum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMaximumTrackColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMaximumTrackColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMinimum.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMinimum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMinimumTrackColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.SliderMinimumTrackColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderThumbColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.SliderThumbColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderValue.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.SliderValue.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SliderValueFromX(float x) -> float
+Microsoft.Maui.Platform.OpenHarmonyView.StepperInterval.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.StepperInterval.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.StepperMaximum.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.StepperMaximum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.StepperMinimum.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.StepperMinimum.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.StepperStep.get -> System.Action<bool>?
+Microsoft.Maui.Platform.OpenHarmonyView.StepperStep.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.StepperValue.get -> double
+Microsoft.Maui.Platform.OpenHarmonyView.StepperValue.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.StrokeColor.get -> Microsoft.Maui.Graphics.Color?
+Microsoft.Maui.Platform.OpenHarmonyView.StrokeColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.StrokeThickness.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.StrokeThickness.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Swipe.get -> System.Action<float, float>?
+Microsoft.Maui.Platform.OpenHarmonyView.Swipe.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeDrag(float dx, float dy) -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeItemAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeItemRect(int index) -> Microsoft.Maui.Graphics.RectF
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeItemWidth.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeItemWidth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeItems.get -> System.Collections.Generic.List<(string! Text, Microsoft.Maui.Graphics.Color! Background, System.Action! Activate)>!
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeOpenChanged.get -> System.Action<bool>?
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeOpenChanged.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SwipeOpenToRight.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.SwitchThumbColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.SwitchThumbColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.SwitchTrackColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.SwitchTrackColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.TabIcons.get -> System.Collections.Generic.List<byte[]?>!
+Microsoft.Maui.Platform.OpenHarmonyView.TabIndexAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.TabSelected.get -> System.Action<int>?
+Microsoft.Maui.Platform.OpenHarmonyView.TabSelected.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.TabTitles.get -> System.Collections.Generic.List<string!>!
+Microsoft.Maui.Platform.OpenHarmonyView.TabTitlesVisible.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.TabTitlesVisible.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Tap.get -> System.Action?
+Microsoft.Maui.Platform.OpenHarmonyView.Tap.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.Text.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyView.Text.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.TextAnchor.get -> int
+Microsoft.Maui.Platform.OpenHarmonyView.TextAnchor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.TextColor.get -> Microsoft.Maui.Graphics.Color!
+Microsoft.Maui.Platform.OpenHarmonyView.TextColor.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.TitleText.get -> string?
+Microsoft.Maui.Platform.OpenHarmonyView.TitleText.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarBarHeight.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemRect(int index) -> Microsoft.Maui.Graphics.RectF
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemWidth.get -> float
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarItemWidth.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarMoreRect() -> Microsoft.Maui.Graphics.RectF
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowIndexAt(float x, float y) -> int
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowOpen.get -> bool
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowOpen.set -> void
+Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowRect(int row) -> Microsoft.Maui.Graphics.RectF
+Microsoft.Maui.Platform.OpenHarmonyView.ViewChildren.get -> System.Collections.Generic.List<Microsoft.Maui.IView!>!
+Microsoft.Maui.Platform.OpenHarmonyView.VirtualView.get -> Microsoft.Maui.IView?
+Microsoft.Maui.Platform.OpenHarmonyView.VirtualView.set -> void
+Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>
+Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>.OpenHarmonyViewHandler(Microsoft.Maui.IPropertyMapper! mapper) -> void
+Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>.OpenHarmonyViewHandler(Microsoft.Maui.IPropertyMapper! mapper, Microsoft.Maui.CommandMapper! commandMapper) -> void
 Microsoft.Maui.Platform.StrokeExtensions
 Microsoft.Maui.Platform.SwipeViewExtensions
 Microsoft.Maui.Platform.TimeExtensions
@@ -1901,6 +2361,17 @@ abstract Microsoft.Maui.Handlers.ViewHandler<TVirtualView, TPlatformView>.Create
 abstract Microsoft.Maui.HybridWebViewInvoker.InvokeMethodAsync(string! methodName, string![]? paramJsonValues) -> System.Threading.Tasks.Task<string?>!
 abstract Microsoft.Maui.Layouts.LayoutManager.ArrangeChildren(Microsoft.Maui.Graphics.Rect bounds) -> Microsoft.Maui.Graphics.Size
 abstract Microsoft.Maui.Layouts.LayoutManager.Measure(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+const Microsoft.Maui.Platform.OpenHarmonyView.CalendarHeaderHeight = 52 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.CalendarRowHeight = 46 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.CalendarWeeks = 6 -> int
+const Microsoft.Maui.Platform.OpenHarmonyView.CalendarWidth = 380 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.HamburgerSize = 40 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.NavBackWidth = 88 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.PopupRowHeight = 46 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.TabBarHeight = 56 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.TitleBarHeight = 56 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.ToolbarMoreWidth = 56 -> float
+const Microsoft.Maui.Platform.OpenHarmonyView.ToolbarOverflowRowHeight = 46 -> float
 const Microsoft.Maui.Primitives.Dimension.Maximum = Infinity -> double
 const Microsoft.Maui.Primitives.Dimension.Minimum = 0 -> double
 const Microsoft.Maui.Primitives.Dimension.Unset = NaN -> double
@@ -2045,6 +2516,20 @@ override Microsoft.Maui.Layouts.HorizontalStackLayoutManager.ArrangeChildren(Mic
 override Microsoft.Maui.Layouts.HorizontalStackLayoutManager.Measure(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Layouts.VerticalStackLayoutManager.ArrangeChildren(Microsoft.Maui.Graphics.Rect bounds) -> Microsoft.Maui.Graphics.Size
 override Microsoft.Maui.Layouts.VerticalStackLayoutManager.Measure(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+override Microsoft.Maui.Platform.OpenHarmonyAccountResult.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+override Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+override Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+override Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyMapMarker.Equals(object? obj) -> bool
+override Microsoft.Maui.Platform.OpenHarmonyMapMarker.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyMapMarker.ToString() -> string!
+override Microsoft.Maui.Platform.OpenHarmonyMapRegion.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+override Microsoft.Maui.Platform.OpenHarmonyPushToken.GetHashCode() -> int
+override Microsoft.Maui.Platform.OpenHarmonySwitchHandler.GetDesiredSize(double widthConstraint, double heightConstraint) -> Microsoft.Maui.Graphics.Size
+override Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>.Invoke(string! command, object? args) -> void
+override Microsoft.Maui.Platform.OpenHarmonyViewHandler<TVirtualView>.SetVirtualView(Microsoft.Maui.IView! view) -> void
 override Microsoft.Maui.RectangleGridAdorner.Draw(Microsoft.Maui.Graphics.ICanvas! canvas, Microsoft.Maui.Graphics.RectF dirtyRect) -> void
 override Microsoft.Maui.SafeAreaEdges.Equals(object? obj) -> bool
 override Microsoft.Maui.SafeAreaEdges.GetHashCode() -> int
@@ -2607,6 +3092,53 @@ static Microsoft.Maui.Platform.ElementExtensions.SetApplicationHandler(this obje
 static Microsoft.Maui.Platform.ElementExtensions.SetWindowHandler(this object! platformWindow, Microsoft.Maui.IWindow! window, Microsoft.Maui.IMauiContext! context) -> void
 static Microsoft.Maui.Platform.ElementExtensions.ToHandler(this Microsoft.Maui.IElement! view, Microsoft.Maui.IMauiContext! context) -> Microsoft.Maui.IElementHandler!
 static Microsoft.Maui.Platform.ElementExtensions.ToPlatform(this Microsoft.Maui.IElement! view, Microsoft.Maui.IMauiContext! context) -> object!
+static Microsoft.Maui.Platform.OpenHarmonyAccount.AuthorizeAsync(System.Collections.Generic.IReadOnlyList<string!>! scopes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyAccountResult>!
+static Microsoft.Maui.Platform.OpenHarmonyAccount.GetQuickLoginAnonymousPhoneAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyAccountResult>!
+static Microsoft.Maui.Platform.OpenHarmonyAccount.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyAccountResult.operator !=(Microsoft.Maui.Platform.OpenHarmonyAccountResult left, Microsoft.Maui.Platform.OpenHarmonyAccountResult right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyAccountResult.operator ==(Microsoft.Maui.Platform.OpenHarmonyAccountResult left, Microsoft.Maui.Platform.OpenHarmonyAccountResult right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler.MapColor(Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler! handler, Microsoft.Maui.IActivityIndicator! indicator) -> void
+static Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler.MapIsRunning(Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler! handler, Microsoft.Maui.IActivityIndicator! indicator) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.MapForeground(Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler! handler, Microsoft.Maui.ICheckBox! checkBox) -> void
+static Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.MapIsChecked(Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler! handler, Microsoft.Maui.ICheckBox! checkBox) -> void
+static Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler.MapIndicator(Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler! handler, Microsoft.Maui.IIndicatorView! indicator) -> void
+static Microsoft.Maui.Platform.OpenHarmonyLiveView.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyLiveView.StartAsync(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate update, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus>!
+static Microsoft.Maui.Platform.OpenHarmonyLiveView.StopAsync(int id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus>!
+static Microsoft.Maui.Platform.OpenHarmonyLiveView.UpdateAsync(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate update, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyLiveViewStatus>!
+static Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.operator !=(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate left, Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.operator ==(Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate left, Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMap.AddMarkerAsync(Microsoft.Maui.Platform.OpenHarmonyMapMarker! marker, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Microsoft.Maui.Platform.OpenHarmonyMap.CameraIdle -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMapRegionEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMap.CloseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Microsoft.Maui.Platform.OpenHarmonyMap.HideAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Microsoft.Maui.Platform.OpenHarmonyMap.IsOverlayAvailable.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMap.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMap.MarkerClick -> System.EventHandler<Microsoft.Maui.Platform.OpenHarmonyMapMarkerClickEventArgs!>?
+static Microsoft.Maui.Platform.OpenHarmonyMap.QueryCapabilitiesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyMapCapability?>!
+static Microsoft.Maui.Platform.OpenHarmonyMap.Ready -> System.EventHandler?
+static Microsoft.Maui.Platform.OpenHarmonyMap.SetRegionAsync(Microsoft.Maui.Platform.OpenHarmonyMapRegion region, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Microsoft.Maui.Platform.OpenHarmonyMap.ShowAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Microsoft.Maui.Platform.OpenHarmonyMapMarker.operator !=(Microsoft.Maui.Platform.OpenHarmonyMapMarker? left, Microsoft.Maui.Platform.OpenHarmonyMapMarker? right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMapMarker.operator ==(Microsoft.Maui.Platform.OpenHarmonyMapMarker? left, Microsoft.Maui.Platform.OpenHarmonyMapMarker? right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMapRegion.operator !=(Microsoft.Maui.Platform.OpenHarmonyMapRegion left, Microsoft.Maui.Platform.OpenHarmonyMapRegion right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyMapRegion.operator ==(Microsoft.Maui.Platform.OpenHarmonyMapRegion left, Microsoft.Maui.Platform.OpenHarmonyMapRegion right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.MapProgress(Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler! handler, Microsoft.Maui.IProgress! progress) -> void
+static Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.MapProgressColor(Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler! handler, Microsoft.Maui.IProgress! progress) -> void
+static Microsoft.Maui.Platform.OpenHarmonyPush.DeleteTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyPushStatus>!
+static Microsoft.Maui.Platform.OpenHarmonyPush.GetTokenAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Maui.Platform.OpenHarmonyPushToken>!
+static Microsoft.Maui.Platform.OpenHarmonyPush.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyPushToken.operator !=(Microsoft.Maui.Platform.OpenHarmonyPushToken left, Microsoft.Maui.Platform.OpenHarmonyPushToken right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonyPushToken.operator ==(Microsoft.Maui.Platform.OpenHarmonyPushToken left, Microsoft.Maui.Platform.OpenHarmonyPushToken right) -> bool
+static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapIsOn(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void
+static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapThumbColor(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void
+static Microsoft.Maui.Platform.OpenHarmonySwitchHandler.MapTrackColor(Microsoft.Maui.Platform.OpenHarmonySwitchHandler! handler, Microsoft.Maui.ISwitch! toggle) -> void
+static Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.InstallDefault() -> void
+static Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.IsSupported.get -> bool
+static Microsoft.Maui.Platform.OpenHarmonyView.AnimationAngle.get -> float
+static Microsoft.Maui.Platform.OpenHarmonyView.AnimationAngle.set -> void
+static Microsoft.Maui.Platform.OpenHarmonyView.CalendarHeight.get -> float
+static Microsoft.Maui.Platform.OpenHarmonyView.ImageDrawn -> System.Action<Microsoft.Maui.Graphics.RectF>?
 static Microsoft.Maui.Platform.StrokeExtensions.UpdateStroke(this object! platformView, Microsoft.Maui.IBorderStroke! border) -> void
 static Microsoft.Maui.Platform.StrokeExtensions.UpdateStrokeDashOffset(this object! platformView, Microsoft.Maui.IBorderStroke! border) -> void
 static Microsoft.Maui.Platform.StrokeExtensions.UpdateStrokeDashPattern(this object! platformView, Microsoft.Maui.IBorderStroke! border) -> void
@@ -2731,6 +3263,12 @@ static readonly Microsoft.Maui.FontFile.Extensions -> string![]!
 static readonly Microsoft.Maui.GridLength.Auto -> Microsoft.Maui.GridLength
 static readonly Microsoft.Maui.GridLength.Star -> Microsoft.Maui.GridLength
 static readonly Microsoft.Maui.Layouts.FlexBasis.Auto -> Microsoft.Maui.Layouts.FlexBasis
+static readonly Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IActivityIndicator!, Microsoft.Maui.Platform.OpenHarmonyActivityIndicatorHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.ICheckBox!, Microsoft.Maui.Platform.OpenHarmonyCheckBoxHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IIndicatorView!, Microsoft.Maui.Platform.OpenHarmonyIndicatorViewHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.IProgress!, Microsoft.Maui.Platform.OpenHarmonyProgressBarHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonySwitchHandler.Mapper -> Microsoft.Maui.IPropertyMapper<Microsoft.Maui.ISwitch!, Microsoft.Maui.Platform.OpenHarmonySwitchHandler!>!
+static readonly Microsoft.Maui.Platform.OpenHarmonyTextToSpeech.Instance -> Microsoft.Maui.Platform.OpenHarmonyTextToSpeech!
 virtual Microsoft.Maui.Animations.Animation.CreateReverse() -> Microsoft.Maui.Animations.Animation!
 virtual Microsoft.Maui.Animations.Animation.Dispose(bool disposing) -> void
 virtual Microsoft.Maui.Animations.Animation.OnTick(double millisecondsSinceLastUpdate) -> void
@@ -2786,6 +3324,7 @@ virtual Microsoft.Maui.Handlers.ViewHandler.ValidateContainerView(object! contai
 virtual Microsoft.Maui.Handlers.ViewHandler<TVirtualView, TPlatformView>.ConnectHandler(TPlatformView! platformView) -> void
 virtual Microsoft.Maui.Handlers.ViewHandler<TVirtualView, TPlatformView>.DisconnectHandler(TPlatformView! platformView) -> void
 virtual Microsoft.Maui.Handlers.ViewHandler<TVirtualView, TPlatformView>.SetVirtualView(Microsoft.Maui.IView! view) -> void
+virtual Microsoft.Maui.Platform.OpenHarmonyView.Draw(Microsoft.OpenHarmony.Maui.Graphics.OpenHarmonyCanvas! canvas) -> void
 virtual Microsoft.Maui.PropertyMapper.GetKeys() -> System.Collections.Generic.IEnumerable<string!>!
 virtual Microsoft.Maui.PropertyMapper.GetProperty(string! key) -> System.Action<Microsoft.Maui.IElementHandler!, Microsoft.Maui.IElement!>?
 virtual Microsoft.Maui.PropertyMapper.SetPropertyCore(string! key, System.Action<Microsoft.Maui.IElementHandler!, Microsoft.Maui.IElement!>! action) -> void
@@ -2822,3 +3361,11 @@ virtual Microsoft.Maui.WindowOverlay.HandleUIChange() -> void
 virtual Microsoft.Maui.WindowOverlay.Initialize() -> bool
 virtual Microsoft.Maui.WindowOverlay.RemoveWindowElement(Microsoft.Maui.IWindowOverlayElement! drawable) -> bool
 virtual Microsoft.Maui.WindowOverlay.RemoveWindowElements() -> void
+~override Microsoft.Maui.Platform.OpenHarmonyAccountResult.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyAccountResult.ToString() -> string
+~override Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyLiveViewUpdate.ToString() -> string
+~override Microsoft.Maui.Platform.OpenHarmonyMapRegion.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyMapRegion.ToString() -> string
+~override Microsoft.Maui.Platform.OpenHarmonyPushToken.Equals(object obj) -> bool
+~override Microsoft.Maui.Platform.OpenHarmonyPushToken.ToString() -> string

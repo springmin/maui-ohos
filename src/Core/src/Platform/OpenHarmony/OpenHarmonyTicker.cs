@@ -11,6 +11,13 @@
 // platform frame requests a redraw, and the loop unsubscribes again when the ticker stops, so
 // an idle UI still costs nothing. Sampling direction stays timer -> AnimationManager -> view
 // properties; repaint direction becomes frame -> RequestRedraw -> Render.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Animations;
 
 namespace Microsoft.Maui.Platform;

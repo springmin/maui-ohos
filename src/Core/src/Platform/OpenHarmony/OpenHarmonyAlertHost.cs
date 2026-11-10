@@ -1,5 +1,12 @@
 // Alert overlay state: the alert manager stores what should be shown and the renderer draws it
 // (scrim + dialog box + buttons) and routes button taps back through the completion callbacks.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.Graphics;
 
 namespace Microsoft.Maui.Platform;

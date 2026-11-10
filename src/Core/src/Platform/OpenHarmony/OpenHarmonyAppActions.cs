@@ -7,6 +7,13 @@
 // a documented no-op, and AppActionActivated never fires. It is registered in UseOpenHarmony so
 // AppActions.Current resolves this class instead of the Essentials reference-assembly
 // "not implemented" exception.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Maui.ApplicationModel;
 
 namespace Microsoft.Maui.Platform;

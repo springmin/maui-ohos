@@ -95,11 +95,11 @@
     <_MauiTargetPlatformIsTizen Condition="'$(_MauiTargetPlatformIdentifier)' == 'tizen'">True</_MauiTargetPlatformIsTizen>
     <_MauiTargetPlatformIsOpenHarmony>false</_MauiTargetPlatformIsOpenHarmony>
     <_MauiTargetPlatformIsOpenHarmony Condition="'$(_MauiTargetPlatformIdentifier)' == 'openharmony'">True</_MauiTargetPlatformIsOpenHarmony>
-    <!-- OpenHarmony is not a NativeAOT target. Gate PublishAot through NativeAotSupported
-         (same pattern as dotnet/aspnetcore#69952) instead of attempting an AOT publish that the
-         platform cannot support. Other platforms keep their existing _UseNativeAot behaviour:
-         the shared probe may set the property to true, and the host-app condition only treats an
-         explicit false as the opt-out. -->
+    <!-- OpenHarmony repo-side/test NativeAOT is not available yet: the OpenHarmony
+         ILCompiler/NativeAOT runtime packs are not published to the SDK feeds, so PublishAot for
+         test assets would restore a missing package. This mirrors dotnet/aspnetcore#69952 and
+         gates repo-side AOT only; user publish AOT uses the runtime ILCompiler pack once it ships.
+         Other platforms keep their existing _UseNativeAot behaviour. -->
     <NativeAotSupported Condition="'$(_MauiTargetPlatformIsOpenHarmony)' == 'True'">false</NativeAotSupported>
   </PropertyGroup>
 

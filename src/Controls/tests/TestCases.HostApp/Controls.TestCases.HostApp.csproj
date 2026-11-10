@@ -31,8 +31,9 @@
     <NoWarn>$(NoWarn);CS0618;CS0672;XC0618;IL2026;IL2091;IL2067;IL2072;IL2087;IL3050</NoWarn>
   </PropertyGroup>
 
-  <!-- OpenHarmony is not a NativeAOT target: NativeAotSupported is set to false by
-       Directory.Build.props for the net*-openharmony TFM (dotnet/aspnetcore#69952 pattern). -->
+  <!-- OpenHarmony repo-side/test NativeAOT is unavailable until the OpenHarmony
+       ILCompiler/NativeAOT runtime packs ship; Directory.Build.props sets NativeAotSupported=false
+       for the net*-openharmony TFM (dotnet/aspnetcore#69952 pattern). -->
   <PropertyGroup Condition=" '$(_UseNativeAot)' == 'true' and '$(NativeAotSupported)' != 'false' ">
     <PublishAot>true</PublishAot>
     <_IsPublishing>true</_IsPublishing>

@@ -5,6 +5,11 @@ Phase 2/3 internalization. The authoritative signatures are in
 
 ## Surface summary
 
+> **Count clarification (2026-11-12).** The Controls baseline contains 42 public types: 41
+> Controls-bound types plus the `MauiOpenHarmonyExtensions` entry point (0 members). The Core
+> baseline contains 57 types: 48 OpenHarmony types plus nine stock MAUI platform-neutral types.
+> See [`openharmony-api-review-controls-41.md`](openharmony-api-review-controls-41.md).
+
 - The slice is split by `src/Core/src/Platform/OpenHarmony/OpenHarmonyCoreSlice.props`:
   **41 OpenHarmony public types in Controls**, **48 in Core**.
 - Controls baseline: 8,082 lines; Core baseline: 3,601 lines.
@@ -151,7 +156,7 @@ Implementation-only types were moved to `internal` before proposing the public s
 
 | Type | Public members | Disposition |
 |---|---:|---|
-| `OpenHarmonyCollectionViewExtensions` | 0 | public |
+| `OpenHarmonyCollectionViewExtensions` | 4 | public |
 
 ### Other
 

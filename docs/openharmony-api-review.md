@@ -5,6 +5,14 @@ upstream API review of the public feature/handler surface.
 
 ## Current baseline
 
+> **Count clarification (2026-11-12).** The Controls baseline has **42** public types: the 41
+> Controls-bound types plus the `MauiOpenHarmonyExtensions` entry point (0 members). The Core
+> baseline has **57** types: 48 OpenHarmony types plus nine stock MAUI platform-neutral types
+> (`ElementExtensions`, `IImageSourcePartSetter`, `ImageSourcePartLoader`, `StrokeExtensions`,
+> `SwipeViewExtensions`, `TimeExtensions`, `ViewExtensions`, `WindowExtensions`, `WrapperView`).
+> The 48 + 41 proposal split is therefore correct once the entry point and the stock types are
+> accounted for. Details: [`openharmony-api-review-controls-41.md`](openharmony-api-review-controls-41.md).
+
 - `src/Controls/src/Core/PublicAPI/net-openharmony/PublicAPI.Unshipped.txt`
   - 8,082 lines total (the full `Microsoft.Maui.Controls` OpenHarmony API).
   - 41 OpenHarmony public types remain here: the Controls-bound handlers, host, shell/window,

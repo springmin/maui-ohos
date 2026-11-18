@@ -33,7 +33,17 @@ namespace UITest.Appium
 		/// <param name="element">Target Element.</param>
 		public static void Tap(this IApp app, string element)
 		{
-			RunWithTimeout(() => FindElement(app, element).Click());
+			RunWithTimeout(() =>
+			{
+				try
+				{
+					FindElement(app, element).Click();
+				}
+				catch (StaleElementReferenceException) when (app is AppiumCatalystApp)
+				{
+					app.WaitForElement(element).Click();
+				}
+			});
 		}
 
 		/// <summary>
@@ -44,7 +54,17 @@ namespace UITest.Appium
 		/// <param name="query">Represents the query that identify an element by parameters such as type, text it contains or identifier.</param>
 		public static void Tap(this IApp app, IQuery query)
 		{
-			RunWithTimeout(() => app.FindElement(query).Tap());
+			RunWithTimeout(() =>
+			{
+				try
+				{
+					app.FindElement(query).Tap();
+				}
+				catch (StaleElementReferenceException) when (app is AppiumCatalystApp)
+				{
+					app.WaitForElement(query).Tap();
+				}
+			});
 		}
 
 		/// <summary>
@@ -1408,9 +1428,15 @@ namespace UITest.Appium
 		/// <param name="withInertia">Whether swipes should cause inertia.</param>
 		public static void ScrollDown(this IApp app, string marked, ScrollStrategy strategy = ScrollStrategy.Auto, double swipePercentage = 0.67, int swipeSpeed = 500, bool withInertia = true)
 		{
-			var elementToScroll = FindElement(app, marked);
-
-			app.ScrollDown(elementToScroll, strategy, swipePercentage, swipeSpeed, withInertia);
+			try
+			{
+				var elementToScroll = FindElement(app, marked);
+				app.ScrollDown(elementToScroll, strategy, swipePercentage, swipeSpeed, withInertia);
+			}
+			catch (StaleElementReferenceException) when (app is AppiumCatalystApp)
+			{
+				app.ScrollDown(app.WaitForElement(marked), strategy, swipePercentage, swipeSpeed, withInertia);
+			}
 		}
 
 		/// <summary>
@@ -3081,6 +3107,16 @@ namespace UITest.Appium
 		}
 
 		/// <summary>
+		/// Clears text from the search handler element for the shell.
+		/// </summary>
+		/// <param name="app">The IApp instance representing the application.</param>
+		/// <exception cref="InvalidOperationException">The search handler element cannot be found.</exception>
+		public static void ClearTextInShellSearchHandler(this IApp app)
+		{
+			app.GetShellSearchHandler().Clear();
+		}
+
+		/// <summary>
 		/// Executes a function with a timeout to prevent tests from hanging indefinitely
 		/// when the application becomes unresponsive (e.g., due to an infinite layout loop).
 		/// WDA (WebDriverAgent) waits for the app's main thread to be idle before executing
@@ -3098,18 +3134,18 @@ namespace UITest.Appium
 				{
 					// Signal cancellation (Appium driver won't respect it, but good hygiene)
 					cts.Cancel();
-					
+
 					// Warn about orphaned thread - the background task will continue blocking until
 					// the underlying Appium/WDA call times out or the process is killed
 					Debug.WriteLine($">>>>> Appium command timed out after {timeout.Value.TotalSeconds}s. Background thread may remain blocked until app is force-terminated.");
-					
+
 					// Observe any future exception from the orphaned task to prevent unobserved task exceptions
 					task.ContinueWith(t =>
 					{
 						if (t.Exception is not null)
 							Debug.WriteLine($">>>>> Orphaned Appium task faulted: {t.Exception.InnerException?.Message}");
 					}, TaskContinuationOptions.OnlyOnFaulted);
-					
+
 					throw new TimeoutException(
 						$"An Appium command did not complete within {timeout.Value.TotalSeconds}s. " +
 						"The application may be unresponsive (e.g., due to an infinite layout loop).");

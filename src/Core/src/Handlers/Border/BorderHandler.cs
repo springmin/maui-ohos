@@ -5,8 +5,6 @@ using PlatformView = Microsoft.Maui.Platform.ContentView;
 using PlatformView = Microsoft.Maui.Platform.ContentViewGroup;
 #elif WINDOWS
 using PlatformView = Microsoft.Maui.Platform.ContentPanel;
-#elif TIZEN
-using PlatformView = Microsoft.Maui.Platform.ContentViewGroup;
 #elif OPENHARMONY
 using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
@@ -44,6 +42,9 @@ namespace Microsoft.Maui.Handlers
 
 		public static CommandMapper<IBorderView, BorderHandler> CommandMapper = new(ViewCommandMapper)
 		{
+#if WINDOWS
+			[nameof(IView.InvalidateMeasure)] = MapInvalidateMeasure,
+#endif
 		};
 
 #if !WINDOWS

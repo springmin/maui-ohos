@@ -7,6 +7,7 @@ using System.Xml;
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.Maui.Controls.SourceGen.TypeConverters;
 using Microsoft.Maui.Controls.Xaml;
 
 using static System.String;
@@ -27,8 +28,14 @@ internal class KnownMarkups
 		returnType = context.Compilation.ObjectType;
 		if (!markupNode.Properties.TryGetValue(new XmlName("", "Member"), out INode ntype)
 			&& !markupNode.Properties.TryGetValue(new XmlName(null, "Member"), out ntype))
+		{
+			if (markupNode.CollectionItems.Count == 0)
+				throw new XamlParseException("Syntax for x:Static is [Member=][prefix:]typeName.staticMemberName", markupNode as IXmlLineInfo);
+
 			ntype = markupNode.CollectionItems[0];
-		var member = ((ValueNode)ntype).Value as string;
+		}
+
+		var member = (ntype as ValueNode)?.Value as string;
 
 		if (IsNullOrEmpty(member) || !member!.Contains("."))
 		{
@@ -203,6 +210,13 @@ internal class KnownMarkups
 						context.Types[vnType] = resolvedType;
 				}
 			}
+		}
+
+		if (ancestorTypeSymbol is null && ancestorTypeNode is ValueNode { Value: string unresolvedType })
+		{
+			context.ReportConversionFailed((IXmlLineInfo)ancestorTypeNode, unresolvedType, Descriptors.TypeResolution);
+			value = "default";
+			return false;
 		}
 
 		// Get the AncestorLevel property (default is 1)

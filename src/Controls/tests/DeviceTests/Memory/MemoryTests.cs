@@ -313,6 +313,16 @@ public class MemoryTests : ControlsHandlerTestBase
 			return;
 #endif
 
+#if !WINDOWS
+		if (type == typeof(HybridWebView))
+		{
+			await Task.Delay(1000);
+			var references = await InvokeOnMainThreadAsync(CreateAndDisconnectHybridWebView);
+			await AssertionExtensions.WaitForGC(references);
+			return;
+		}
+#endif
+
 		WeakReference viewReference = null;
 		WeakReference platformViewReference = null;
 		WeakReference handlerReference = null;
@@ -414,6 +424,33 @@ public class MemoryTests : ControlsHandlerTestBase
 
 		await AssertionExtensions.WaitForGC(viewReference, handlerReference, platformViewReference);
 	}
+
+#if !WINDOWS
+	// The GC check must start after strong construction locals have left the setup frame.
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	WeakReference[] CreateAndDisconnectHybridWebView()
+	{
+		var layout = new Grid();
+		var view = new HybridWebView { HybridRoot = "HybridTestRoot" };
+		layout.Add(view);
+		CreateHandler<LayoutHandler>(layout);
+
+		var viewHandler = view.Handler;
+		Assert.NotNull(viewHandler);
+		WeakReference[] references =
+		[
+			new(view),
+			new(viewHandler),
+			new(viewHandler.PlatformView)
+		];
+
+		if (viewHandler is IViewHandler disconnectableHandler)
+			disconnectableHandler.DisconnectHandler();
+
+		view.Handler = null;
+		return references;
+	}
+#endif
 
 	[Theory("Polygon and Polyline Points Replacement Does Not Leak Handler")]
 	[InlineData(typeof(Polygon))]
@@ -930,14 +967,23 @@ public class MemoryTests : ControlsHandlerTestBase
 		Assert.Equal(4, references.Count);
 		await AssertionExtensions.WaitForGC(references[2], references[3]);
 	}
-#if TEST_FAILS_ON_ANDROID && TESTS_FAILS_ON_WINDOWS && TESTS_FAILS_ON_IOS && TESTS_FAILS_ON_MACCATALYST //For more information, see: https://github.com/dotnet/maui/issues/35985
+
 	[Fact("Window Does Not Leak")]
 	public async Task WindowDoesNotLeak()
 	{
 		SetupBuilder();
 
-		var references = new List<WeakReference>();
+		var references = await CreateWindowLeakReferencesAsync();
 
+		await AssertionExtensions.WaitForGC([.. references]);
+	}
+
+	// Extracted into a non-inlineable method so the `window`/`page` locals aren't hoisted into the
+	// caller's async state machine, which could keep them rooted past the WaitForGC await below.
+	[MethodImpl(MethodImplOptions.NoInlining)]
+	async Task<List<WeakReference>> CreateWindowLeakReferencesAsync()
+	{
+		var references = new List<WeakReference>();
 
 		var page = new ContentPage();
 		var window = new Window(page);
@@ -957,9 +1003,8 @@ public class MemoryTests : ControlsHandlerTestBase
 			}
 		});
 
-		await AssertionExtensions.WaitForGC([.. references]);
+		return references;
 	}
-#endif
 
 	[Fact("VisualDiagnosticsOverlay Does Not Leak"
 #if IOS || MACCATALYST

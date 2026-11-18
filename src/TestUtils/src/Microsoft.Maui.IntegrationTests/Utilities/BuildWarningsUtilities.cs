@@ -109,7 +109,7 @@ namespace Microsoft.Maui.IntegrationTests
 			return actualWarnings;
 		}
 
-		static void ReadBuildEvents(string binLogFilePath, Action<BuildEventArgs> processEvent)
+		internal static void ReadBuildEvents(string binLogFilePath, Action<BuildEventArgs> processEvent)
 		{
 			using var stream = File.OpenRead(binLogFilePath);
 			// Unlike ReadRecords, Replay does not initialize message resources in a fresh process.
@@ -122,7 +122,7 @@ namespace Microsoft.Maui.IntegrationTests
 				processEvent(args);
 			};
 			// Replay otherwise reports read exceptions only through this event.
-			reader.OnException += exception => ExceptionDispatchInfo.Capture(exception).Throw();
+			reader.OnException += exception => ExceptionDispatchInfo.Capture(NormalizeReadException(exception)).Throw();
 			reader.Replay(stream);
 
 			// BuildFinished precedes the embedded imports and final end-of-file marker.
@@ -130,6 +130,20 @@ namespace Microsoft.Maui.IntegrationTests
 				throw new InvalidDataException("The binlog is incomplete: the end-of-file marker was not recorded.");
 			if (!buildFinished)
 				throw new InvalidDataException("The binlog is incomplete: no BuildFinished event was recorded.");
+		}
+
+		internal static Exception NormalizeReadException(Exception exception)
+		{
+			// StructuredLogger 2.3.246 passes a short ReadBytes(16) result to Guid instead of reporting EOF.
+			// OnException surrounds record deserialization, not the dispatched processEvent callback.
+			if (exception is ArgumentException { ParamName: "b" } &&
+				exception.GetType() == typeof(ArgumentException) &&
+				exception.TargetSite?.DeclaringType == typeof(Guid))
+			{
+				return new InvalidDataException($"The binlog contains an incomplete GUID: {exception.Message}", exception);
+			}
+
+			return exception;
 		}
 
 		private static void AddActualWarning(this List<WarningsPerFile> warnings, string file, string code, string message)
@@ -181,12 +195,14 @@ namespace Microsoft.Maui.IntegrationTests
 			foreach (var expectedWarningsPerFile in expectedWarnings)
 			{
 				var actualWarningsPerFile = actualWarnings.FirstOrDefault(actualWarning => actualWarning.File.CompareWarningsFilePaths(expectedWarningsPerFile.File));
-				if (actualWarningsPerFile is null) Assert.Fail($"Expected warnings file path '{expectedWarningsPerFile.File}' was not found.");
+				if (actualWarningsPerFile is null)
+					Assert.Fail($"Expected warnings file path '{expectedWarningsPerFile.File}' was not found.");
 
 				foreach (var expectedWarningsPerCode in expectedWarningsPerFile.WarningsPerCode)
 				{
 					var actualWarningsPerCode = actualWarningsPerFile!.WarningsPerCode.FirstOrDefault(x => x.Code == expectedWarningsPerCode.Code);
-					if (actualWarningsPerCode is null) Assert.Fail($"Expected warning code '{expectedWarningsPerCode.Code}' was not found for the expected warnings file path '{expectedWarningsPerFile.File}'");
+					if (actualWarningsPerCode is null)
+						Assert.Fail($"Expected warning code '{expectedWarningsPerCode.Code}' was not found for the expected warnings file path '{expectedWarningsPerFile.File}'");
 
 					foreach (var expectedWarningsMessage in expectedWarningsPerCode.Messages)
 					{
@@ -225,25 +241,8 @@ namespace Microsoft.Maui.IntegrationTests
 		// These might be different from iOS/Mac warnings due to platform-specific implementations
 		private static readonly List<WarningsPerFile> expectedNativeAOTWarningsWindows = new();
 
-		// Android baseline warnings to ensure no new warnings are introduced
-		private static readonly List<WarningsPerFile> expectedNativeAOTWarningsAndroid = new()
-		{
-			new WarningsPerFile
-			{
-				File = "Xamarin.Android.Common.targets",
-				WarningsPerCode = new List<WarningsPerCode>
-				{
-					new WarningsPerCode
-					{
-						Code = "XA1040",
-						Messages = new List<string>
-						{
-							"The NativeAOT runtime on Android is an experimental feature and not yet suitable for production use. File issues at: https://github.com/dotnet/android/issues",
-						}
-					},
-				}
-			},
-		};
+		// Android reports its experimental NativeAOT notice as a message, not a warning.
+		private static readonly List<WarningsPerFile> expectedNativeAOTWarningsAndroid = new();
 
 		public static List<WarningsPerFile> ExpectedNativeAOTWarnings
 		{

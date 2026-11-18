@@ -75,19 +75,11 @@
         Version="$(_SkiaSharpVersion)"
     />
     <PackageReference
-        Update="SkiaSharp.Views.Gtk3"
-        Version="$(_SkiaSharpVersion)"
-    />
-    <PackageReference
         Update="SkiaSharp.Views.WinUI"
         Version="$(_SkiaSharpVersion)"
     />
     <PackageReference
         Update="SkiaSharp.Views.WPF"
-        Version="$(_SkiaSharpVersion)"
-    />
-    <PackageReference
-        Update="SkiaSharp.NativeAssets.Linux"
         Version="$(_SkiaSharpVersion)"
     />
     <PackageReference
@@ -117,14 +109,6 @@
     <PackageReference
          Update="System.Buffers"
          Version="$(SystemBuffersPackageVersion)"
-    />
-    <PackageReference
-         Update="System.IO.UnmanagedMemoryStream"
-         Version="$(SystemIOUnmanagedMemoryStreamPackageVersion)"
-    />
-    <PackageReference
-         Update="System.ObjectModel"
-         Version="$(SystemObjectModelPackageVersion)"
     />
     <PackageReference
          Update="System.Runtime.CompilerServices.Unsafe"
@@ -360,10 +344,6 @@
     <PackageReference
         Update="Mono.ApiTools.MSBuildTasks"
         Version="$(MonoApiToolsMSBuildTasksPackageVersion)"
-    />
-    <PackageReference
-        Update="Tizen.UIExtensions.NUI"
-        Version="$(TizenUIExtensionsVersion)"
     />
     <PackageReference
         Update="Svg.Skia"

@@ -3,9 +3,11 @@ trigger:
   branches:
     include:
     - main
+    - net11
     - net*.0
     - release/*
     - inflight/*
+    - candidate/*
   paths:
     include:
     - '*'
@@ -21,10 +23,13 @@ trigger:
 pr:
   branches:
     include:
+    - automation/release/*
     - main
+    - net11
     - net*.0
     - release/*
     - inflight/*
+    - candidate/*
   paths:
     include:
     - '*'
@@ -50,8 +55,6 @@ parameters:
   - Debug
   - Release
 
-# Temporary RC2 workaround: macOS defaults use GoldenGate until standard images
-# provide Xcode compatible with the pinned Apple SDK.
 - name: BuildPlatforms
   type: object
   default:
@@ -98,7 +101,7 @@ parameters:
         - ImageOverride -equals 1es-windows-2022-open
       os: windows
 
-# Apple jobs share the Aces image used by UI and device test builds.
+# Apple compilation jobs require the Xcode 27 Aces image.
 - name: MacOSPool
   type: object
   default:
@@ -122,8 +125,8 @@ parameters:
       - ImageOverride -equals 1ESPT-Ubuntu22.04
 
 # Condition for MacOSPool comparison lanes (non-ARM64)
-# These additional comparison lanes remain disabled; the standard build, pack,
-# and ARM64 integration lanes provide public macOS coverage.
+# Additional comparison lanes remain disabled; the build, pack and ARM64
+# integration lanes provide public macOS coverage.
 # Original condition: or(and(ne(variables['Build.Reason'], 'PullRequest'), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), and(startsWith(variables['Build.SourceBranch'], 'refs/heads/net'), endsWith(variables['Build.SourceBranch'], '.0')), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'), startsWith(variables['Build.SourceBranch'], 'refs/heads/inflight/'))), and(eq(variables['Build.Reason'], 'PullRequest'), or(and(startsWith(variables['System.PullRequest.TargetBranch'], 'net'), endsWith(variables['System.PullRequest.TargetBranch'], '.0')), startsWith(variables['System.PullRequest.TargetBranch'], 'release/'), startsWith(variables['System.PullRequest.TargetBranch'], 'inflight/'))))
 - name: macOSPoolLaneCondition
   type: string
@@ -254,6 +257,16 @@ stages:
         pool: ${{ parameters.MacOSPool.internal }}
       timeout: 240
       testCategory: Build
+      testFilter: 'Category=Build&DisplayName!~net10.0'
+    # The .NET 10 compatibility workload requires Xcode 26.5, not the app SDK's Xcode 27.
+    - name: mac_buildtemplate_previous_tests
+      pool:
+        name: Azure Pipelines
+        vmImage: macOS-26
+      timeout: 240
+      testCategory: Build
+      testFilter: 'Category=Build&DisplayName~net10.0'
+      xcodeVersion: '26.5'
 
     - name: win_blazortemplate_tests
       ${{ if eq(variables['Build.DefinitionName'], 'maui-pr') }}:

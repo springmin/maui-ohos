@@ -31,6 +31,162 @@ green base job alone is not causal proof, and missing evidence is reported expli
 
 ## Pipelines
 
+### Automated CI fixes
+
+`ci-status-main` scans the three pipelines every twelve hours and creates fix
+PRs against `main`, the .NET 11 servicing development branch. `ci-status-net11`
+is manual-only for historical investigations after the net11-to-main promotion.
+They do not file CI-scan tracking issues or failure/no-op diagnostic issues. Findings that
+cannot be safely fixed remain in the run's evidence and analysis artifacts.
+Manual dispatch defaults to staged (`dry_run: true`), including PR updates.
+
+The scanners deduplicate by a stable failure fingerprint on the PR, watch the
+same owned PR for up to ten attempts, and publish at most one PR operation per
+run. A PR requires a real, validated source/test fix; reproduction-only and empty
+hand-off PRs are not allowed. The trusted Azure DevOps validator reconciles open
+CI-fix PR heads after a scanner completes, including PRs created with
+`GITHUB_TOKEN` that do not emit follow-up workflow events.
+
+`ci-status-fix` and `ci-status-fix-net11` are manual-only compatibility workflows
+for older issue-linked PRs. They must not be scheduled alongside the direct
+scanners. The legacy issue reconciler and locking workflow do not produce new
+issues.
+
+### Branch promotion and servicing
+
+After the .NET 11 promotion, `main` owns .NET 11 servicing development. The
+main-to-net11 and net11-to-RC2 merge routes are retired; a future servicing cut
+must explicitly select its release branch rather than reuse the RC2 route.
+Official nightly builds exclude the historical `net10.0` and `net11.0` branches.
+
+For the staged .NET 12 transition described in `docs/ReleaseBranchWorkflow.md`,
+literal `net11` preserves the pre-transition `main` history. Primary CI definitions
+explicitly include `net11` and `candidate/*`; the official definition includes
+`net11` for signed nightly, localization and API-scan routing. These changes must
+be deployed before assuming that branch creation activates the new CI routes.
+Do not treat the historical `net11.0` subscription target as the new branch.
+
+Individual .NET11 fix PRs initially target `net11` for review. After approval,
+a maintainer manually retargets the PR to the active versioned inflight branch
+and merges it directly there; bots do not retarget or merge. Required CI must
+validate the final base. `net11` receives selected release contents through the
+separate candidate integration, not direct individual-fix merges. Milestone
+assignment must honor the final versioned staging base instead of net11's patch.
+
+Release-related tooling resolves the configured servicing branch independently
+of feature `main`: milestone ownership and review baselines must recognize
+literal `net11` and versioned candidate/inflight lanes. Credential-bearing
+review provisioning refuses the new servicing/staging targets until GitHub
+reports branch protection; the naming allowlist alone is not protection.
+The release migration must deploy those protections separately rather than
+bypass the refusal or grant extra pipeline permissions.
+
+The daily **Forward servicing fixes** workflow prepares a draft merge PR from an
+expendable automation head, not from the `net11` source ref itself. It activates
+only when the feature branch has a later major and the fixes tip has CI-normalized
+`ci.main` / non-stable package metadata. Candidates retain CI settings; their
+servicing flip is a separate reviewed PR on automation/release before the
+manual cut. The staging workflow prepares the normalized next-cycle net11-to-main PR too.
+Source/target refs are read-only; automation never guesses conflict resolutions,
+approves PRs, or auto-merges. Actual forward-PR CI remains a separate gate.
+
+The **Release tracking PRs** workflow prepares the next candidate/inflight
+branches and draft PR pair after a verified same-repository candidate merge into
+net11. Its merged-PR trigger uses default-branch workflow code and explicitly
+checks out trusted main, never PR code. A reproducible release-lane receipt pins
+inputs/outputs for same-source retries. A newer maintainer candidate merge
+supersedes stale cycle bookkeeping through an exact SHA lease, retaining its
+predecessor receipt and replacing only exact verified older generated outputs.
+Normalization, servicing and state PR heads use source-<full-candidate-merge-sha>
+suffixes, so historical PRs cannot block a newer source. Concurrent unrelated
+edits remain protected, and actual API/Git failures remain explicit.
+The deployed workflow stages the exact candidate merge,
+proposes next-cycle CI on net11 and creates the next pair. Independently, publication
+opens a servicing/stable PR targeting automation/release, before any real release.
+The maintainer reviews and merges using Create a merge commit, then manually
+creates the real release at that exact servicing merge. No post-cut servicing PR
+is opened. CI restoration is prepared as a reviewed normalization
+PR, never a direct protected net11 write. Until its pinned child is merged with
+Create a merge commit, the coordinator reports waiting-for-normalization-approval,
+preserves staging/current tracking SR, and withholds next-lane activation and
+forward flow. Its same-repository merged-PR trigger also accepts the managed
+automation/normalization route. It does not merge either reviewed PR, advance canonical
+release/nightly state, or publish customer packages. Completed production
+rollover prepares a draft canonical `currentSr` update after rechecking staging,
+normalized fixes and replacement lanes; review/CI/merge still gate the actual
+state change. Its `nightlyMode` is preserved, so the first versioned-nightly
+activation still requires independently verified deployment. The signed-publication
+workflow uses existing federation/internal access, waits for a reviewed servicing
+merge, exact manual cut and mirror source, queues the existing signed build, then canonical
+artifact preparation with pushPackages=false. Public release approvals remain.
+
+Configured servicing progress is independent of manual release tags. Readiness
+pins the first GA branch or preceding SR branch as its inventory baseline, keeps
+the current/prior cycle visible, and honors human closure per source/baseline
+snapshot. Tag creation, absence or movement cannot gate or advance cuts,
+normalization, replacement lanes or signing preparation. Stable tag-push
+milestone processing ignores the configured train; historical tag diagnostics
+and explicit manual release actions remain separate.
+
+.NET 10 SR13 publishes from `release/10.0.1xx-sr13`, independently of `main`.
+Preserve its release commit and packages, and keep publication on the .NET 10 channel during the
+.NET 11 transition. Do not cut over `inflight/current` or synchronize the internal
+`main` mirror as part of SR13 publication; those are separate .NET 11 operations.
+
+### Versioned inflight nightly migration
+
+The release-branch proposal in `docs/ReleaseBranchWorkflow.md` adds support for
+versioned `inflight/<band>-srN` sources without changing the existing
+`ci.inflight` package stream or the internal `dotnet-maui` signing/publishing path.
+Scheduled inflight runs select their eligible lane from
+`eng/release-rollover.json` at a pinned public `main` commit before packing.
+`nightlyMode: legacy` preserves `inflight/current`; `versioned` selects the state's
+`releaseBand` and `currentSr + 1`; `candidate` (the checked-in mode) selects
+`candidate/<releaseBand>-sr<currentSr>` and follows `currentSr` automatically.
+Unselected retained lanes skip packing. Feed destination is set by the Maestro
+default-channel mapping for the built branch, not by this repository; a stale
+`inflight/current → .NET 10.0.1xx SDK` mapping publishes 11.x packages to the
+dotnet10 feeds.
+
+This is a staged migration, not evidence that the new lanes are already building.
+Deploy the selection and branding changes to the internal mirrored source
+branches and verify signed artifacts/feed wiring before switching the canonical
+mode. Creating the public refs or passing the GitHub sandbox is not sufficient.
+The independent nightly-mirror job in **Prepare signed release publication**
+reconciles the state-selected candidate hourly and after canonical state changes
+on trusted `main`. It reuses the existing Azure federation identity and keeps an
+internal ownership ref so later rebases cannot discard unrelated internal work.
+The mirrored candidate retains the existing 05:00 UTC official-build schedule;
+the mirror workflow does not queue a competing nightly.
+
+### Engineering dependency updates
+
+Maestro owns the `Microsoft.DotNet.*` dependencies, including the Arcade toolset
+and XHarness. Update the toolset as a coordinated dependency change: keep
+`global.json` and `eng/Versions.props` aligned with `eng/Version.Details.xml`,
+including its source commit, and take the matching `eng/common` update and feed
+changes when required. An individual NuGet version bump does not update the
+tracked toolset or shared build infrastructure.
+
+Stable Mono ToolChain and Emscripten workload manifests are published to
+NuGet.org. `src/DotNet/Dependencies/Workloads.csproj` adds that source only when
+restoring final runtime manifests; prerelease manifests retain the configured
+build feeds. Official Pack macOS stages the exact restored runtime-manifest
+`.nupkg` files in `MacNativeArtifacts`. Pack Windows sets
+`RuntimeManifestPackageSource` to that transferred local source instead of
+contacting NuGet.org through CFSClean. Public/local builds keep the NuGet.org
+default. Keep the pinned versions unchanged when repairing a missing-source
+`NU1102` failure rather than substituting the nearest older RTM package or
+assuming SDK-bundled manifests with the same version contain identical packs.
+
+Dependabot excludes these packages to avoid partial toolset upgrades. It also
+excludes `Magick.NET-Q8-AnyCPU` major version updates: version 15 changed screenshot
+comparison behavior and removed Intel macOS support. A major upgrade requires
+explicit validation of the screenshot baselines and supported runner
+architectures; patch and minor updates remain enabled.
+
+### Pipeline definitions
+
 **Organization**: `dnceng-public` / project `public`
 (`https://dev.azure.com/dnceng-public/public/_apis/build/...`).
 
@@ -98,6 +254,51 @@ still uses the Helix queues in `eng/helix_xharness.proj`.
   inaccessible/expired/insufficient data — do not assume unrelated or PR-caused.
 - Helix work-item console output may live behind `helix.dot.net` and Azure Blob URLs.
 
+## Setup-only retries
+
+Shared provisioning initializes `DOTNET_CLI_HOME` under the agent's per-job
+temporary directory before invoking .NET. It preserves an existing
+`NUGET_PACKAGES`, or pins the original user-profile package cache when unset,
+so NuGet restores and Arcade's MSBuild task imports use the same cache.
+An unwritable CLI-state directory fails preparation rather than changing
+permissions on the hosted agent's shared home directory.
+
+Shared test preparation uses **at most five total attempts per setup operation**,
+not five additional retries or five whole-job reruns. Azure task-level recovery
+uses `retryCountOnTaskFailure: 4`, with the agent's backoff and attempt diagnostics.
+Task and job timeouts can end recovery earlier; exhaustion remains a failed step.
+
+- `eng/pipelines/common/provision.yml` covers .NET SDK/tool installation, JDK,
+  Xcode selection/provisioning, Android SDK environment discovery and AVD creation.
+  Its consumers include UI-test lanes (including Material3), device-test builds,
+  unit/Helix preparation, integration tests and the review gate. Platform and skip
+  conditions still determine which operations run.
+- Android common packages, platform APIs and emulator images retry **per package**
+  through `src/Provisioning/Provisioning.csproj` and
+  `eng/scripts/Install-AndroidSdkPackage.ps1`. Only Azure Pipelines installs retry;
+  local installs still attempt once. Each CI attempt has a fresh Android user
+  cache and temporary directory. After a failed attempt, the installer discovers
+  the SDK path and removes only the failed package directory and the SDK's `.temp`
+  staging directory before retrying. Successful packages are not reinstalled.
+  The enclosing Azure task does not retry, avoiding a five-by-five multiplier.
+- Simulator-runtime installation keeps its existing CoreSimulator recovery, but
+  counts the initial download toward the five-attempt cap and fails on exhaustion
+  or an unusable runtime instead of continuing with a warning.
+- Shared UI/device/template/integration setup also retries artifact downloads and
+  separate .NET SDK/workload/tool installation. UI setup additionally retries Node
+  and Appium installation. Windows Helix-device preparation and the legacy
+  handler/template paths use the same task retry count.
+- The Cake UI runner retries its explicitly separated preparation/build phases
+  before invoking the test runner: iOS device preparation, Android APK installation,
+  Windows test paths, and UI-test project builds on all four platforms. Local
+  runs and non-UI Cake targets keep their existing behavior.
+
+This is **not** a retry based on an absent TRX or a zero test count. Test commands,
+NUnit fixture setup/teardown, result reconciliation, publication, and existing
+test-execution retries are unchanged. Android emulator boot, independent review
+gate preparation, and provisioning inside Helix/XHarness workers retain their
+existing policies; shared agent setup does not wrap or resubmit those test runs.
+
 ## Enumerate EVERY failed leg — Build Analysis is NOT exhaustive
 
 > 🚨 The single most common way to be **wrong** about "what's unique to this PR" is to
@@ -122,6 +323,18 @@ still uses the Helix queues in `eng/helix_xharness.proj`.
   **all** failed legs. Absence of evidence is not evidence — it is usually an unread log.
 
 ## MAUI-specific quirks
+
+### Windows packaged device-test deployment
+
+The Helix Windows runner installs the test MSIX and its x64 dependencies in one
+`Add-AppxPackage` operation with `ForceApplicationShutdown`. On disposable workers,
+Windows apps such as Web Experience can hold shared runtime dependencies open and
+block deployment with `0x80073D02` before any tests start.
+[Microsoft documents](https://learn.microsoft.com/powershell/module/appx/add-appxpackage#-forceapplicationshutdown)
+that this switch shuts down processes associated with the package **or its
+dependencies**; `ForceTargetApplicationShutdown` only covers the target package.
+Keep this behavior scoped to the Helix runner, not local developer deployment.
+Deployment errors still fail the work item and print the Appx deployment log.
 
 ### Android activity isolation
 
@@ -272,6 +485,15 @@ MAUI build artifacts are **Container** type, not `PipelineArtifact`:
 If available, the `mcp-binlog-tool` / binlog MCP server can analyze downloaded
 `.binlog` files. Optional — core investigation works via `gh` CLI and REST.
 
+### APIScan analysis inputs
+
+The official pipeline stages unsigned build outputs in `APIScanFiles` for
+analysis, separately from the signed shipping packages. Keep both the
+`APIScanFiles` artifact and its APIScan consumer job marked `isProduction: false`;
+otherwise production-release validation reports missing signing certificates
+on these analysis-only copies. This classification does not disable `APIScan@2`
+or change signing and validation of the actual release artifacts.
+
 ## Test count deduplication
 
 **Never sum raw failed counts across test runs.** MAUI UI/device tests repeat the
@@ -376,6 +598,8 @@ error XAGRDL0000: Could not GET '...pkgs.dev.azure.com/.../maven/v1/...'
 | `error IL####` / `ILC####` / NativeAOT publish fail | `maui-pr` AOT legs, `Run Integration Tests – AOT` | **NativeAOT / ILC** trim-analysis break. May be pre-existing (e.g. HybridWebView `IL2026`) — confirm with a job- AND test-level baseline diff before attributing to the PR. |
 | `error NETSDK1144` | `maui-pr` TrimFull legs | Optimizing assemblies for size failed (often an ILLink warning promoted to error). Check whether the same leg is red on the base branch. |
 | `XamlC` | `maui-pr` | XAML compiler — usually missing type or bad binding |
+| `WMC0612` / XBF `0x09C4` / `Property Not Found` after adding native Windows `x:DataType` | `maui-pr` Windows build/pack | The native XBF generator rejects the annotations introduced by #38735 on classic `{Binding}` templates. Restore the prior metadata without replacing bindings or converters. XML/source-only checks cannot validate XBF compilation; require an actual Windows build. |
+| `WMC9999` on overloaded table collections, `WMC0821` on open generic types, or invalid generated `XamlTypeInfo.g.cs` after adding native `[Bindable]` | `maui-pr` Windows build/pack | These were successive failures from #38735's new metadata in the Windows investigation on #39608. Restore the pre-cleanup native metadata baseline rather than changing public collection APIs, generic types, or generated code. Preserve existing runtime binding behavior and validate with the native Windows compiler. |
 | `error XAGRDL0000` / `401` / `No local versions` | `maui-pr` or official build | Gradle/Maven feed issue — see above |
 | Apple workload install cannot find a `net10.0` SDK pack | `maui-pr` SDK provisioning | The .NET 11 Apple manifests also install .NET 10 compatibility packs. Resolve the exact missing version's feed with `darc get-asset`; the current .NET 11 feed alone may not contain it. Do not copy another branch's compatibility feed without checking its manifest versions. |
 | `NETSDK1140` rejects the Apple target platform version | `maui-pr` build/pack | Align current Apple target-framework versions and SDK defaults in `Directory.Build.props` with the selected Apple SDK. net11.0 uses 26.5; the RC2 release branch uses 27.0. Preserve previous-.NET compatibility targets. |
@@ -468,6 +692,15 @@ on appearance alone:
    dismisses, because a broad known-issue regex could otherwise launder a PR-caused break in
    a *different* test that merely shares a red leg on base. An uncorroborated text match (no
    exact base match) stays `indeterminate` (`Needs human investigation`).
+   The local gatherer preserves `ErrorMessage` arrays as ordered AND conditions:
+   every literal must occur on a distinct subsequent line within one actual occurrence,
+   following the [public BA array contract](https://github.com/dotnet/arcade/blob/5a63d054ea793bdbdb6aa9f4558558e3a8f41529/Documentation/Build%20Analysis/KnownIssues.md#fill-out-known-issues-with-a-list-of-errors).
+   Each array's matched text includes that occurrence's name, message, and separately
+   captured stack trace. Arrays cannot combine evidence from separate occurrences of a
+   deduplicated test/platform. Scalar and regex rules retain their existing aggregated text.
+   Case-insensitive matching, the 20,000-character cap per matched text, first-matching-rule
+   selection, and attribution gates are unchanged. This local hint matcher does not
+   establish full Build Analysis/Build Insights service parity.
 4. **Retry recovery** — the failing leg was retried by CI and **passed** on a later
    attempt (the recovered leg does not surface as a failure at all). A leg that was retried
    and **still failed** (`retriedStillFailing = true`) is the opposite — **persistent**,
@@ -476,6 +709,21 @@ on appearance alone:
 If none of these hold, a failure on a path/platform the PR changes leans PR-caused. Note
 that **not every failure is a test** — a red build leg with no extracted test name still
 counts as a failure and must be classified, never silently dropped.
+
+**Build Insights report intake:** The automated review gatherer also reads the
+GitHub check reports for its captured PR head, accepting only the
+`build-insights` / `Build Insights` publisher/name pair. It explicitly requests
+all check runs, including earlier same-named reports, within its pagination cap.
+`context.json` exposes their metadata and bounded raw
+title, summary, and text in `buildInsights.reports`. These are untrusted,
+supplementary leads, not a replacement for direct Azure/Helix evidence, the
+local known-issue matcher, or baseline attribution. Collection `complete` does
+not certify pipeline coverage; pending, missing, or truncated reports cannot
+establish that a failure is absent. Collection errors remain explicit, and the
+no-results evaluation shortcuts do not fetch reports. Supplementary collection
+runs only after direct evidence, target-branch history, and baseline attribution,
+using the remaining gather budget. An exhausted budget leaves an explicit report
+collection limitation rather than delaying primary evidence.
 
 The gatherer's **legacy deterministic verdict ceiling** (`gate.verdictCeiling`)
 constrains legacy merge-readiness consumers, not the current skill's attribution

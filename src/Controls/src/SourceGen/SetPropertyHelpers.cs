@@ -153,9 +153,9 @@ static class SetPropertyHelpers
 
 	/// <summary>
 	/// Adds a lazy resource to the ResourceDictionary using AddFactory.
-	/// The resource is created inside a lambda function for on-demand instantiation.
+	/// Creates the resource on demand using a lambda, or a stable local function when replacing an entry.
 	/// </summary>
-	public static void AddLazyResourceToResourceDictionary(IndentedTextWriter writer, ILocalValue parentVar, ElementNode node, SourceGenContext context)
+	public static void AddLazyResourceToResourceDictionary(IndentedTextWriter writer, ILocalValue parentVar, ElementNode node, SourceGenContext context, string? replacementFactoryName = null)
 	{
 		// Get the type of the resource
 		if (!node.XmlType.TryResolveTypeSymbol(null, context.Compilation, context.XmlnsCache, context.TypeCache, out var type) || type is null)
@@ -200,7 +200,7 @@ static class SetPropertyHelpers
 			}
 		}
 
-		// Generate the AddFactory call
+		string resourceKeyExpression;
 		if (isImplicitStyle)
 		{
 			// Get TargetType from Style
@@ -211,14 +211,24 @@ static class SetPropertyHelpers
 				return;
 			}
 
-			writer.WriteLine($"{parentVar.ValueAccessor}.AddFactory({targetTypeExpr}, () =>");
+			resourceKeyExpression = targetTypeExpr;
 		}
 		else
 		{
-			writer.WriteLine($"{parentVar.ValueAccessor}.AddFactory(\"{CSharpExpressionHelpers.EscapeForString(key!)}\", () =>");
+			resourceKeyExpression = $"\"{CSharpExpressionHelpers.EscapeForString(key!)}\"";
 		}
 
-		using (PrePost.NewBlock(writer, begin: "{", end: $"}}, shared: {shared.ToString().ToLowerInvariant()});"))
+		if (replacementFactoryName is not null)
+		{
+			// A stable local function avoids anonymous-lambda identity churn across EnC deltas.
+			var returnType = isImplicitStyle ? "global::Microsoft.Maui.Controls.Style" : "object";
+			writer.WriteLine($"{returnType} {replacementFactoryName}()");
+		}
+		else
+			writer.WriteLine($"{parentVar.ValueAccessor}.AddFactory({resourceKeyExpression}, () =>");
+
+		using (PrePost.NewBlock(writer, begin: "{", end: replacementFactoryName is not null
+			? "}" : $"}}, shared: {shared.ToString().ToLowerInvariant()});"))
 		{
 			// Create a temporary context for generating the lambda body
 			var lambdaContext = new SourceGenContext(
@@ -259,6 +269,13 @@ static class SetPropertyHelpers
 				// Fallback - shouldn't happen
 				writer.WriteLine($"return null!;");
 			}
+		}
+
+		if (replacementFactoryName is not null)
+		{
+			var keyExpression = isImplicitStyle ? $"{resourceKeyExpression}.FullName!" : resourceKeyExpression;
+			writer.WriteLine($"{parentVar.ValueAccessor}.Remove({keyExpression});");
+			writer.WriteLine($"{parentVar.ValueAccessor}.AddFactory({resourceKeyExpression}, {replacementFactoryName}, shared: {shared.ToString().ToLowerInvariant()});");
 		}
 	}
 
@@ -862,7 +879,7 @@ static class SetPropertyHelpers
 		if (resolution.Location == MemberLocation.Neither &&
 			!string.IsNullOrEmpty(resolution.RootIdentifier) &&
 			MemberResolver.IsSimpleIdentifier(expression.Code) &&
-			!MemberResolver.StartsWithTypeReference(context.Compilation, expression.Code, MemberResolver.GetContainingNamespace(context.RootType)))
+			!resolution.ResolvesToStaticType)
 		{
 			var neitherLocation = LocationCreate(context.ProjectItem.RelativePath!, (IXmlLineInfo)valueNode, expression.Code);
 			context.ReportDiagnostic(Diagnostic.Create(Descriptors.MemberNotFound, neitherLocation, resolution.RootIdentifier, context.RootType?.Name ?? "this", dataTypeSymbol.Name));
@@ -887,6 +904,14 @@ static class SetPropertyHelpers
 					return true; // Handled (with error)
 				}
 			}
+		}
+
+		if (resolution.Location == MemberLocation.Neither &&
+			resolution.ResolvesToStaticType &&
+			MemberResolver.IsSimpleIdentifier(expression.Code))
+		{
+			// Pure static member access should be emitted as a SetValue expression, not a binding.
+			return false;
 		}
 
 		// If we have binding handlers, this needs a TypedBinding

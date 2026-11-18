@@ -67,6 +67,8 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 
 	WeakNotifyPropertyChangedProxy? _layoutPropertyChangedProxy;
 	PropertyChangedEventHandler? _layoutPropertyChanged;
+	WeakNotifyCollectionChangedProxy? _itemsChangedProxy;
+	NotifyCollectionChangedEventHandler? _itemsChanged;
 	bool _isScrollingForItemsUpdate;
 	SnapPointsType _snapPointsType;
 	SnapPointsAlignment _snapPointsAlignment;
@@ -253,10 +255,8 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 			mauiItemsView.CleanUpAutomationEvents();
 		}
 
-		if (_collectionViewSource?.Source is INotifyCollectionChanged incc)
-		{
-			incc.CollectionChanged -= ItemsChanged;
-		}
+		_itemsChangedProxy?.Unsubscribe();
+		_itemsChangedProxy = null;
 
 		if (_scrollViewer is not null)
 		{
@@ -440,7 +440,8 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 
 		if (_collectionViewSource?.Source is INotifyCollectionChanged incc)
 		{
-			incc.CollectionChanged += ItemsChanged;
+			_itemsChanged ??= ItemsChanged;
+			_itemsChangedProxy = new WeakNotifyCollectionChangedProxy(incc, _itemsChanged);
 		}
 
 		// Set up the new ItemTemplate
@@ -449,12 +450,14 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 			_itemFactory = new ItemFactory(Element);
 			PlatformView.ItemTemplate = _itemFactory;
 		}
-		else if (PlatformView.ItemTemplate is not null)
+		else if (PlatformView.ItemTemplate is ItemFactory)
 		{
+			// Preserve WinUI's default ItemContainer template when no MAUI template is set.
 			PlatformView.ItemTemplate = null;
 		}
 
-		PlatformView.ItemsSource = _collectionViewSource?.View;
+		// A CollectionViewSource with no Source does not provide a usable WinUI view.
+		PlatformView.ItemsSource = _collectionViewSource?.Source is null ? null : _collectionViewSource.View;
 		(PlatformView as MauiItemsView)?.InvalidateAutomationSetProperties();
 
 		if (PlatformView is MauiItemsView mauiItemsViewFlat)
@@ -503,10 +506,8 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 				groupedItemTemplateCollection.CleanUp();
 			}
 
-			if (_collectionViewSource.Source is INotifyCollectionChanged incc)
-			{
-				incc.CollectionChanged -= ItemsChanged;
-			}
+			_itemsChangedProxy?.Unsubscribe();
+			_itemsChangedProxy = null;
 
 			_collectionViewSource.Source = null;
 			_collectionViewSource = null;
@@ -534,11 +535,6 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 					VirtualView.RemoveLogicalChild(element);
 				}
 			}
-		}
-
-		if (VirtualView?.ItemsSource is null && PlatformView is not null)
-		{
-			PlatformView.ItemsSource = null;
 		}
 	}
 
@@ -600,7 +596,8 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 			return;
 		}
 
-		if (!PlatformView.IsLoaded)
+		// Collapsed views can be loaded without an ItemsRepeater; WinUI cannot scroll them.
+		if (!PlatformView.IsLoaded || PlatformView.Visibility != WVisibility.Visible)
 		{
 			return;
 		}
@@ -789,7 +786,10 @@ public abstract class ItemsViewHandler2<TItemsView> : ViewHandler<TItemsView, WI
 		bool noTemplate = ItemsView.ItemTemplate is null;
 		bool isMeasureAllItems = ItemsView is CollectionView cv && cv.ItemSizingStrategy == ItemSizingStrategy.MeasureAllItems;
 
-		layout.ItemsStretch = (noTemplate && isMeasureAllItems)
+		bool isHorizontalLayout = gridItemsLayout.Orientation == ItemsLayoutOrientation.Horizontal;
+		// Uniform stretching gives an untemplated horizontal grid enough width to scroll,
+		// but on a vertical grid it also inflates row height and creates large blank gaps.
+		layout.ItemsStretch = (isHorizontalLayout && noTemplate && isMeasureAllItems)
 			? UniformGridLayoutItemsStretch.Uniform
 			: UniformGridLayoutItemsStretch.Fill;
 		layout.ItemsJustification = UniformGridLayoutItemsJustification.Start;

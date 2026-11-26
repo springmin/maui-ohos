@@ -1,0 +1,166 @@
+// Shared handler wiring for the platform slice: MAUI's own platform-partial handlers have no
+// platform view here, so the slice connects its own handlers (exact type -> interfaces ->
+// base types) for an element tree.
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Maui.Hosting;
+
+namespace Microsoft.Maui.Platform;
+
+/// <summary>
+/// One slice handler registration (FIX-INTEROP #5/#6). Keeping the handler Type inside this
+/// type lets the trim/AOT analyzers follow the DynamicallyAccessedMembers contract through
+/// MAUI's AddHandler and through the connector's factory; a Dictionary&lt;Type, Type&gt;
+/// erased it and produced IL2072 (registration) and IL2067 (Activator.CreateInstance). The
+/// factory also removes the per-connect Activator.CreateInstance call.
+/// </summary>
+internal sealed class SliceHandlerRegistration
+{
+    public SliceHandlerRegistration(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type handlerType)
+    {
+        HandlerType = handlerType;
+        Create = () => (IElementHandler)Activator.CreateInstance(handlerType)!;
+    }
+
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
+    public Type HandlerType { get; }
+
+    /// <summary>Builds one handler instance without a reflection call at connect time.</summary>
+    public Func<IElementHandler> Create { get; }
+}
+
+internal static class OpenHarmonyHandlerConnector
+{
+    /// <summary>Maui context of the running application (set by the app host).</summary>
+    public static IMauiContext? Context { get; set; }
+
+    /// <summary>Resolves the slice handler for a view type (exact type, interfaces, base types).</summary>
+    public static Type? FindSliceHandlerType(Type viewType) => FindSliceHandler(viewType)?.HandlerType;
+
+    // App-supplied registrations live in their own map so RegisterHandler can run before the
+    // host is up without forcing MauiOpenHarmonyExtensions' static initializer (whose handler
+    // types assume the host services exist).
+    private static readonly Dictionary<Type, SliceHandlerRegistration> s_appHandlers = new();
+
+    /// <summary>
+    /// Resolves the slice handler registration for a view type (exact type, interfaces, base
+    /// types). The interface walk is safe for trimming/AOT even though the analyzer cannot
+    /// prove it: interface implementations are never removed from a type (metadata identity
+    /// requires them), the slice handler interfaces are rooted as SliceHandlers keys in this
+    /// assembly, and get_Interfaces is a pure metadata read on an instantiated type.
+    /// Object.GetType() carries no DynamicallyAccessedMembers annotations (the static type
+    /// IElement has none and rc.1 exposes no public seam to add them), so the single IL2070 is
+    /// suppressed with that structural justification instead of loosening the analyzer.
+    /// </summary>
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = "Interfaces cannot be trimmed off a type; the slice handler interfaces are rooted as SliceHandlers keys in this assembly.")]
+    internal static SliceHandlerRegistration? FindSliceHandler(Type viewType)
+    {
+        if (s_appHandlers.TryGetValue(viewType, out SliceHandlerRegistration? app))
+        {
+            return app;
+        }
+        if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(viewType, out SliceHandlerRegistration? exact))
+        {
+            return exact;
+        }
+        foreach (Type iface in viewType.GetInterfaces())
+        {
+            if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(iface, out SliceHandlerRegistration? byInterface))
+            {
+                return byInterface;
+            }
+        }
+        for (Type? type = viewType.BaseType; type is not null; type = type.BaseType)
+        {
+            if (MauiOpenHarmonyExtensions.SliceHandlers.TryGetValue(type, out SliceHandlerRegistration? byBase))
+            {
+                return byBase;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Creates one handler instance by its registered type (kept for callers outside
+    /// the connector; the connector itself uses the registration's factory).</summary>
+    public static IElementHandler? HandlerFor(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type handlerType)
+        => Activator.CreateInstance(handlerType) as IElementHandler;
+
+    /// <summary>
+    /// Serializes handler wiring. The runtime calls <see cref="ConnectTree"/> from the app's
+    /// launch thread (startup) and the shell calls it from its callback thread (surface/frame
+    /// arrange), and MAUI's <c>Element.SetHandler</c> is not re-entrant: two concurrent connects
+    /// of the same element race the check-then-assign and trip "Handler is already being set
+    /// elsewhere" (device JIT startup; also PlatformView-null and collection corruption). The
+    /// lock is re-entrant, so handlers can call back into the connector while their virtual view
+    /// is being connected.
+    /// </summary>
+    private static readonly object s_connectSync = new();
+
+    /// <summary>Connects the slice handler of a single element when it has none.</summary>
+    public static void Connect(IElement? element)
+    {
+        lock (s_connectSync)
+        {
+            ConnectCore(element);
+        }
+    }
+
+    /// <summary>Connects handlers for an element and its descendants (idempotent, thread-safe).</summary>
+    public static void ConnectTree(IElement? element)
+    {
+        lock (s_connectSync)
+        {
+            ConnectTreeCore(element);
+        }
+    }
+
+    private static void ConnectCore(IElement? element)
+    {
+        if (element is null || element.Handler is not null)
+        {
+            return;
+        }
+        if (FindSliceHandler(element.GetType()) is { } registration && Context is not null)
+        {
+            IElementHandler handler = registration.Create();
+            handler.SetMauiContext(Context);
+            element.Handler = handler;
+        }
+    }
+
+    /// <summary>
+    /// Registers an app-supplied handler for a third-party view type (CommunityToolkit,
+    /// Syncfusion, a line-of-business control, ...). The slice registry intentionally covers
+    /// MAUI's own view types only; this is the supported extension point for library controls,
+    /// with the handler type kept visible to the trim/AOT analyzers by the attribute.
+    /// </summary>
+    public static void RegisterHandler(
+        Type viewType,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type handlerType)
+    {
+        s_appHandlers[viewType] = new SliceHandlerRegistration(handlerType);
+    }
+
+    private static void ConnectTreeCore(IElement? element)
+    {
+        ConnectCore(element);
+        if (element is ILayout layout)
+        {
+            foreach (IView child in layout)
+            {
+                ConnectTreeCore(child);
+            }
+        }
+        else if (element is Microsoft.Maui.Controls.NavigationPage navigation)
+        {
+            // A navigation page's visible content is the current page.
+            ConnectTreeCore(navigation.CurrentPage);
+        }
+        else if (element is IContentView contentView)
+        {
+            ConnectTreeCore(contentView.PresentedContent);
+        }
+    }
+}

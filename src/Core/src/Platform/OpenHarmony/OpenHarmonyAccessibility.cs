@@ -1,0 +1,1519 @@
+// Accessibility for OpenHarmony. The compositor draws custom pixels, so there is no ArkUI node
+// tree for a screen reader to read: this builds a shadow tree from the MAUI view tree (bounds, text,
+// description, role, state) which the host publishes through the ArkUI NDK accessibility provider
+// (OH_ArkUI_NativeModule_GetNativeAccessibilityProvider / OH_ArkUI_AddAndGetAccessibilityElementInfo)
+// and which tests can assert as a snapshot without a device.
+using System.Runtime.InteropServices;
+using Microsoft.Maui;
+using Microsoft.Maui.Controls;
+using Microsoft.Maui.Graphics;
+using System.Runtime.CompilerServices;
+
+namespace Microsoft.Maui.Platform;
+
+/// <summary>
+/// One node of the shadow tree. Range values are only meaningful for slider/progress roles;
+/// every other role marks the range absent with <see cref="double.NaN"/> bounds, which can
+/// never satisfy "RangeMin &lt;= RangeMax" (the host's validity test). Checked is 0/1 for
+/// switch/checkBox and -1 when the role has no check state.
+/// </summary>
+public sealed record OpenHarmonyAccessibilityNode(
+    int Id,
+    int ParentId,
+    string Role,
+    string? Text,
+    string? Description,
+    string? Hint,
+    RectF Bounds,
+    bool IsEnabled,
+    bool IsFocusable,
+    double RangeMin,
+    double RangeMax,
+    double RangeCurrent,
+    int Checked);
+
+/// <summary>Action codes from the ArkUI NDK (ArkUI_Accessibility_ActionType).</summary>
+public enum OpenHarmonyAccessibilityAction
+{
+    Invalid = 0,
+    Click = 0x00000010,
+    LongClick = 0x00000020,
+    GainFocus = 0x00000040,
+    ClearFocus = 0x00000080,
+    ScrollForward = 0x00000100,
+    ScrollBackward = 0x00000200,
+    Copy = 0x00000400,
+    Paste = 0x00000800,
+    Cut = 0x00001000,
+    SelectText = 0x00002000,
+    SetText = 0x00004000,
+    SetCursorPosition = 0x00100000,
+}
+
+public static partial class OpenHarmonyAccessibility
+{
+    /// <summary>Actions a node with the given role can perform (published to the provider).</summary>
+    /// <remarks>
+    /// Only actions the host really executes are advertised. The provider's action listener is
+    /// <c>(nodeId, action)</c> with no value payload, so SET_TEXT and SET_CURSOR_POSITION can never
+    /// be honoured and are not published. This slice has no platform long-press path either, so
+    /// LONG_CLICK is not published. CLICK, the scroll actions (IScrollView/ISlider) and the text
+    /// input actions (copy/paste/cut/select, all executed on the node's view) are. The modal
+    /// prompt field is the one narrowing: it publishes CLICK and COPY only, because its edits
+    /// ride the keyboard bridge and it has no view or caret/selection model.
+    /// </remarks>
+    public static IReadOnlyList<OpenHarmonyAccessibilityAction> ActionsFor(string role)
+        => role switch
+        {
+            "button" => new[] { OpenHarmonyAccessibilityAction.Click },
+            "text" => new[] { OpenHarmonyAccessibilityAction.Click },
+            "textInput" => new[]
+            {
+                OpenHarmonyAccessibilityAction.Click,
+                OpenHarmonyAccessibilityAction.Copy,
+                OpenHarmonyAccessibilityAction.Paste,
+                OpenHarmonyAccessibilityAction.Cut,
+                OpenHarmonyAccessibilityAction.SelectText,
+            },
+            "checkBox" or "switch" => new[] { OpenHarmonyAccessibilityAction.Click },
+            "slider" => new[]
+            {
+                OpenHarmonyAccessibilityAction.ScrollForward,
+                OpenHarmonyAccessibilityAction.ScrollBackward,
+            },
+            "scroll" => new[]
+            {
+                OpenHarmonyAccessibilityAction.ScrollForward,
+                OpenHarmonyAccessibilityAction.ScrollBackward,
+            },
+            _ => Array.Empty<OpenHarmonyAccessibilityAction>(),
+        };
+
+    /// <summary>
+    /// The same action set as <see cref="ActionsFor"/> as a bit mask, without the array (and its
+    /// interface enumerator) the publish loop would otherwise allocate per node per republish.
+    /// </summary>
+    private static int ActionMask(string role) => role switch
+    {
+        "button" or "text" or "checkBox" or "switch" => (int)OpenHarmonyAccessibilityAction.Click,
+        "textInput" => (int)(OpenHarmonyAccessibilityAction.Click
+            | OpenHarmonyAccessibilityAction.Copy
+            | OpenHarmonyAccessibilityAction.Paste
+            | OpenHarmonyAccessibilityAction.Cut
+            | OpenHarmonyAccessibilityAction.SelectText),
+        "slider" or "scroll" => (int)(OpenHarmonyAccessibilityAction.ScrollForward
+            | OpenHarmonyAccessibilityAction.ScrollBackward),
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Action mask for one published node, with the modal prompt field narrowed to the actions
+    /// the alert really executes: it is a <c>textInput</c> by role, but its edits ride the
+    /// keyboard bridge (no view, no caret/selection model), so only CLICK (focus it) and COPY
+    /// (its published text) can be honoured; PASTE/CUT/SELECT_TEXT would be advertised but
+    /// no-op and are withheld for modal nodes.
+    /// </summary>
+    private static int ActionMask(string role, bool modal)
+        => modal && role == "textInput"
+            ? (int)(OpenHarmonyAccessibilityAction.Click | OpenHarmonyAccessibilityAction.Copy)
+            : ActionMask(role);
+
+    // The shadow tree is published as immutable snapshots: Refresh walks the live tree into
+    // reusable build buffers and only swaps the published snapshot in when something actually
+    // moved. An accessibility callback on another thread (Nodes, TryFindNode, the action
+    // listener) can therefore enumerate a frame without ever observing a list being cleared or
+    // appended to, and a node's bounds always belong to one coherent frame. Old snapshots stay
+    // valid for any in-flight enumeration, and a frame whose tree is unchanged publishes no new
+    // objects at all: every node position reuses the previous frame's immutable node record.
+    private sealed class Frame
+    {
+        public static readonly Frame Empty = new(Array.Empty<OpenHarmonyAccessibilityNode>(), Array.Empty<IView?>(), 0);
+
+        public Frame(OpenHarmonyAccessibilityNode[] nodes, IView?[] views, int modalRootId)
+        {
+            Nodes = nodes;
+            Views = views;
+            ModalRootId = modalRootId;
+        }
+
+        /// <summary>Nodes of the frame, root first, parent before child (id = index + 1).</summary>
+        public OpenHarmonyAccessibilityNode[] Nodes { get; }
+
+        /// <summary>
+        /// Positional view table: <c>Views[i]</c> is the view <c>Nodes[i]</c> was built from (null
+        /// for the modal alert nodes, which have no view). The array is swapped together with
+        /// <see cref="Nodes"/>, so an action callback always routes against a single complete
+        /// frame, never a partially rebuilt one.
+        /// </summary>
+        public IView?[] Views { get; }
+
+        /// <summary>
+        /// Id of the modal alert subtree root (an open Alert/ActionSheet/Prompt), 0 when no alert
+        /// is open. The modal nodes are appended after the view tree, so ids
+        /// <c>&gt;= ModalRootId</c> are exactly the alert subtree (the focus trap's inside).
+        /// </summary>
+        public int ModalRootId { get; }
+    }
+
+    private static Frame s_frame = Frame.Empty;
+    // MULTIWINDOW-L M4: one shadow frame per window. The primary window's frame lives in
+    // s_frame (the historical Volatile.Read path, zero change); a secondary window's frame is
+    // kept in this table so its render pass can no longer overwrite the primary tree (the M3
+    // regression: both windows called Refresh/Publish, last renderer won).
+    //
+    // SEC-SCAN-5c F: the secondary tables are bounded. MaxWindowFrames mirrors the native
+    // shadow-table partition cap (OHOS_A11Y_MAX_NAMED_PARTITIONS, host_a11y_table.h) and a
+    // frame walk longer than MaxWindowFrameNodes is truncated to a well-formed prefix, so an
+    // id churn or a pathological tree cannot grow managed memory without a live window. A
+    // window's frame, diff baseline and provider first-publish marker are released together
+    // (ReleaseWindow), which also frees its frame slot for reuse; the primary window keeps the
+    // historical unbounded frame (zero change).
+    internal const int MaxWindowFrames = 8;
+    internal const int MaxWindowFrameNodes = 4096;
+    private static readonly object s_framesLock = new();
+    private static readonly Dictionary<string, Frame> s_windowFrames = new(StringComparer.Ordinal);
+
+    /// <summary>Secondary-window frames refused because <see cref="MaxWindowFrames"/> was
+    /// reached (diagnostics; a window close frees its slot for reuse).</summary>
+    internal static int WindowFramesDropped { get; private set; }
+
+    /// <summary>Secondary-frame walks stopped at <see cref="MaxWindowFrameNodes"/> (diagnostics).</summary>
+    internal static int WindowFrameWalksTruncated { get; private set; }
+
+    /// <summary>Nodes of the last published primary frame (root first, parents before children).</summary>
+    public static IReadOnlyList<OpenHarmonyAccessibilityNode> Nodes => Volatile.Read(ref s_frame).Nodes;
+
+    /// <summary>Nodes of a window's last shadow frame (the primary id returns the published
+    /// frame; a secondary window's frame is built per window - see <see cref="Publish(string)"/>).</summary>
+    internal static IReadOnlyList<OpenHarmonyAccessibilityNode> NodesForWindow(string windowId)
+        => FrameOf(windowId).Nodes;
+
+    /// <summary>Number of windows with a shadow frame (primary included when published).</summary>
+    internal static int FrameWindowCount
+    {
+        get
+        {
+            if (Volatile.Read(ref s_frame) == Frame.Empty)
+            {
+                lock (s_framesLock)
+                {
+                    return s_windowFrames.Count;
+                }
+            }
+            lock (s_framesLock)
+            {
+                return s_windowFrames.Count + 1;
+            }
+        }
+    }
+
+    /// <summary>Secondary-window publish passes that were kept local (no per-window provider).</summary>
+    internal static int SecondaryPublishes { get; private set; }
+
+    /// <summary>Secondary-window publish passes handed to an attached per-window provider
+    /// (MULTIWINDOW-L2 a: zero while no instance provider is attached, e.g. an old host or the
+    /// W0-degraded platform path).</summary>
+    internal static int SecondaryProviderPublishes { get; private set; }
+
+    /// <summary>Nodes of the last kept secondary frame (diagnostics).</summary>
+    internal static int LastSecondaryPublishedCount { get; private set; }
+
+    /// <summary>Number of stored diff baselines, primary included when published (diagnostics
+    /// for the SEC-SCAN-5c F baseline bound: a secondary baseline only exists while its frame
+    /// does).</summary>
+    internal static int BaselineWindowCount
+    {
+        get
+        {
+            lock (s_previousListsLock)
+            {
+                return s_previousLists.Count;
+            }
+        }
+    }
+
+    /// <summary>True when the window has a stored shadow frame (primary: a published frame; a
+    /// secondary window: an entry in the bounded frame table). Diagnostics for the SEC-SCAN-5c F
+    /// cap/release checks.</summary>
+    internal static bool HasWindowFrame(string windowId)
+    {
+        if (string.IsNullOrEmpty(windowId))
+        {
+            return false;
+        }
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            return Volatile.Read(ref s_frame) != Frame.Empty;
+        }
+        lock (s_framesLock)
+        {
+            return s_windowFrames.ContainsKey(windowId);
+        }
+    }
+
+    private static Frame FrameOf(string windowId)
+    {
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            return Volatile.Read(ref s_frame);
+        }
+        lock (s_framesLock)
+        {
+            return s_windowFrames.TryGetValue(windowId, out Frame? frame) ? frame : Frame.Empty;
+        }
+    }
+
+    private static bool _windowFrameCapLogged;
+
+    private static void LogWindowFrameCapOnce()
+    {
+        if (_windowFrameCapLogged)
+        {
+            return;
+        }
+        _windowFrameCapLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            $"[maui] accessibility: the secondary shadow-frame cap ({MaxWindowFrames}) is full; " +
+            "dropping new window frames until a window closes (the native partition cap is the same)");
+    }
+
+    private static bool _nullRefreshLogged;
+
+    private static void LogNullRefreshOnce()
+    {
+        if (_nullRefreshLogged)
+        {
+            return;
+        }
+        _nullRefreshLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] accessibility: a shadow-frame refresh without a window id or root was ignored (fail-safe no-op)");
+    }
+
+    private static void StoreFrame(string windowId, Frame frame)
+    {
+        if (windowId == OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            Volatile.Write(ref s_frame, frame);
+            return;
+        }
+        lock (s_framesLock)
+        {
+            if (!s_windowFrames.ContainsKey(windowId) && s_windowFrames.Count >= MaxWindowFrames)
+            {
+                // SEC-SCAN-5c F: full table = drop the new id's frame (ReleaseWindow frees a
+                // slot). The window's publish degrades to the empty-frame no-op.
+                WindowFramesDropped++;
+                LogWindowFrameCapOnce();
+                return;
+            }
+            s_windowFrames[windowId] = frame;
+        }
+    }
+
+    /// <summary>
+    /// Drops a closed window's shadow frame and its first-publish marker (SEC-SCAN-6 C): a window
+    /// that later reuses the id must publish its first frame again (the stale marker would let an
+    /// events==0 reopen skip it) and must not pin a dead tree. The primary window is untouched
+    /// (its frame keeps the historical lifecycle).
+    /// </summary>
+    internal static void ReleaseWindow(string windowId)
+    {
+        if (string.IsNullOrEmpty(windowId) ||
+            string.Equals(windowId, OpenHarmonyWindowSurface.PrimaryWindowId, StringComparison.Ordinal))
+        {
+            return;
+        }
+        lock (s_framesLock)
+        {
+            s_windowFrames.Remove(windowId);
+        }
+        // M3: the diff baseline goes with the frame, so a window that reuses the id publishes
+        // its first frame again instead of diffing against the retired tree.
+        lock (s_previousListsLock)
+        {
+            s_previousLists.Remove(windowId);
+        }
+        lock (s_windowProviderLock)
+        {
+            s_providerPublishedWindows.Remove(windowId);
+        }
+        // MULTIWINDOW-L3 / SEC-SCAN-6 C: the host half of the close hook. The native table
+        // partition and the per-instance attach record go with the window, so the id's table
+        // slot returns to the capped pool and a later window reusing the id starts from
+        // not-attached; a host library without the export keeps the managed-only release.
+        ReleaseProviderState(windowId);
+    }
+
+    /// <summary>
+    /// Drops the closed window's native accessibility provider state: the window's node-table
+    /// partition and its per-instance attach record in the host. Best effort (the close hook must
+    /// never throw) and a no-op when the host library predates the export.
+    /// SEC-SCAN-7 A: the export is called directly and only EntryPointNotFound is cached - the
+    /// retired separate NativeLibrary pre-probe could answer "no export" from the managed loader
+    /// while the in-process host served the export fine (the A11Y-SELFCHECK root cause), which
+    /// silently skipped this native half of the SEC-SCAN-6 C close hook; a host that predates the
+    /// export still degrades to the managed-only release through the cached EntryPointNotFound.
+    /// </summary>
+    private static void ReleaseProviderState(string windowId)
+    {
+        if (Volatile.Read(ref s_releaseExport) < 0)
+        {
+            return;
+        }
+        try
+        {
+            int released = AccessibilityRelease(windowId);
+            Volatile.Write(ref s_releaseExport, 1);
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(released != 0
+                ? $"[maui] accessibility: released the native provider state of '{windowId}'"
+                : $"[maui] accessibility: no native provider state for '{windowId}'");
+        }
+        catch (DllNotFoundException)
+        {
+            Volatile.Write(ref s_releaseExport, -1);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Volatile.Write(ref s_releaseExport, -1);
+        }
+        catch (Exception)
+        {
+            // The window has already closed; a failure here must not cascade into the close path.
+        }
+    }
+
+    private const string HostLibrary = "libopenharmonyhost.so";
+    private static bool _available = true;
+    private static bool _secondaryProviderLogged;
+    private static bool _secondaryProviderAttachedLogged;
+    private static bool _windowActionListenerLogged;
+    // 0 unknown, 1 a per-window provider-status call already succeeded, -1 the host predates the
+    // export (cached from the EntryPointNotFound catch; an old host keeps the local-frame
+    // degrade). A11Y-SELFCHECK: this is now the only cache; the gate calls the export itself.
+    private static int s_windowProviderExport;
+    // 0 unknown, 1 the close-hook release export is present, -1 the host predates it (cached
+    // like the other optional-export probes; an old host keeps the managed-only release).
+    private static int s_releaseExport;
+    // Windows whose frame was already handed to an attached per-instance provider: the first
+    // publish of a window bypasses the unchanged-frame skip (its frame may predate the attach),
+    // after that only changed frames go out, matching the primary publish discipline.
+    private static readonly object s_windowProviderLock = new();
+    private static readonly HashSet<string> s_providerPublishedWindows = new(StringComparer.Ordinal);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin")]
+    private static partial int AccessibilityBegin(int count);
+
+    // The argument order is the publish contract shared with openharmony_host.h /
+    // openharmony_host.c; the interaction harness reflects this method and compares the
+    // parameter names/types against the C definition, so an arity or order change fails
+    // off-device instead of shifting arguments on device (see the audit doc, section 30).
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityNode(int id, int parentId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? hint,
+        float x, float y, float width, float height, int flags, int actions,
+        double rangeMin, double rangeMax, double rangeCurrent, int @checked);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit")]
+    private static partial int AccessibilityCommit();
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void ActionListener(int nodeId, int action);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_set_action_listener")]
+    private static partial void SetActionListener(IntPtr callback);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event")]
+    private static partial int SendEvent(int eventType);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status")]
+    private static partial int ProviderStatus();
+
+    // MULTIWINDOW-L2 a (W1): the per-window provider path. The host keeps one shadow-table
+    // partition per provider instance (the instance string the NAPI layer registered with
+    // OH_ArkUI_AccessibilityProviderRegisterCallbackWithInstance), so a secondary window's
+    // publish can no longer overwrite the primary window's table. Every entry is optional: a
+    // host library built before these exports keeps the M4 behaviour (the frame stays local),
+    // which the WindowProviderExportAvailable probe and the catches in PublishSecondary cover.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_begin_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityBeginFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance, int count);
+
+    // The argument order of the per-window publish mirrors the legacy ohos_host_accessibility_node
+    // contract (id, parent, role, text, description, hint, x, y, w, h, flags, actions, range*, checked),
+    // with the instance string in front; openharmony_host.h and host_a11y_table.c must agree.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_node_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityNodeFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance,
+        int id, int parentId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string role,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? text,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? description,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? hint,
+        float x, float y, float width, float height, int flags, int actions,
+        double rangeMin, double rangeMax, double rangeCurrent, int @checked);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_commit_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityCommitFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_provider_status_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ProviderStatusFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
+
+    // MULTIWINDOW-L3 / SEC-SCAN-6 C: the close hook's native half. ohos_host_accessibility_release_for
+    // frees the closed secondary window's shadow-table partition (host_a11y_table.c) and resets
+    // its per-instance NAPI attach record (host_napi.cpp), so a window reusing the id publishes
+    // into a fresh partition and never reaches the dead window's provider. Optional like the rest:
+    // ReleaseProviderState calls it directly (SEC-SCAN-7 A) and an old host keeps the managed-only
+    // release through the cached EntryPointNotFound.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_release_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityRelease([MarshalAs(UnmanagedType.LPUTF8Str)] string instance);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_send_event_for", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int SendEventFor([MarshalAs(UnmanagedType.LPUTF8Str)] string instance, int eventType);
+
+    /// <summary>Reverse callback for per-window actions: the window id (UTF-8) the provider was
+    /// registered under, the node id and the ArkUI action bit.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void WindowActionListener(IntPtr windowIdUtf8, int nodeId, int action);
+
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_set_window_action_listener")]
+    private static partial void SetWindowActionListener(IntPtr callback);
+
+    // The dedicated text-carrying announcement export (host_napi.cpp): it builds an
+    // ANNOUNCE_FOR_ACCESSIBILITY event, sets the announced text on it and sends it through the
+    // attached provider. A host library built before this export only has
+    // ohos_host_accessibility_send_event, which carries the event kind alone; Announce calls this
+    // export directly (SEC7 pre-probe sweep) and keeps the event-kind path as the fallback once
+    // the call reports the export missing.
+    [LibraryImport(HostLibrary, EntryPoint = "ohos_host_accessibility_announce", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int AccessibilityAnnounce([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
+
+    // 0 unknown, 1 the text-carrying announce export answered a call, -1 missing (cached from the
+    // direct call; a host that predates the export keeps the event-kind fallback).
+    private static int s_announceExport;
+
+    private static unsafe IntPtr _actionThunk = (IntPtr)(delegate* unmanaged[Cdecl]<int, int, void>)&OnAction;
+    private static Action<int, int>? _actionHandler;
+    private static unsafe IntPtr _windowActionThunk =
+        (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, int, void>)&OnWindowAction;
+    private static Action<string, int, int>? _windowActionHandler;
+
+    /// <summary>Receives accessibility actions (CLICK, SET_TEXT, SCROLL...) from the framework.</summary>
+    public static void SetActionHandler(Action<int, int>? handler)
+    {
+        _actionHandler = handler;
+        if (!_available || handler is null)
+        {
+            return;
+        }
+        try
+        {
+            SetActionListener(_actionThunk);
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+    }
+
+    /// <summary>
+    /// Receives actions from the per-window providers (MULTIWINDOW-L2 a). The first argument is
+    /// the provider instance (= the window id the shell handed to attachAccessibilityNodeFor),
+    /// so the handler can route the action into the owning window's renderer/view instead of the
+    /// primary one. Registering is best effort: a host library without the export leaves the
+    /// per-window providers actionless (their nodes stay readable) while the primary path is
+    /// untouched.
+    /// </summary>
+    internal static void SetWindowActionHandler(Action<string, int, int>? handler)
+    {
+        _windowActionHandler = handler;
+        if (!_available || handler is null)
+        {
+            return;
+        }
+        try
+        {
+            SetWindowActionListener(_windowActionThunk);
+            if (!_windowActionListenerLogged)
+            {
+                _windowActionListenerLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    "[maui] accessibility: per-window action listener registered");
+            }
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Old host: per-window providers cannot route actions; keep the primary path.
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+    }
+
+    private static bool _statusLogged;
+
+    private static void LogProviderStatusOnce()
+    {
+        if (_statusLogged)
+        {
+            return;
+        }
+        _statusLogged = true;
+        int status = -1;
+        if (_available)
+        {
+            try
+            {
+                status = ProviderStatus();
+            }
+            catch (Exception)
+            {
+                _available = false;
+            }
+        }
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            $"[maui] accessibility provider status={status} (1=attached, 2=frame node, 3=node content)");
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnAction(int nodeId, int action)
+    {
+        // The host calls this from the accessibility thread (host_napi.cpp A11yExecuteAction), so
+        // this is a reverse P/Invoke boundary: an exception escaping into native code would unwind
+        // through the host and abort the process. The handler routes actions back into the normal
+        // input path, which runs app event code, so catch everything and report instead.
+        try
+        {
+            _actionHandler?.Invoke(nodeId, action);
+        }
+        catch (Exception ex)
+        {
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                $"[maui] accessibility action handler failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnWindowAction(IntPtr windowIdUtf8, int nodeId, int action)
+    {
+        // Same reverse P/Invoke boundary as OnAction. The window id string is owned by the host
+        // (the instance string it registered) and only valid for the duration of this call, so it
+        // is copied before the handler runs.
+        try
+        {
+            string windowId = windowIdUtf8 != IntPtr.Zero
+                ? Marshal.PtrToStringUTF8(windowIdUtf8) ?? string.Empty
+                : string.Empty;
+            _windowActionHandler?.Invoke(windowId, nodeId, action);
+        }
+        catch (Exception ex)
+        {
+            Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                $"[maui] accessibility window action handler failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static bool s_eventDeliveryLogged;
+
+    /// <summary>Records the first frame whose events had no attached provider (once per process).</summary>
+    private static void LogEventDeliveryOnce(int sent)
+    {
+        if (sent != 0 || s_eventDeliveryLogged)
+        {
+            return;
+        }
+        s_eventDeliveryLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] accessibility events dropped: no provider is attached");
+    }
+
+    /// <summary>Pushes the pending frame changes as accessibility events.</summary>
+    public static void FlushEvents()
+    {
+        if (!_available || PendingEventCount == 0 || LastPublishedCount == 0)
+        {
+            return;
+        }
+        try
+        {
+            // A zero result means no provider is attached; the event is dropped, but publishing
+            // stays enabled so a provider attached later receives the next frame.
+            int sent = SendEvent(PendingEventCount);
+            PendingEventCount = 0;
+            LogEventDeliveryOnce(sent);
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+    }
+
+    /// <summary>
+    /// Announces text through the platform screen reader (the platform half of
+    /// <c>Microsoft.Maui.Accessibility.ISemanticScreenReader.Announce</c>).
+    ///
+    /// Preferred path: the dedicated host export
+    /// <c>int ohos_host_accessibility_announce(const char* text)</c>, which builds an
+    /// ANNOUNCE_FOR_ACCESSIBILITY event
+    /// (ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY), sets the announced
+    /// text (OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility) and sends it through the
+    /// attached provider (host_napi.cpp). The export is called directly (SEC7 pre-probe sweep): a
+    /// missing export (cached, like the other optional exports) falls back to the older
+    /// event-kind-only path
+    /// <c>ohos_host_accessibility_send_event(EventAnnouncement)</c>, which maps to
+    /// OH_ArkUI_AccessibilityEventSetEventType + OH_ArkUI_SendAccessibilityAsyncEvent and cannot
+    /// carry the text itself (the text still lands in <see cref="LastAnnouncement"/>). Both paths
+    /// degrade silently without the host library.
+    /// </summary>
+    /// <returns>True when the announcement reached the host provider.</returns>
+    public static bool Announce(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+        Volatile.Write(ref s_lastAnnouncement, text);
+        WouldAnnounce = _available;
+        if (!_available)
+        {
+            return false;
+        }
+        if (Volatile.Read(ref s_announceExport) < 0)
+        {
+            return SendAnnounceFallback();
+        }
+        try
+        {
+            // The host answers 1 when the event was created and sent, 0 when no provider is
+            // attached (nothing to announce to) - that is not a failure of availability.
+            int sent = AccessibilityAnnounce(text);
+            Volatile.Write(ref s_announceExport, 1);
+            if (sent != 0)
+            {
+                AnnouncementsSent++;
+                return true;
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // The host library or the export is missing: this host predates the export, so the
+            // event-kind path takes over from here on (the miss is cached).
+            Volatile.Write(ref s_announceExport, -1);
+        }
+        catch (Exception)
+        {
+            // Same visibility rule as Publish: availability flips off, but WouldAnnounce stays
+            // true because the call attempted the host boundary ("would have talked to it").
+            _available = false;
+            return false;
+        }
+        return SendAnnounceFallback();
+    }
+
+    /// <summary>The event-kind-only announcement path for hosts that predate the text-carrying
+    /// export (or when the text export just reported missing).</summary>
+    private static bool SendAnnounceFallback()
+    {
+        try
+        {
+            if (SendEvent(EventAnnouncement) != 0)
+            {
+                AnnouncementsSent++;
+                LogAnnounceFallbackOnce();
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            _available = false;
+        }
+        return false;
+    }
+
+    private static string? s_lastAnnouncement;
+    private static bool _announceFallbackLogged;
+
+    /// <summary>Text of the last <see cref="Announce"/> call (null before the first one).</summary>
+    public static string? LastAnnouncement => Volatile.Read(ref s_lastAnnouncement);
+
+    /// <summary>Announcements the host provider accepted.</summary>
+    public static int AnnouncementsSent { get; private set; }
+
+    /// <summary>True when the last <see cref="Announce"/> call would have talked to the host.</summary>
+    public static bool WouldAnnounce { get; private set; }
+
+    private static void LogAnnounceFallbackOnce()
+    {
+        if (_announceFallbackLogged)
+        {
+            return;
+        }
+        _announceFallbackLogged = true;
+        Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+            "[maui] screen reader announce fell back to ohos_host_accessibility_send_event " +
+            "(event kind only): this host library predates ohos_host_accessibility_announce(const char* text)");
+    }
+
+    /// <summary>Finds a published node by id (used to route actions back to a hit test).</summary>
+    public static bool TryFindNode(int id, out OpenHarmonyAccessibilityNode node)
+        => TryFindNode(OpenHarmonyWindowSurface.PrimaryWindowId, id, out node);
+
+    /// <summary>
+    /// MULTIWINDOW-L2 a: finds a node in one window's own frame. Node ids are positional
+    /// (id = index + 1), so the same numeric id exists in every window; the window id decides
+    /// which frame (and therefore which view tree) the id is resolved against. The primary
+    /// overload above keeps the historical single-frame behaviour for existing callers.
+    /// </summary>
+    internal static bool TryFindNode(string windowId, int id, out OpenHarmonyAccessibilityNode node)
+    {
+        // One immutable index snapshot: an action arriving while Refresh rebuilds the tree routes
+        // with the last complete frame (never a half-swapped one and never a partially updated
+        // rectangle), so a click cannot be misrouted onto torn bounds. Node ids are the frame's
+        // positional slots (id = index + 1), so the lookup is a direct index into the snapshot.
+        Frame frame = FrameOf(windowId);
+        if (id >= 1 && id <= frame.Nodes.Length && frame.Nodes[id - 1].Id == id)
+        {
+            node = frame.Nodes[id - 1];
+            return true;
+        }
+        node = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the view a published node was built from, so an action can be executed on it
+    /// (scrolling, text edits). False when the node is unknown, is a modal alert node (which has
+    /// no view; the alert itself handles the action) or its view has gone away.
+    /// </summary>
+    public static bool TryFindView(int id, out IView view)
+        => TryFindView(OpenHarmonyWindowSurface.PrimaryWindowId, id, out view);
+
+    /// <summary>MULTIWINDOW-L2 a: the per-window variant of <see cref="TryFindView(int, out IView)"/>;
+    /// a node id only resolves against its own window's frame.</summary>
+    internal static bool TryFindView(string windowId, int id, out IView view)
+    {
+        Frame frame = FrameOf(windowId);
+        if (id >= 1 && id <= frame.Views.Length && frame.Nodes[id - 1].Id == id
+            && frame.Views[id - 1] is { } found)
+        {
+            view = found;
+            return true;
+        }
+        view = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// True when the id belongs to the modal alert subtree of the published frame (an open
+    /// Alert/ActionSheet/Prompt). While a modal is open only these nodes accept actions; the
+    /// background tree stays published but non-focusable, so the screen reader's focus order
+    /// (the host's focusable-bit scans) cannot leave the dialog.
+    /// </summary>
+    internal static bool IsModalNode(int id)
+        => IsModalNode(OpenHarmonyWindowSurface.PrimaryWindowId, id);
+
+    /// <summary>MULTIWINDOW-L2 a: the per-window modal test; an alert owned by one window only
+    /// traps that window's frame.</summary>
+    internal static bool IsModalNode(string windowId, int id)
+    {
+        Frame frame = FrameOf(windowId);
+        return frame.ModalRootId != 0
+            && id >= frame.ModalRootId
+            && id <= frame.Nodes.Length
+            && frame.Nodes[id - 1].Id == id;
+    }
+
+    /// <summary>Nodes handed to the host by the last publish pass (0 when unavailable).</summary>
+    public static int LastPublishedCount { get; private set; }
+
+    /// <summary>Frames whose publish was skipped because nothing changed (avoids per-frame marshalling).</summary>
+    public static int FramesSkipped { get; private set; }
+
+    /// <summary>Whether the last publish pass would have talked to the host (observable off-device).</summary>
+    public static bool WouldPublish { get; private set; }
+
+    // One baseline per window (M4 partition): the diff of a secondary frame must not compare
+    // against the primary window's previous list.
+    private static readonly object s_previousListsLock = new();
+    private static readonly Dictionary<string, OpenHarmonyAccessibilityNode[]> s_previousLists = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Changes detected between the last two published frames, as ArkUI accessibility event type
+    /// flags (0x20 page state update, 0x800 page content update, 0x10 text update); the host turns
+    /// these into OH_ArkUI_SendAccessibilityAsyncEvent calls.
+    /// </summary>
+    public static int PendingEventCount { get; private set; }
+
+    public const int EventPageStateUpdate = 0x00000020;
+    public const int EventPageContentUpdate = 0x00000800;
+    public const int EventTextUpdate = 0x00000010;
+
+    /// <summary>
+    /// Proactive announcement event (ArkUI NDK
+    /// ARKUI_ACCESSIBILITY_NATIVE_EVENT_TYPE_ANNOUNCE_FOR_ACCESSIBILITY, 0x10000000), the event
+    /// kind that asks the screen reader to read text out of turn.
+    /// </summary>
+    public const int EventAnnouncement = 0x10000000;
+
+    private static int DiffFrames(string windowId, OpenHarmonyAccessibilityNode[] current)
+    {
+        // Read the baseline snapshot, compare against the frame being published, then make the
+        // frame the new baseline with a single reference swap: no Clear/AddRange on a collection
+        // another thread could be enumerating.
+        OpenHarmonyAccessibilityNode[] previous;
+        lock (s_previousListsLock)
+        {
+            previous = s_previousLists.TryGetValue(windowId, out OpenHarmonyAccessibilityNode[]? list)
+                ? list : Array.Empty<OpenHarmonyAccessibilityNode>();
+        }
+        int events = 0;
+        if (previous.Length != current.Length)
+        {
+            events |= EventPageContentUpdate;
+        }
+        int shared = Math.Min(previous.Length, current.Length);
+        for (int i = 0; i < shared; i++)
+        {
+            if (!string.Equals(previous[i].Text, current[i].Text, StringComparison.Ordinal)
+                || !string.Equals(previous[i].Description, current[i].Description, StringComparison.Ordinal)
+                || !string.Equals(previous[i].Hint, current[i].Hint, StringComparison.Ordinal))
+            {
+                events |= EventTextUpdate;
+            }
+            // Range/checked changes must force a republish even when the bounds and text did
+            // not move (dragging a slider is exactly that case). double.Equals treats NaN as
+            // equal to NaN, so an absent range does not look changed on every frame.
+            bool rangeSame = previous[i].RangeMin.Equals(current[i].RangeMin)
+                && previous[i].RangeMax.Equals(current[i].RangeMax)
+                && previous[i].RangeCurrent.Equals(current[i].RangeCurrent);
+            if (previous[i].Bounds != current[i].Bounds
+                || !rangeSame
+                || previous[i].Checked != current[i].Checked)
+            {
+                events |= EventPageStateUpdate;
+            }
+        }
+        lock (s_previousListsLock)
+        {
+            s_previousLists[windowId] = current;
+        }
+        return events;
+    }
+
+    /// <summary>Rebuilds the shadow tree for a rendered frame (only when something moved).</summary>
+    public static void Refresh(IView root) => Refresh(OpenHarmonyWindowSurface.PrimaryWindowId, root);
+
+    /// <summary>
+    /// MULTIWINDOW-L M4: rebuilds one window's shadow tree. Each window keeps its own frame
+    /// (so a secondary render can no longer overwrite the primary's published tree) and only the
+    /// window that owns an open alert republishes the alert's modal nodes.
+    /// </summary>
+    public static void Refresh(string windowId, IView root)
+    {
+        // SEC-SCAN-5c F: a missing window id or root is not a content change (the renderer
+        // always passes both). Fail-safe no-op: the published frame and provider state stay,
+        // and the build buffers are not touched, so a buggy caller cannot clear a window's
+        // shadow tree or start a walk without a tree.
+        if (string.IsNullOrEmpty(windowId) || root is null)
+        {
+            LogNullRefreshOnce();
+            return;
+        }
+        // The build buffers are render-thread state and are reused across frames: an unchanged
+        // frame walks the tree, reuses every previous node and view and swaps nothing, so it
+        // allocates no nodes, no lists and no arrays. A changed frame allocates only the new
+        // snapshot (plus a node record per position that actually moved).
+        lock (s_buildLock)
+        {
+            Frame previous = FrameOf(windowId);
+            s_buildNodes.Clear();
+            s_buildViews.Clear();
+            s_buildPending.Clear();
+            // An open alert is modal: the background tree stays in the frame with its content,
+            // but every background node is republished non-focusable and the alert's own nodes
+            // are appended after it as the only focusable region (the focus trap). Only the
+            // window the alert belongs to appends them.
+            OpenHarmonyAlertState? alert = OpenHarmonyAlertHost.CurrentFor(windowId);
+            // SEC-SCAN-5c F: only a secondary window's walk is capped; the primary frame keeps
+            // its historical unbounded walk (int.MaxValue never triggers the stop).
+            bool secondaryFrame = windowId != OpenHarmonyWindowSurface.PrimaryWindowId;
+            bool changed = Visit(root, previous, alert is not null,
+                secondaryFrame ? MaxWindowFrameNodes : int.MaxValue);
+            s_walkRoot = null;
+            s_titleBarView = null;
+            (int modalRootId, bool modalChanged) = AppendAlertNodes(previous, alert);
+            changed |= modalChanged || modalRootId != previous.ModalRootId;
+            if (!changed)
+            {
+                return;
+            }
+            // Publish the completed frame with atomic reference swaps: a callback on the
+            // accessibility thread either sees the previous complete frame or this one, never a
+            // partial rebuild, and the arrays themselves are never mutated after publication.
+            StoreFrame(windowId, new Frame(s_buildNodes.ToArray(), s_buildViews.ToArray(), modalRootId));
+        }
+    }
+
+    /// <summary>
+    /// Hands the shadow tree to the host, which turns it into ArkUI accessibility element
+    /// information served by the registered provider callbacks. Degrades to a no-op off-device.
+    /// </summary>
+    public static void Publish() => Publish(OpenHarmonyWindowSurface.PrimaryWindowId);
+
+    /// <summary>
+    /// MULTIWINDOW-L M4/L2: publishes one window's shadow tree. The primary window keeps the
+    /// historical provider path (native begin/node/commit, event diff, status probe)
+    /// byte-for-byte. A secondary window publishes into its own host table partition when its
+    /// instance provider is attached (MULTIWINDOW-L2 a, RegisterCallbackWithInstance); without
+    /// one the frame is diffed and kept locally (the M4 degrade - the primary tree is never
+    /// overwritten and the subwindow tree stays addressable).
+    /// </summary>
+    public static void Publish(string windowId)
+    {
+        Frame frame = FrameOf(windowId);
+        OpenHarmonyAccessibilityNode[] nodes = frame.Nodes;
+        if (windowId != OpenHarmonyWindowSurface.PrimaryWindowId)
+        {
+            // SEC-SCAN-5c F: an empty secondary frame (an id that never had a frame, a window
+            // dropped by the frame cap, or a frame already released with its window) publishes
+            // nothing: no diff baseline for an id without a frame (the baseline table stays
+            // bounded by the frame table) and no per-window provider probe or counters. The
+            // provider state keeps following the window lifecycle (ReleaseWindow).
+            if (nodes.Length == 0)
+            {
+                return;
+            }
+            PublishSecondary(windowId, frame, nodes, DiffFrames(windowId, nodes));
+            return;
+        }
+        // The event source is managed state, so the diff runs even when the host is unavailable.
+        int events = DiffFrames(windowId, nodes);
+        PendingEventCount = events;
+        if (!_available || nodes.Length == 0)
+        {
+            LastPublishedCount = 0;
+            return;
+        }
+        WouldPublish = _available && nodes.Length > 0 && PendingEventCount != 0;
+        if (!WouldPublish)
+        {
+            // Nothing moved: skip the native traffic (three calls plus UTF-8 marshalling per node).
+            FramesSkipped++;
+            LastPublishedCount = 0;
+            return;
+        }
+        try
+        {
+            if (AccessibilityBegin(nodes.Length) != 0)
+            {
+                _available = false;
+                LastPublishedCount = 0;
+                return;
+            }
+            foreach (OpenHarmonyAccessibilityNode node in nodes)
+            {
+                int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
+                bool modal = frame.ModalRootId != 0 && node.Id >= frame.ModalRootId;
+                AccessibilityNode(node.Id, node.ParentId, node.Role, node.Text, node.Description, node.Hint,
+                    node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags,
+                    ActionMask(node.Role, modal),
+                    node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
+            }
+            LastPublishedCount = AccessibilityCommit();
+            FlushEvents();
+            LogProviderStatusOnce();
+        }
+        catch (DllNotFoundException)
+        {
+            _available = false;
+            LastPublishedCount = 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _available = false;
+            LastPublishedCount = 0;
+        }
+    }
+
+    /// <summary>Test seam: the per-window provider status probe the publish gate and the
+    /// pending-publish check read. Null keeps the real host export (the interaction suite sets
+    /// it to simulate an attached provider instance without a device).</summary>
+    internal static Func<string, int>? ProviderStatusProbe { get; set; }
+
+    /// <summary>
+    /// MULTIWINDOW-L2 a: publishes a secondary window's frame. When the host attached a
+    /// per-instance provider for this window (the shell reported the child NodeContent through
+    /// attachAccessibilityNodeFor, host status 1), the nodes go through the *_for exports into
+    /// that window's table partition and the diffed events are sent on that provider; the
+    /// primary table and primary provider are never addressed. Otherwise the frame is kept
+    /// locally exactly as in M4 (documented degrade; no partial publish, no double presentation).
+    /// A11Y-SELFCHECK: the attach status is read through the export call itself; the old
+    /// separate NativeLibrary probe could answer "no export" from the managed loader while the
+    /// in-process host (the one the shell attached to) served the window fine, which left the
+    /// first publish local and the shell's 3s self-check at nodes=0.
+    /// </summary>
+    private static void PublishSecondary(string windowId, Frame frame, OpenHarmonyAccessibilityNode[] nodes, int events)
+    {
+        bool attached = nodes.Length > 0 && WindowProviderAttached(windowId);
+        if (!attached)
+        {
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+            if (nodes.Length > 0 && !_secondaryProviderLogged)
+            {
+                _secondaryProviderLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    $"[maui] accessibility: window '{windowId}' keeps its shadow frame locally " +
+                    "(no per-window provider attached; the main provider is unchanged)");
+            }
+            return;
+        }
+        // The provider's first frame always goes out (it may have been built before the shell
+        // reported the ContentSlot), and after that only changed frames do - the same
+        // skip-unchanged discipline the primary publish applies.
+        bool firstProviderPublish;
+        lock (s_windowProviderLock)
+        {
+            firstProviderPublish = !s_providerPublishedWindows.Contains(windowId);
+        }
+        if (!firstProviderPublish && events == 0)
+        {
+            return;
+        }
+        try
+        {
+            AccessibilityBeginFor(windowId, nodes.Length);
+            foreach (OpenHarmonyAccessibilityNode node in nodes)
+            {
+                int flags = (node.IsEnabled ? 1 : 0) | (node.IsFocusable ? 2 : 0);
+                bool modal = frame.ModalRootId != 0 && node.Id >= frame.ModalRootId;
+                AccessibilityNodeFor(windowId, node.Id, node.ParentId, node.Role, node.Text, node.Description,
+                    node.Hint, node.Bounds.X, node.Bounds.Y, node.Bounds.Width, node.Bounds.Height, flags,
+                    ActionMask(node.Role, modal),
+                    node.RangeMin, node.RangeMax, node.RangeCurrent, node.Checked);
+            }
+            AccessibilityCommitFor(windowId);
+            if (events != 0)
+            {
+                SendEventFor(windowId, events);
+            }
+            lock (s_windowProviderLock)
+            {
+                s_providerPublishedWindows.Add(windowId);
+            }
+            SecondaryProviderPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+            if (!_secondaryProviderAttachedLogged)
+            {
+                _secondaryProviderAttachedLogged = true;
+                Microsoft.OpenHarmony.Hosting.OpenHarmonyBridge.WriteStatus(
+                    $"[maui] accessibility: window '{windowId}' published {nodes.Length} nodes " +
+                    "through its own provider instance");
+            }
+        }
+        catch (DllNotFoundException)
+        {
+            // The host vanished after the probe: keep the frame local, primary state untouched.
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Volatile.Write(ref s_windowProviderExport, -1);
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+        }
+        catch (Exception)
+        {
+            SecondaryPublishes++;
+            LastSecondaryPublishedCount = nodes.Length;
+        }
+    }
+
+    /// <summary>Status 1 means the per-instance provider for this window is attached; any other
+    /// status (0/3/4 or an unknown instance) keeps the local-frame degrade. A11Y-SELFCHECK: the
+    /// probe is the export call itself, so the gate sees exactly the host state the shell
+    /// attached to; the retired separate NativeLibrary pre-probe could answer "no export" from
+    /// the managed loader while the in-process host served the window fine (first publish kept
+    /// local, shell self-check stuck at nodes=0). A host that predates the export answers
+    /// EntryPointNotFound once (cached), which keeps the documented old-host degrade.</summary>
+    private static bool WindowProviderAttached(string windowId)
+    {
+        if (ProviderStatusProbe is { } probe)
+        {
+            return probe(windowId) == 1;
+        }
+        if (Volatile.Read(ref s_windowProviderExport) < 0)
+        {
+            return false;
+        }
+        try
+        {
+            bool attached = ProviderStatusFor(windowId) == 1;
+            Volatile.Write(ref s_windowProviderExport, 1);
+            return attached;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Volatile.Write(ref s_windowProviderExport, -1);
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A11Y-SELFCHECK: true when this window has a shadow frame, its own provider is attached
+    /// and the frame never went out to that provider. The shell attaches the child provider
+    /// after the page mounted, which can be later than the window's last rendered frame; the
+    /// window host forces one repaint while this is true, so the provider receives its first
+    /// frame inside the shell's self-check window instead of waiting for the next user input.
+    /// </summary>
+    internal static bool WindowPublishPending(string windowId)
+    {
+        if (FrameOf(windowId).Nodes.Length == 0)
+        {
+            return false;
+        }
+        lock (s_windowProviderLock)
+        {
+            if (s_providerPublishedWindows.Contains(windowId))
+            {
+                return false;
+            }
+        }
+        return WindowProviderAttached(windowId);
+    }
+
+    // Reused build buffers, guarded by s_buildLock. Only Refresh touches them, and it is driven
+    // from the render thread; the lock keeps a reentrant test/simulated call from corrupting a
+    // walk in progress. They grow to the tree size once and are then reused every frame.
+    private static readonly object s_buildLock = new();
+    private static readonly List<OpenHarmonyAccessibilityNode> s_buildNodes = new();
+    // Null slots are the modal alert nodes: they are built from the alert state, not from a view.
+    private static readonly List<IView?> s_buildViews = new();
+    private static readonly Stack<(IView View, int ParentId)> s_buildPending = new();
+    private static readonly List<IView> s_buildChildren = new();
+    // The walk in progress (N4): the render root and the window TitleBar row's view, so the
+    // title bar can be seeded as the root's first child. Only Refresh/Visit touch them, under
+    // s_buildLock, and they are cleared when the walk ends.
+    private static IView? s_walkRoot;
+    private static IView? s_titleBarView;
+
+    /// <summary>
+    /// The visible Window.TitleBar row's view for a render root, or null when the window has no
+    /// TitleBar (or it is hidden). The row is a logical child of the window, so the accessibility
+    /// walk reaches it through the window handler rather than through the page tree (N4).
+    /// </summary>
+    private static IView? ResolveTitleBarView(IView root)
+    {
+        if (root is not Microsoft.Maui.Controls.VisualElement element ||
+            element.Window is not { Handler: OpenHarmonyWindowHandler windowHandler } ||
+            windowHandler.TitleBar is not { IsVisible: true } titleBar)
+        {
+            return null;
+        }
+        return titleBar.View;
+    }
+
+    /// <summary>
+    /// Builds the node for one position, reusing the previous frame's immutable record when every
+    /// published value (and the view it was built from) is unchanged. Reuse is safe for in-flight
+    /// snapshots: the reused record still holds the same values it was published with.
+    /// </summary>
+    private static OpenHarmonyAccessibilityNode BuildNode(IView view, int id, int parentId,
+        OpenHarmonyAccessibilityNode? previous, bool modal)
+    {
+        RectF bounds = default;
+        if (view.Handler?.PlatformView is OpenHarmonyView platform)
+        {
+            // Accessibility publishes canvas-space bounds (the resolved flow direction included).
+            bounds = platform.CanvasFrame;
+        }
+        string role = RoleOf(view);
+        if (view is VisualElement heading && SemanticProperties.GetHeadingLevel(heading) != SemanticHeadingLevel.None && role == "text")
+        {
+            role = "header";
+        }
+        string? text = view is IText textPart && !string.IsNullOrEmpty(textPart.Text) ? textPart.Text
+            : view is ILabel label && !string.IsNullOrEmpty(label.Text) ? label.Text
+            : null;
+        // SEC-SCAN-4: a password entry must not publish its plaintext through the shadow tree.
+        // The compositor already masks the drawn text (OpenHarmonyView.DisplayText); an enabled
+        // screen reader could otherwise read the password verbatim from the published node. The
+        // platform flag is authoritative when the handler is connected; the virtual IEntry flag
+        // covers a view that has no platform view yet.
+        bool passwordEntry = view is IEntry { IsPassword: true } ||
+            (view.Handler?.PlatformView is OpenHarmonyView passwordPlatform && passwordPlatform.IsPassword);
+        if (text is not null && passwordEntry)
+        {
+            text = OpenHarmonyView.MaskPassword(text);
+        }
+        string? description = view is VisualElement element ? SemanticProperties.GetDescription(element) : null;
+        string? hint = view is VisualElement hintElement ? SemanticProperties.GetHint(hintElement) : null;
+        bool enabled = view is not VisualElement visual || visual.IsEnabled;
+        // While an alert is open the whole background tree drops the focusable bit: the host's
+        // focus-move scans walk the published table by exactly this flag, so focus cannot leave
+        // the dialog (the alert's own nodes are appended focusable after the tree).
+        bool focusable = !modal && view is VisualElement focusableElement && focusableElement.IsEnabled && role != "group";
+        // Range is published only where the control has one; NaN bounds mark it absent (the
+        // host's "RangeMin <= RangeMax" check can never pass for NaN). Sliders use their own
+        // Minimum/Maximum/Value; MAUI's IProgress.Progress is already a 0..1 fraction, so the
+        // progress range is published as 0/1/Progress (no rescaling to 0..100).
+        double rangeMin = double.NaN;
+        double rangeMax = double.NaN;
+        double rangeCurrent = 0;
+        if (view is ISlider slider)
+        {
+            rangeMin = slider.Minimum;
+            rangeMax = slider.Maximum;
+            rangeCurrent = slider.Value;
+        }
+        else if (view is IProgress progress)
+        {
+            rangeMin = 0;
+            rangeMax = 1;
+            rangeCurrent = progress.Progress;
+        }
+        // Checked is 0/1 only for real toggle roles; -1 keeps the host from announcing a state
+        // the control does not have (SetChecked is skipped for -1 on the host side).
+        int checkedState = view switch
+        {
+            ISwitch toggle => toggle.IsOn ? 1 : 0,
+            ICheckBox checkBox => checkBox.IsChecked ? 1 : 0,
+            _ => -1,
+        };
+        if (previous is not null && NodeMatches(previous, id, parentId, role, text, description, hint, bounds,
+            enabled, focusable, rangeMin, rangeMax, rangeCurrent, checkedState))
+        {
+            return previous;
+        }
+        return new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds, enabled, focusable,
+            rangeMin, rangeMax, rangeCurrent, checkedState);
+    }
+
+    /// <summary>Value equality of every published field; <c>double.Equals</c> keeps NaN == NaN.</summary>
+    private static bool NodeMatches(OpenHarmonyAccessibilityNode node, int id, int parentId, string role,
+        string? text, string? description, string? hint, RectF bounds, bool enabled, bool focusable,
+        double rangeMin, double rangeMax, double rangeCurrent, int checkedState)
+        => node.Id == id
+            && node.ParentId == parentId
+            && string.Equals(node.Role, role, StringComparison.Ordinal)
+            && string.Equals(node.Text, text, StringComparison.Ordinal)
+            && string.Equals(node.Description, description, StringComparison.Ordinal)
+            && string.Equals(node.Hint, hint, StringComparison.Ordinal)
+            && node.Bounds == bounds
+            && node.IsEnabled == enabled
+            && node.IsFocusable == focusable
+            && node.RangeMin.Equals(rangeMin)
+            && node.RangeMax.Equals(rangeMax)
+            && node.RangeCurrent.Equals(rangeCurrent)
+            && node.Checked == checkedState;
+
+    private static bool Visit(IView root, Frame previous, bool modal, int nodeLimit)
+    {
+        // N4: the Window.TitleBar row is a logical child of the window, not of the page the walk
+        // starts from, so it is seeded as the render root's first child (it is the topmost row).
+        s_walkRoot = root;
+        s_titleBarView = ResolveTitleBarView(root);
+        // The view walk covers the content nodes only; the previous frame's alert nodes (appended
+        // at ModalRootId) are not positions the walk can produce, so the length check compares
+        // against the previous content count alone.
+        int previousViewCount = previous.ModalRootId == 0 ? previous.Nodes.Length : previous.ModalRootId - 1;
+        bool changed = false;
+        s_buildPending.Push((root, 0));
+        while (s_buildPending.Count > 0)
+        {
+            if (s_buildNodes.Count >= nodeLimit)
+            {
+                // SEC-SCAN-5c F: the secondary-window walk stops at the node cap. Parents are
+                // always added before their children, so the truncated frame is a well-formed
+                // prefix (every published parent id resolves); the truncation republishes as a
+                // length change. The primary window passes int.MaxValue and never stops here.
+                WindowFrameWalksTruncated++;
+                break;
+            }
+            (IView view, int parent) = s_buildPending.Pop();
+            int index = s_buildNodes.Count;
+            int id = index + 1;
+            // A position can be reused only when it is the same view: an identical-looking node
+            // built from a different view must still re-index the frame so TryFindView routes
+            // actions to the view actually being shown.
+            OpenHarmonyAccessibilityNode? previousNode =
+                index < previous.Nodes.Length && ReferenceEquals(previous.Views[index], view)
+                    ? previous.Nodes[index]
+                    : null;
+            OpenHarmonyAccessibilityNode node = BuildNode(view, id, parent, previousNode, modal);
+            s_buildNodes.Add(node);
+            s_buildViews.Add(view);
+            changed |= !ReferenceEquals(node, previousNode);
+            PushChildren(view, id);
+        }
+        // A shorter frame is a change even when every surviving position reused its node.
+        return changed || s_buildNodes.Count != previousViewCount;
+    }
+
+    /// <summary>
+    /// Pushes a view's children onto the pending stack in traversal order, without the per-node
+    /// list and iterator allocations the previous implementation paid on every frame.
+    /// </summary>
+    private static void PushChildren(IView view, int id)
+    {
+        s_buildChildren.Clear();
+        // N4: the window TitleBar row leads the render root's children, matching the frame order
+        // (the bar is the topmost row); its own subtree is pushed by the regular walk below.
+        if (s_titleBarView is { } titleBarView && ReferenceEquals(view, s_walkRoot))
+        {
+            s_buildChildren.Add(titleBarView);
+        }
+        if (view is ILayout layout)
+        {
+            // Indexed access over IList<IView>: a foreach would allocate the interface enumerator.
+            for (int i = 0; i < layout.Count; i++)
+            {
+                s_buildChildren.Add(layout[i]);
+            }
+        }
+        if (view is Microsoft.Maui.Controls.NavigationPage navigation && navigation.CurrentPage is IView currentPage)
+        {
+            s_buildChildren.Add(currentPage);
+        }
+        // The compositor's ChildEnumerator yields a tabbed page's selected page exactly like a
+        // navigation page's current page (with the same presented-content reference guard); the
+        // shadow tree mirrors that walk so assistive technology sees what the frame draws. rc.1's
+        // TabbedPage is not an IContentView, so the presented-content branch cannot cover it.
+        if (view is Microsoft.Maui.Controls.TabbedPage tabbed &&
+            tabbed.CurrentPage is IView tabPage &&
+            !ReferenceEquals(tabPage, (view as IContentView)?.PresentedContent))
+        {
+            s_buildChildren.Add(tabPage);
+        }
+        // The same mirroring for a shell: the compositor's ChildEnumerator yields its CurrentPage,
+        // so the shadow tree publishes what the frame draws. rc.1's Shell is not an IContentView,
+        // so the presented-content branch below cannot reach the page it presents either.
+        if (view is Microsoft.Maui.Controls.Shell shell &&
+            shell.CurrentPage is IView shellPage &&
+            !ReferenceEquals(shellPage, (view as IContentView)?.PresentedContent))
+        {
+            s_buildChildren.Add(shellPage);
+        }
+        // FIX-A11YFLYOUT: the compositor's ChildEnumerator yields a flyout page's detail page
+        // (always visible) and its panel while presented, so the shadow tree publishes what the
+        // frame draws. The hello-maui-app window is a FlyoutPage: without this branch the walk
+        // stopped at the root and the device --a11y-probe reported nodeCount=1. rc.1's FlyoutPage
+        // is not an IContentView, so the presented-content branch cannot reach either pane.
+        if (view is Microsoft.Maui.Controls.FlyoutPage flyoutPage && flyoutPage.Detail is IView detail)
+        {
+            s_buildChildren.Add(detail);
+        }
+        if (view is Microsoft.Maui.Controls.FlyoutPage presentedFlyout &&
+            presentedFlyout.IsPresented &&
+            presentedFlyout.Flyout is IView flyoutContent)
+        {
+            s_buildChildren.Add(flyoutContent);
+        }
+        if (view is IContentView contentView && contentView.PresentedContent is IView presented && !ReferenceEquals(presented, view))
+        {
+            s_buildChildren.Add(presented);
+        }
+        for (int i = s_buildChildren.Count - 1; i >= 0; i--)
+        {
+            s_buildPending.Push((s_buildChildren[i], id));
+        }
+    }
+
+    /// <summary>
+    /// Appends the open alert's nodes after the view tree: a dialog root (title, or the message
+    /// when there is no title), the message when both are present, the prompt text field and one
+    /// button per accept/cancel label or action sheet row. Returns the dialog root's id (0 when
+    /// no alert is open) and whether any appended node had to be rebuilt.
+    /// </summary>
+    private static (int RootId, bool Changed) AppendAlertNodes(Frame previous, OpenHarmonyAlertState? alert)
+    {
+        if (alert is null)
+        {
+            return (0, false);
+        }
+        bool changed = false;
+        int rootId = s_buildNodes.Count + 1;
+        // Title and message collapse into the dialog node when only one of them exists, so a
+        // dialog with a message but no title does not get an empty leading focus stop.
+        string? title = !string.IsNullOrEmpty(alert.Title) ? alert.Title : null;
+        string? message = !string.IsNullOrEmpty(alert.Message) ? alert.Message : null;
+        AddAlertNode(previous, 0, "dialog", title ?? message, null, null,
+            alert.BoxRect, focusable: true, ref changed);
+        if (title is not null && message is not null)
+        {
+            AddAlertNode(previous, rootId, "text", message, null, null,
+                alert.MessageRect, focusable: true, ref changed);
+        }
+        if (alert.Kind == OpenHarmonyAlertKind.Prompt)
+        {
+            AddAlertNode(previous, rootId, "textInput", alert.PromptText, null, null,
+                alert.PromptRect, focusable: true, ref changed);
+        }
+        if (alert.Kind == OpenHarmonyAlertKind.ActionSheet)
+        {
+            for (int i = 0; i < alert.Options.Count; i++)
+            {
+                AddAlertNode(previous, rootId, "button", alert.Options[i], null, null,
+                    alert.OptionRect(i), focusable: true, ref changed);
+            }
+        }
+        if (!string.IsNullOrEmpty(alert.Accept))
+        {
+            AddAlertNode(previous, rootId, "button", alert.Accept, null, null,
+                alert.AcceptRect, focusable: true, ref changed);
+        }
+        if (!string.IsNullOrEmpty(alert.Cancel))
+        {
+            AddAlertNode(previous, rootId, "button", alert.Cancel, null, null,
+                alert.CancelRect, focusable: true, ref changed);
+        }
+        return (rootId, changed);
+    }
+
+    /// <summary>
+    /// Appends one alert node, reusing the previous frame's immutable record at the same position
+    /// when it was also an alert node with identical published values (the same reuse rule the
+    /// view walk applies, minus the view identity, which alert nodes do not have).
+    /// </summary>
+    private static void AddAlertNode(Frame previous, int parentId, string role, string? text,
+        string? description, string? hint, RectF bounds, bool focusable, ref bool changed)
+    {
+        int index = s_buildNodes.Count;
+        int id = index + 1;
+        OpenHarmonyAccessibilityNode? previousNode =
+            index < previous.Nodes.Length && previous.Views[index] is null ? previous.Nodes[index] : null;
+        if (previousNode is not null && NodeMatches(previousNode, id, parentId, role, text, description,
+            hint, bounds, true, focusable, double.NaN, double.NaN, 0, -1))
+        {
+            s_buildNodes.Add(previousNode);
+            s_buildViews.Add(null);
+            return;
+        }
+        s_buildNodes.Add(new OpenHarmonyAccessibilityNode(id, parentId, role, text, description, hint, bounds,
+            true, focusable, double.NaN, double.NaN, 0, -1));
+        s_buildViews.Add(null);
+        changed = true;
+    }
+
+    private static string RoleOf(IView view) => view switch
+    {
+        IButton => "button",
+        IEntry or IEditor => "textInput",
+        ICheckBox => "checkBox",
+        ISwitch => "switch",
+        ISlider => "slider",
+        IScrollView => "scroll",
+        IProgress => "progress",
+        Microsoft.Maui.IImage => "image",
+        ILabel => "text",
+        _ => "group",
+    };
+}

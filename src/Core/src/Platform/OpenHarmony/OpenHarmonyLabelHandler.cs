@@ -1,0 +1,198 @@
+// LabelHandler for OpenHarmony: maps ILabel onto the compositor's platform view.
+using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Handlers;
+using HostCanvas = Microsoft.OpenHarmony.Hosting.OpenHarmonyCanvas;
+
+namespace Microsoft.Maui.Platform;
+
+public sealed class OpenHarmonyLabelHandler : OpenHarmonyViewHandler<ILabel>
+{
+    public static readonly IPropertyMapper<ILabel, OpenHarmonyLabelHandler> Mapper =
+        new PropertyMapper<ILabel, OpenHarmonyLabelHandler>(ViewMapper)
+        {
+            [nameof(ILabel.Text)] = MapText,
+            [nameof(Microsoft.Maui.Controls.Label.FormattedText)] = MapFormattedText,
+            [nameof(ILabel.TextColor)] = MapTextColor,
+            [nameof(ITextStyle.Font)] = MapFont,
+            [nameof(ITextStyle.CharacterSpacing)] = MapCharacterSpacing,
+            [nameof(ITextAlignment.HorizontalTextAlignment)] = MapHorizontalTextAlignment,
+            [nameof(ITextAlignment.VerticalTextAlignment)] = MapVerticalTextAlignment,
+            [nameof(ILabel.LineHeight)] = MapLineHeight,
+            [nameof(ILabel.TextDecorations)] = MapTextDecorations,
+            [nameof(Microsoft.Maui.Controls.Label.MaxLines)] = MapMaxLines,
+            [nameof(Microsoft.Maui.Controls.Label.LineBreakMode)] = MapLineBreakMode,
+            [nameof(Microsoft.Maui.Controls.Label.Padding)] = MapPadding,
+        };
+
+    public OpenHarmonyLabelHandler() : base(Mapper) { }
+
+    protected override OpenHarmonyView CreatePlatformView()
+    {
+        // The styled view carries the text attributes the base view does not model (the mappers
+        // below fill them in through the Label's Font/ITextStyle/ITextAlignment/ILabel surface).
+        return new OpenHarmonyTextView();
+    }
+
+    private new OpenHarmonyTextView PlatformView => (OpenHarmonyTextView)base.PlatformView!;
+
+    public override Size GetDesiredSize(double widthConstraint, double heightConstraint)
+    {
+        string text = (VirtualView as IText)?.Text ?? string.Empty;
+        OpenHarmonyTextView view = PlatformView;
+        Thickness padding = OpenHarmonyTextMapping.NormalizePadding(view.Padding, Thickness.Zero);
+        float fontSize = FontSizeOf(view);
+        float available = (float)Math.Max(0, widthConstraint - padding.HorizontalThickness);
+        (float width, float height) = view.MeasureTextBlock(text, fontSize, available);
+        return new Size(
+            Math.Min(width + padding.HorizontalThickness, widthConstraint),
+            height + padding.VerticalThickness);
+    }
+
+    private static float FontSizeOf(OpenHarmonyTextView view) => view.FontSize > 0 ? view.FontSize : 14f;
+
+    // Text measurements are cached per (text, size, typeface generation, font-scale generation).
+    // A frame measures every laid-out line at least twice (measure/arrange desired size plus the
+    // draw pass) and each measurement is a native call plus a UTF-8 string marshal, so a
+    // label-heavy tree paid the same measurements on every frame. Only successful native
+    // measurements are cached; the estimate fallback is pure arithmetic and needs no cache. The
+    // cache is keyed on the font manager's typeface generation because the platform selects one
+    // process-wide typeface, so a font-family switch must not serve widths measured with the old
+    // one; the scale generation does the same for the system font size (T21).
+    private const int MeasureCacheCapacity = 1024;
+    private static readonly object s_measureLock = new();
+    private static readonly Dictionary<MeasureKey, (float Width, float Height)> s_measureCache = new();
+
+    private readonly record struct MeasureKey(string Text, float FontSize, int TypefaceGeneration,
+        int FontScaleGeneration);
+
+    /// <summary>
+    /// Platform text metrics with an estimate fallback (device text APIs need a surface). The
+    /// logical size is multiplied by the system font scale here, so every consumer (plain text,
+    /// run layout, line heights) measures what the draw pass will render.
+    /// </summary>
+    internal static (float Width, float Height) MeasureText(string text, float fontSize)
+    {
+        float scaledSize = OpenHarmonyFontManager.ScaleFontSize(fontSize);
+        if (!string.IsNullOrEmpty(text))
+        {
+            var key = new MeasureKey(text, fontSize, OpenHarmonyFontManager.TypefaceGeneration,
+                OpenHarmonyFontManager.FontScaleGeneration);
+            lock (s_measureLock)
+            {
+                if (s_measureCache.TryGetValue(key, out (float Width, float Height) cached))
+                {
+                    return cached;
+                }
+            }
+            if (HostCanvas.MeasureText(text, scaledSize, out int measuredWidth, out int measuredHeight) &&
+                measuredWidth > 0)
+            {
+                var measured = ((float)measuredWidth, (float)measuredHeight);
+                lock (s_measureLock)
+                {
+                    if (s_measureCache.Count >= MeasureCacheCapacity)
+                    {
+                        s_measureCache.Clear();
+                    }
+                    s_measureCache[key] = measured;
+                }
+                return measured;
+            }
+        }
+        return (text.Length * scaledSize * 0.55f, scaledSize * 1.35f);
+    }
+
+    public static void MapText(OpenHarmonyLabelHandler handler, ILabel label)
+        => SyncText(handler, label);
+
+    /// <summary>
+    /// The label's span list is desugared into platform runs. FormattedText and Text are two
+    /// separate bindable properties that clear each other, and the change notifications arrive in
+    /// both orders (Text then FormattedText=null, or FormattedText then Text=""), so both mappers
+    /// re-read the pair and settle on one mode instead of trusting the event's own property.
+    /// </summary>
+    public static void MapFormattedText(OpenHarmonyLabelHandler handler, ILabel label)
+        => SyncText(handler, label);
+
+    private static void SyncText(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        OpenHarmonyTextView view = handler.PlatformView;
+        OpenHarmonyTextRun[]? runs = OpenHarmonyFormattedText.Create(label, label as Microsoft.Maui.Controls.Label);
+        if (runs is { Length: > 0 })
+        {
+            // The runs own the drawn text; a stale plain text would be measured against them.
+            view.Text = null;
+            view.SetFormattedRuns(runs);
+            return;
+        }
+        view.SetFormattedRuns(null);
+        view.Text = label.Text;
+    }
+
+    /// <summary>
+    /// Label-level style is the fallback for spans that do not set one, so a style change while
+    /// formatted mode is active has to rebuild the runs (the run set cached the old fallback).
+    /// </summary>
+    private static void RefreshFormattedText(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        if (handler.PlatformView.HasFormattedRuns)
+        {
+            SyncText(handler, label);
+        }
+    }
+
+    public static void MapTextColor(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        handler.PlatformView.TextColor = label.TextColor ?? Colors.White;
+        RefreshFormattedText(handler, label);
+    }
+
+    /// <summary>
+    /// Maps the whole font surface (size, family, weight, slant). MAUI raises the Font change for
+    /// FontSize/FontFamily/FontAttributes changes, and <see cref="Microsoft.Maui.Font"/> carries
+    /// all of them, so one mapper covers the three.
+    /// </summary>
+    public static void MapFont(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        Microsoft.Maui.Font font = label.Font;
+        OpenHarmonyTextView view = handler.PlatformView;
+        view.FontSize = font.Size > 0 ? (float)font.Size : 14f;
+        view.TextFont = OpenHarmonyTextMapping.Resolve(handler, font);
+        RefreshFormattedText(handler, label);
+    }
+
+    public static void MapCharacterSpacing(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        handler.PlatformView.CharacterSpacing = label.CharacterSpacing;
+        RefreshFormattedText(handler, label);
+    }
+
+    public static void MapHorizontalTextAlignment(OpenHarmonyLabelHandler handler, ILabel label)
+        => handler.PlatformView.HorizontalTextAlignment = label.HorizontalTextAlignment;
+
+    public static void MapVerticalTextAlignment(OpenHarmonyLabelHandler handler, ILabel label)
+        => handler.PlatformView.VerticalTextAlignment = label.VerticalTextAlignment;
+
+    public static void MapLineHeight(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        handler.PlatformView.LineHeight = label.LineHeight;
+        RefreshFormattedText(handler, label);
+    }
+
+    public static void MapTextDecorations(OpenHarmonyLabelHandler handler, ILabel label)
+    {
+        handler.PlatformView.TextDecorations = label.TextDecorations;
+        RefreshFormattedText(handler, label);
+    }
+
+    public static void MapMaxLines(OpenHarmonyLabelHandler handler, ILabel label)
+        => handler.PlatformView.MaxLines = (label as Microsoft.Maui.Controls.Label)?.MaxLines ?? -1;
+
+    public static void MapLineBreakMode(OpenHarmonyLabelHandler handler, ILabel label)
+        => handler.PlatformView.LineBreakMode = (label as Microsoft.Maui.Controls.Label)?.LineBreakMode
+            ?? Microsoft.Maui.LineBreakMode.WordWrap;
+
+    public static void MapPadding(OpenHarmonyLabelHandler handler, ILabel label)
+        => handler.PlatformView.Padding =
+            OpenHarmonyTextMapping.NormalizePadding((label as IPadding)?.Padding ?? Thickness.Zero, Thickness.Zero);
+}

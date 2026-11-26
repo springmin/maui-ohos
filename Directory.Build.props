@@ -1,6 +1,14 @@
 <Project>
-  <Import Project="Sdk.props" Sdk="Microsoft.DotNet.Arcade.Sdk" />
-  <Import Condition="'$(EnvironmentBuildPropsImported)' != 'True'" Project="$(MSBuildThisFileDirectory)eng\Environment.Build.props" />
+  <!-- Slice-only checkouts (the feature/openharmony tip and the released source tarball) do
+       not carry eng/; skip the Arcade bootstrap and the fork environment props there so the
+       standalone slice project evaluates and builds without the full fork toolchain. In a full
+       checkout eng/ exists and both imports run exactly as before. -->
+  <Import Condition="Exists('$(MSBuildThisFileDirectory)eng\Environment.Build.props')" Project="Sdk.props" Sdk="Microsoft.DotNet.Arcade.Sdk" />
+  <Import Condition="'$(EnvironmentBuildPropsImported)' != 'True' and Exists('$(MSBuildThisFileDirectory)eng\Environment.Build.props')" Project="$(MSBuildThisFileDirectory)eng\Environment.Build.props" />
+  <!-- Shared AOT-supported probe (also used by the SDK/aspnetcore platform gates). It is
+       imported before the per-platform block below so a platform can opt out; the file only
+       assigns NativeAotSupported when it is still unset. -->
+  <Import Condition="Exists('$(MSBuildThisFileDirectory)eng\common\native\NativeAotSupported.props')" Project="$(MSBuildThisFileDirectory)eng\common\native\NativeAotSupported.props" />
 
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -83,6 +91,14 @@
     <_MauiTargetPlatformIstvOS Condition="'$(_MauiTargetPlatformIdentifier)' == 'tvos'">True</_MauiTargetPlatformIstvOS>
     <_MauiTargetPlatformIsWindows>false</_MauiTargetPlatformIsWindows>
     <_MauiTargetPlatformIsWindows Condition="$(_MauiTargetPlatformIdentifier.Contains('windows')) == 'True'">True</_MauiTargetPlatformIsWindows>
+    <_MauiTargetPlatformIsOpenHarmony>false</_MauiTargetPlatformIsOpenHarmony>
+    <_MauiTargetPlatformIsOpenHarmony Condition="'$(_MauiTargetPlatformIdentifier)' == 'openharmony'">True</_MauiTargetPlatformIsOpenHarmony>
+    <!-- OpenHarmony repo-side/test NativeAOT is not available yet: the OpenHarmony
+         ILCompiler/NativeAOT runtime packs are not published to the SDK feeds, so PublishAot for
+         test assets would restore a missing package. This mirrors dotnet/aspnetcore#69952 and
+         gates repo-side AOT only; user publish AOT uses the runtime ILCompiler pack once it ships.
+         Other platforms keep their existing _UseNativeAot behaviour. -->
+    <NativeAotSupported Condition="'$(_MauiTargetPlatformIsOpenHarmony)' == 'True'">false</NativeAotSupported>
   </PropertyGroup>
 
   <!-- Try determine which .NET workloads are installed -->
@@ -101,9 +117,23 @@
     <DotNetMacOSWorkloadInstalledVersion Condition="Exists('$(DotNetWorkloadInstallLocation)microsoft.net.sdk.macos\WorkloadManifest.json')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(DotNetWorkloadInstallLocation)\microsoft.net.sdk.macos\WorkloadManifest.json')), '$(DotNetWorkloadVersionRegex)'))</DotNetMacOSWorkloadInstalledVersion>
 
     <DotNetMacOSWorkloadIsInstalled Condition="Exists('$(DotNetWorkloadPacksInstallLocation)Microsoft.macOS.Sdk\$(DotNetMacOSWorkloadInstalledVersion)\Sdk\AutoImport.props')">true</DotNetMacOSWorkloadIsInstalled>
+    <!-- OpenHarmony detection is independent of the macOS/Windows install location probes
+         above: locate the platform workload manifest through a wildcard (any SDK feature band)
+         and derive the packs directory from it, so it also works on Linux/HarmonyOS hosts. -->
+    <_DotNetOpenHarmonyManifestFiles Condition="'$(DOTNET_ROOT)' != '' and Exists('$(DOTNET_ROOT)/sdk-manifests')">$([System.IO.Directory]::GetFiles('$(DOTNET_ROOT)/sdk-manifests', 'WorkloadManifest.json', System.IO.SearchOption.AllDirectories))</_DotNetOpenHarmonyManifestFiles>
+    <_DotNetOpenHarmonyManifestFiles Condition="'$(_DotNetOpenHarmonyManifestFiles)' == '' and '$(ProgramFiles)' != '' and Exists('$(ProgramFiles)/dotnet/sdk-manifests')">$([System.IO.Directory]::GetFiles('$(ProgramFiles)/dotnet/sdk-manifests', 'WorkloadManifest.json', System.IO.SearchOption.AllDirectories))</_DotNetOpenHarmonyManifestFiles>
+    <_DotNetOpenHarmonyManifestFile>$([System.Text.RegularExpressions.Regex]::Match('$(_DotNetOpenHarmonyManifestFiles)', '[^;]*microsoft\.net\.sdk\.openharmony[^;]*'))</_DotNetOpenHarmonyManifestFile>
+    <_DotNetOpenHarmonyManifestDir Condition="'$(_DotNetOpenHarmonyManifestFile)' != ''">$([System.IO.Path]::GetDirectoryName('$(_DotNetOpenHarmonyManifestFile)'))</_DotNetOpenHarmonyManifestDir>
+    <DotNetOpenHarmonyWorkloadInstalledVersion Condition="'$(_DotNetOpenHarmonyManifestDir)' != '' and Exists('$(_DotNetOpenHarmonyManifestDir)/WorkloadManifest.json')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(_DotNetOpenHarmonyManifestDir)/WorkloadManifest.json')), $(DotNetWorkloadVersionRegex)))</DotNetOpenHarmonyWorkloadInstalledVersion>
+    <DotNetOpenHarmonyWorkloadPacksInstallLocation Condition="'$(_DotNetOpenHarmonyManifestDir)' != ''">$([System.IO.Path]::GetFullPath('$(_DotNetOpenHarmonyManifestDir)/../../../packs'))/</DotNetOpenHarmonyWorkloadPacksInstallLocation>
+    <DotNetOpenHarmonyWorkloadIsInstalled Condition="'$(DotNetOpenHarmonyWorkloadPacksInstallLocation)' != '' and Exists('$(DotNetOpenHarmonyWorkloadPacksInstallLocation)Microsoft.OpenHarmony.Sdk/$(DotNetOpenHarmonyWorkloadInstalledVersion)/Sdk/AutoImport.props')">true</DotNetOpenHarmonyWorkloadIsInstalled>
+    <IncludeOpenHarmonyTargetFrameworks Condition="'$(DotNetOpenHarmonyWorkloadIsInstalled)' == 'true'">true</IncludeOpenHarmonyTargetFrameworks>
 
     <IncludeWindowsTargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows')) or '$(Packing)' == 'true'">true</IncludeWindowsTargetFrameworks>
     <IncludeMacOSTargetFrameworks Condition="'$(DotNetMacOSWorkloadIsInstalled)' == 'true'">true</IncludeMacOSTargetFrameworks>
+    <!-- OpenHarmony: enabled automatically when the microsoft.net.sdk.openharmony workload
+         is installed; opt in early with -p:IncludeOpenHarmonyTargetFrameworks=true. -->
+    <IncludeOpenHarmonyTargetFrameworks Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == ''">false</IncludeOpenHarmonyTargetFrameworks>
     <IncludeAndroidTargetFrameworks>true</IncludeAndroidTargetFrameworks>
     <IncludeMacCatalystTargetFrameworks>true</IncludeMacCatalystTargetFrameworks>
     <IncludeIosTargetFrameworks>true</IncludeIosTargetFrameworks>
@@ -112,6 +142,8 @@
   <!-- this is CI, so everything should be there -->
   <PropertyGroup Condition="('$(CI)' == 'true' or '$(TF_BUILD)' == 'true') and ('$(BuildTaskOnlyBuild)' != 'true')">
     <IncludeWindowsTargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">true</IncludeWindowsTargetFrameworks>
+    <!-- OpenHarmony TFM is not available yet either -->
+    <IncludeOpenHarmonyTargetFrameworks>false</IncludeOpenHarmonyTargetFrameworks>
     <IncludeMacOSTargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">true</IncludeMacOSTargetFrameworks>
     <IncludeAndroidTargetFrameworks>true</IncludeAndroidTargetFrameworks>
     <IncludeMacCatalystTargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">true</IncludeMacCatalystTargetFrameworks>
@@ -120,6 +152,7 @@
 
   <PropertyGroup>
     <DefineConstants Condition="'$(_MauiTargetPlatformIsWindows)' == 'True'">$(DefineConstants);WINDOWS</DefineConstants>
+    <DefineConstants Condition="'$(_MauiTargetPlatformIsOpenHarmony)' == 'True'">$(DefineConstants);OPENHARMONY</DefineConstants>
     <DefineConstants Condition="'$(IncludePreviousTfms)' == 'True'">$(DefineConstants);ENABLE_PREVIOUS_TFM_BUILDS</DefineConstants>
     <!-- <SymbolPackageFormat>snupkg</SymbolPackageFormat> -->
     <!-- <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles> -->
@@ -160,6 +193,11 @@
     <AndroidTargetFrameworkVersion>37.0</AndroidTargetFrameworkVersion>
     <WindowsTargetFrameworkVersion>10.0.19041.0</WindowsTargetFrameworkVersion>
     <Windows2TargetFrameworkVersion>10.0.20348.0</Windows2TargetFrameworkVersion>
+    <!-- OpenHarmony TFM version = the API level of the SDK used to build (iOS/Xcode model).
+         The platform workload (microsoft.net.sdk.openharmony) accepts 20.0 (public SDK) and
+         26.0 (device SDK). Default to the public SDK; device builds override with
+         -p:OpenHarmonyTargetFrameworkVersion=26.0. -->
+    <OpenHarmonyTargetFrameworkVersion>20.0</OpenHarmonyTargetFrameworkVersion>
     <!-- Previous .NET -->
     <IosPreviousTargetFrameworkVersion>18.0</IosPreviousTargetFrameworkVersion>
     <TvosPreviousTargetFrameworkVersion>18.0</TvosPreviousTargetFrameworkVersion>
@@ -177,6 +215,7 @@
   <PropertyGroup>
     <!-- Library: The Real TFMs -->
     <WindowsMauiPlatforms Condition="'$(WindowsMauiPlatforms)' == ''">net$(_MauiDotNetVersion)-windows$(WindowsTargetFrameworkVersion);net$(_MauiDotNetVersion)-windows$(Windows2TargetFrameworkVersion)</WindowsMauiPlatforms>
+    <MauiPlatforms Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-openharmony$(OpenHarmonyTargetFrameworkVersion);$(MauiPlatforms)</MauiPlatforms>
     <MauiPlatforms Condition="'$(IncludeWindowsTargetFrameworks)' == 'true'">$(WindowsMauiPlatforms);$(MauiPlatforms)</MauiPlatforms>
     <MauiPlatforms Condition="'$(IncludeAndroidTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-android$(AndroidTargetFrameworkVersion);$(MauiPlatforms)</MauiPlatforms>
     <MauiPlatforms Condition="'$(IncludeAndroidTargetFrameworks)' == 'true' and '$(AndroidTargetFrameworkVersion)' != '$(AndroidTargetFrameworkVersionSdkDefault)'">net$(_MauiDotNetVersion)-android;$(MauiPlatforms)</MauiPlatforms>
@@ -193,6 +232,7 @@
     <MauiPreviousPlatforms Condition="'$(IncludeIosTargetFrameworks)' == 'true'">net$(_MauiPreviousDotNetVersion)-ios$(IosPreviousTargetFrameworkVersion);$(MauiPreviousPlatforms)</MauiPreviousPlatforms>
 
     <!-- App: Sample Apps -->
+    <MauiSamplePlatforms Condition="'$(IncludeOpenHarmonyTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-openharmony;$(MauiSamplePlatforms)</MauiSamplePlatforms>
     <MauiSamplePlatforms Condition="'$(IncludeWindowsTargetFrameworks)' == 'true'">$(WindowsMauiPlatforms);$(MauiSamplePlatforms)</MauiSamplePlatforms>
     <MauiSamplePlatforms Condition="'$(IncludeAndroidTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-android;$(MauiSamplePlatforms)</MauiSamplePlatforms>
     <MauiSamplePlatforms Condition="'$(IncludeMacCatalystTargetFrameworks)' == 'true'">net$(_MauiDotNetVersion)-maccatalyst;$(MauiSamplePlatforms)</MauiSamplePlatforms>
@@ -251,7 +291,7 @@
     <Win2DWarnNoPlatform>false</Win2DWarnNoPlatform>
   </PropertyGroup>
 
-  <Import Condition="'$(SampleProject)' != 'True' and '$(CI)' == 'true'" Project="$(MSBuildThisFileDirectory)eng\SourceLink.Build.props" />
+  <Import Condition="'$(SampleProject)' != 'True' and '$(CI)' == 'true' and Exists('$(MSBuildThisFileDirectory)eng\SourceLink.Build.props')" Project="$(MSBuildThisFileDirectory)eng\SourceLink.Build.props" />
   <ItemGroup Condition="'$(MSBuildVersion)' != '' AND '$(MSBuildVersion)' &lt; '16.7.0'  ">
     <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="4.7.0" PrivateAssets="all" />
   </ItemGroup>

@@ -6,6 +6,8 @@ using PlatformView = UIKit.UIView;
 using PlatformView = Android.Views.View;
 #elif WINDOWS
 using PlatformView = Microsoft.UI.Xaml.FrameworkElement;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif
@@ -346,7 +348,7 @@ namespace Microsoft.Maui.Handlers
 #endif
 
 
-#if !(NETSTANDARD || !PLATFORM)
+#if (!(NETSTANDARD || !PLATFORM)) && !OPENHARMONY
 		private protected abstract void OnConnectHandler(PlatformView platformView);
 
 		partial void ConnectingHandler(PlatformView? platformView);

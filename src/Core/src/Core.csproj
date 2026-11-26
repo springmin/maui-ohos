@@ -35,6 +35,7 @@
   </PropertyGroup>
 
   <Import Project="$(MauiSrcDirectory)MultiTargeting.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)Platform/OpenHarmony/OpenHarmonyCoreSlice.props" />
 
   <ItemGroup>
     <PackageReference Include="MemoryAnalyzers" />
@@ -72,6 +73,30 @@
     </XcodeProject>
     <ObjcBindingApiDefinition Include="..\AppleNative\ApiDefinition.cs" />
     <ObjcBindingCoreSource Include="..\AppleNative\StructsAndEnums.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="$(TargetFramework.Contains('-openharmony'))">
+    <!-- The OpenHarmony slice is split by dependency. OpenHarmonyCoreSlice.props lists the files
+         that only depend on Core/workload contracts and compile into Microsoft.Maui.Core; the
+         remaining handlers/host files consume Microsoft.Maui.Controls concrete types and stay in
+         Microsoft.Maui.Controls (see Controls.Core.csproj). MultiTargeting.targets still removes
+         the folder for every non-OpenHarmony TFM. -->
+    <Compile Remove="Platform/OpenHarmony/**/*.cs" />
+    <Compile Include="@(OpenHarmonyCoreSliceFile->'Platform/OpenHarmony/%(Identity)')" />
+    <!-- Element handlers whose CreatePlatformElement/interface members live only in the Standard
+         fallback. The OpenHarmony slice supplies the real handlers; these keep the shared handler
+         types complete for the OpenHarmony TFM. -->
+    <Compile Include="Handlers/**/*Handler.Standard.cs"
+             Exclude="Handlers/Application/ApplicationHandler.Standard.cs;Handlers/Window/WindowHandler.Standard.cs;Handlers/View/ViewHandlerOfT.Standard.cs;Handlers/HybridWebView/HybridWebViewHandler.Standard.cs" />
+    <Compile Include="WindowOverlay/WindowOverlay.Standard.cs" />
+    <Compile Include="VisualDiagnostics/VisualDiagnosticsOverlay.Standard.cs" />
+    <Compile Include="Fonts/*.Standard.cs" />
+    <Compile Include="Platform/Standard/ViewExtensions.cs" />
+    <Compile Include="Platform/Standard/StrokeExtensions.cs" />
+    <Compile Include="Platform/Standard/WindowExtensions.cs" />
+    <Compile Include="Platform/Standard/MauiContextExtensions.cs" />
+    <Compile Include="Dispatching/Dispatcher.Standard.cs" />
+    <Compile Include="Animations/PlatformTicker.Standard.cs" />
+    <Compile Include="Hosting/LifecycleEvents/AppHostBuilderExtensions.Standard.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Essentials\src\Essentials.csproj" />

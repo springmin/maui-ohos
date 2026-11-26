@@ -5,6 +5,8 @@ using PlatformView = Microsoft.Maui.Platform.ContentView;
 using PlatformView = Microsoft.Maui.Platform.ContentViewGroup;
 #elif WINDOWS
 using PlatformView = Microsoft.Maui.Platform.ContentPanel;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif

@@ -271,7 +271,7 @@ namespace Microsoft.Maui.Handlers
 
 
 
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 		public static async void MapEvaluateJavaScriptAsync(IHybridWebViewHandler handler, IHybridWebView hybridWebView, object? arg)
 		{
 			if (arg is not EvaluateJavaScriptAsyncRequest request)

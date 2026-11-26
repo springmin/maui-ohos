@@ -5,6 +5,8 @@ using PlatformView = Microsoft.Maui.Platform.MauiCheckBox;
 using PlatformView = AndroidX.AppCompat.Widget.AppCompatCheckBox;
 #elif WINDOWS
 using PlatformView = Microsoft.UI.Xaml.Controls.CheckBox;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #elif (NETSTANDARD || !PLATFORM)
 using PlatformView = System.Object;
 #endif

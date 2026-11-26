@@ -8,6 +8,8 @@ using PlatformView = UIKit.IUIApplicationDelegate;
 using PlatformView = Android.App.Application;
 #elif WINDOWS
 using PlatformView = Microsoft.UI.Xaml.Application;
+#elif OPENHARMONY
+using PlatformView = System.Object;
 #endif
 
 namespace Microsoft.Maui.Handlers

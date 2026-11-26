@@ -18,6 +18,9 @@ using ParentView = Android.Views.IViewParent;
 #elif WINDOWS
 using PlatformView = Microsoft.UI.Xaml.FrameworkElement;
 using ParentView = Microsoft.UI.Xaml.DependencyObject;
+#elif OPENHARMONY
+using PlatformView = System.Object;
+using ParentView = System.Object;
 #else
 using PlatformView = System.Object;
 using ParentView = System.Object;
@@ -51,7 +54,7 @@ namespace Microsoft.Maui.Platform
 		internal static T? GetParentOfType<T>(this ParentView? view)
 #if ANDROID
 			where T : class, ParentView
-#elif PLATFORM
+#elif PLATFORM && !OPENHARMONY
 			where T : ParentView
 #else
 			where T : class
@@ -107,7 +110,7 @@ namespace Microsoft.Maui.Platform
 		internal static T? GetParentOfType<T>(this PlatformView view)
 #if ANDROID
 			where T : class, ParentView
-#elif PLATFORM
+#elif PLATFORM && !OPENHARMONY
 			where T : ParentView
 #else
 			where T : class
@@ -213,7 +216,7 @@ namespace Microsoft.Maui.Platform
 		}
 
 
-#if PLATFORM
+#if PLATFORM && !OPENHARMONY
 		internal static T? FindDescendantView<T>(this PlatformView view, Func<PlatformView, bool> predicate) where T : PlatformView
 		{
 			var queue = new Queue<PlatformView>();

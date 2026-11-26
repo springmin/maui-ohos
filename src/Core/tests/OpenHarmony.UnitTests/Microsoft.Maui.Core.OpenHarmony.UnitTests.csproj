@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Host-runnable unit tests for the OpenHarmony platform slice. The slice has no device or
+       native-library dependency for these cases: text transforms, accessibility action mapping
+       and source-path validation are pure managed logic. The project references the slice's
+       compile vehicle so it runs in any checkout that supplies the two workload assemblies:
+
+         dotnet test src/Core/tests/OpenHarmony.UnitTests/Microsoft.Maui.Core.OpenHarmony.UnitTests.csproj \
+           -p:OpenHarmonyHostingAssembly=<...> -p:OpenHarmonyGraphicsAssembly=<...>
+
+       It is intentionally not part of the default solution: the OpenHarmony workload is an
+       external platform band, so the default MAUI build must stay workload-free. -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <AssemblyName>Microsoft.Maui.Core.OpenHarmony.UnitTests</AssemblyName>
+    <RootNamespace>Microsoft.Maui.Core.OpenHarmony.UnitTests</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <MauiTestProject>true</MauiTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="$(XunitPackageVersion)" />
+    <PackageReference Include="coverlet.collector" Version="$(CoverletCollectorPackageVersion)">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Platform/OpenHarmony/Microsoft.Maui.Platform.OpenHarmony.csproj" />
+    <!-- The slice's module initializers touch the bridge types while registering the
+         Essentials defaults, so the host-runnable test output needs the managed bridge (the
+         native library is still absent: every native call is guarded and stays off-device). -->
+    <Reference Include="Microsoft.OpenHarmony.Hosting">
+      <HintPath>$(OpenHarmonyHostingAssembly)</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.OpenHarmony.Maui.Graphics">
+      <HintPath>$(OpenHarmonyGraphicsAssembly)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
